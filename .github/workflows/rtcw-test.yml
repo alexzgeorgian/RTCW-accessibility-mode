@@ -43,13 +43,20 @@ concurrency:
 
 env:
   PUBLIC_RELEASES: alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-releases
-  TAG: rtcw-test-${{ github.run_number }}
+  # The builds went up to rtcw-test-54 in the Enemy Territory repository,
+  # where this began. The Mac game's updater offers a build only when its
+  # number is higher than its own, so the numbers here go on from there:
+  # each job sets TAG to rtcw-test-(this run's number + BUILD_OFFSET).
+  BUILD_OFFSET: 100
 
 jobs:
   mac:
     name: Build the campaign for the Mac
     runs-on: macos-15
     steps:
+      - name: Number the build
+        run: echo "TAG=rtcw-test-$(( ${{ github.run_number }} + BUILD_OFFSET ))" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           path: accessibility-mode
@@ -69,6 +76,9 @@ jobs:
     needs: mac
     runs-on: ubuntu-latest
     steps:
+      - name: Number the build
+        run: echo "TAG=rtcw-test-$(( ${{ github.run_number }} + BUILD_OFFSET ))" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
         with:
           path: accessibility-mode
