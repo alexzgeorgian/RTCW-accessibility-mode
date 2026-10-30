@@ -1153,3 +1153,32 @@ start X said "Area 1. 2 doors out, 2 to new areas. Door 1 of 2, to a
 new area, ahead right, 59 meters, 10 meters above you" and turned the
 player toward the way; T said "7 things left in this area: 4 items, 3
 switches" of the level's 40.
+
+## 0051: choose, then O leads, for everything
+
+The tester, used to 1428, where keys go forward and back through the
+items, as through the waypoints, and one more leads to the one chosen
+while W walks, pressed T to choose and walked; T again on the way went
+on to the next thing. So every list now only chooses, and O leads:
+
+- T and Y (bind generation 17, Y only where it is still empty) go
+  forward and back through the things left in the area, nearest first:
+  "7 things left in this area: 4 items, 3 switches. 1 of 7, Luger,
+  ahead, 4 meters. Walk onto it", "2 of 7, Switch, ahead right, 54
+  meters. O leads there". The list keeps its order while it is gone
+  through; it is made again in another area, or 30 seconds after the
+  last press. Things done since are passed over.
+- X goes round the doors out of the area the same way, and chooses the
+  point just through the door.
+- L and K (generation 17, K only where empty) are the waypoints, forward
+  and back.
+- O takes the choice, puts the marker on it and turns the player toward
+  the way at once (CG_AccessibilityFaceTheWay); O again turns toward it
+  again, as for the way out. The choice no longer lapses after 20
+  seconds: it stands until O takes it, another is made, or Backspace
+  lets go of it with the marker (CG_AccessibilityChosenClear).
+
+Checked in the first level: T, T, T, Y said items 1, 2, 3 and 2 of 7;
+O then said "Facing the way. 5 meters, then right. Switch, 54 meters, 6
+meters above you"; X and X said doors 1 and 2 of 2; Backspace and O led
+to the way out; Y, K and X were bound in a config from before.

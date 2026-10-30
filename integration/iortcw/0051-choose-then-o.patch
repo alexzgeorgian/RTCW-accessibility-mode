@@ -1,0 +1,627 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 4b72500f..cebea6d0 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -724,6 +724,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityWaypointPrev" );
+ 	trap_AddCommand( "accessibilityExplore" );
+ 	trap_AddCommand( "accessibilityThingsNext" );
++	trap_AddCommand( "accessibilityThingsPrev" );
+ 	trap_AddCommand( "accessibilityAreaExits" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+ 	trap_AddCommand( "-accessibilityTurnLeft" );
+@@ -762,6 +763,7 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 	} else if ( !Q_stricmp( cmd, "accessibilityEnemyCallouts" ) ) {
+ 		CG_AccessibilityEnemyCallouts_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityMarkerClear" ) ) {
++		CG_AccessibilityChosenClear();
+ 		CG_AccessibilityMarkerClear();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
+ 		CG_AccessibilityWaypointPlace();
+@@ -773,6 +775,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityExplore();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityThingsNext" ) ) {
+ 		CG_AccessibilityThingsNext();
++	} else if ( !Q_stricmp( cmd, "accessibilityThingsPrev" ) ) {
++		CG_AccessibilityThingsPrev();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityAreaExits" ) ) {
+ 		CG_AccessibilityAreaExits();
+ 	} else if ( !Q_stricmp( cmd, "+accessibilityTurnLeft" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 5c2e8a6c..604f4303 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -28,15 +28,14 @@
+  * the compiler cuts it into areas, split where a door closes the way.
+  * The player is told the area they come into, new or again; X goes
+  * through the doors out of it, nearest first, saying where each leads -
+- * a new area, or one explored - and leads to it; T keeps to what is in
+- * the area. Areas are numbered as the player first comes into them.
++ * a new area, or one explored - and O leads to the one chosen; T keeps to
++ * what is in the area. Areas are numbered as the player first comes into them.
+  */
+ 
+ #define ETA_AREAS_MAX       1024
+ #define ETA_AREA_EXITS_MAX  256
+ #define ETA_AREA_SETTLE_MS  700     /* in a new area this long: come into it */
+-#define ETA_AREA_PICK_MS    8000    /* X again this soon: the next door */
+-#define ETA_AREA_PICK_MOVED 80.0f   /* and this near where it was pressed */
++#define ETA_AREA_LIST_MS    30000   /* X again this soon: on along the same list */
+ #define ETA_AREA_SAME_DOOR  136.0f  /* the other half of a double door */
+ #define ETA_AREA_THINGS_NEAR 400.0f /* a thing whose area is not known, this near: here */
+ #define ETA_AREA_THROUGH    224.0f  /* led this far through a door, where the floor goes on */
+@@ -60,8 +59,9 @@ static struct
+ 	int            numbered;
+ 	int            current;                 /* the map's own number, or -1 */
+ 	int            pending, pendingAt;
+-	int            pressedAt, picks, target, targetSide;
+-	vec3_t         pressedFrom;
++	int            pressedAt;
++	int            list[ETA_AREA_EXITS_MAX];   /* X's list, nearest first */
++	int            listCount, listPos, listArea;
+ } eta_areas;
+ 
+ /* The area a point is in: a point in a wall or in the floor - a switch,
+@@ -207,7 +207,7 @@ static void ETA_AreasDoors(void)
+ void CG_AccessibilityAreasLoaded(int count)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+-	eta_areas.current = eta_areas.pending = eta_areas.target = -1;
++	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.count   = count;
+ 	eta_areas.loaded  = (qboolean)(count > 1);
+ 	if (eta_areas.loaded)
+@@ -362,36 +362,22 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 	Com_sprintf(out, size, "In area %d, of %d explored. %s", eta_areas.number[area], eta_areas.numbered, doors);
+ }
+ 
+-/* Whether the marker is still on the door X led to. */
+-static qboolean ETA_AreaMarkerOurs(void)
+-{
+-	vec3_t     origin;
+-	const char *name;
+-
+-	if (eta_areas.target < 0 || eta_areas.target >= eta_areas.exitCount)
+-	{
+-		return qfalse;
+-	}
+-	return (qboolean)(CG_AccessibilityMarkerInfo(origin, &name)
+-	                  && Distance(origin, eta_areas.exits[eta_areas.target].side[eta_areas.targetSide]) < 1.0f);
+-}
+-
+ /*
+- * X: the doors out of the area the player is in, nearest first, and to
+- * the one chosen, as T leads to a thing - turned toward the way there,
+- * with the ping. X again within a few seconds, the next door; later,
+- * still on the way to one, turned toward the way again. A door to an
+- * area not yet explored is said so, and so is the one toward the way out.
++ * X: the doors out of the area the player is in, nearest first, one
++ * after another and round again, as T goes through the things. Each is
++ * chosen, and O leads to it - just through it, into the area beyond. A
++ * door to an area not yet explored is said so, and so is the one toward
++ * the way out. The list keeps its order until the player is in another
++ * area, or a while has gone by.
+  */
+ void CG_AccessibilityAreaExits(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 order[ETA_AREA_EXITS_MAX], count = 0, area, wayOutArea = -1, i, j, meters;
++	int                 count = 0, area, wayOutArea = -1, i, j, meters, other, side;
+ 	char                where[96], height[64], name[64], doors[96];
+ 	const eta_areaExit_t *exit;
+ 	vec3_t              delta, wayOut;
+-	qboolean            again;
+-	int                 other;
++	qboolean            fresh;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+ 	{
+@@ -413,56 +399,52 @@ void CG_AccessibilityAreaExits(void)
+ 		eta_areas.number[area] = ++eta_areas.numbered;
+ 	}
+ 
+-	/* Again soon, standing where it was pressed: the next door. Walked
+-	   on since, toward the one chosen: turned toward the way again. */
+-	again               = (qboolean)(cg.time >= eta_areas.pressedAt && cg.time - eta_areas.pressedAt < ETA_AREA_PICK_MS
+-	                                 && Distance(ps->origin, eta_areas.pressedFrom) < ETA_AREA_PICK_MOVED);
++	fresh = (qboolean)(cg.time < eta_areas.pressedAt || cg.time - eta_areas.pressedAt >= ETA_AREA_LIST_MS
++	                   || area != eta_areas.listArea || !eta_areas.listCount);
+ 	eta_areas.pressedAt = cg.time;
+-	VectorCopy(ps->origin, eta_areas.pressedFrom);
+-	if (!again && ETA_AreaMarkerOurs())
+-	{
+-		CG_AccessibilityFaceTheWay();
+-		return;
+-	}
+ 
+-	for (i = 0; i < eta_areas.exitCount; i++)
++	if (fresh)
+ 	{
+-		if (eta_areas.exits[i].area[0] == area || eta_areas.exits[i].area[1] == area)
++		for (i = 0; i < eta_areas.exitCount; i++)
+ 		{
+-			order[count++] = i;
++			if (eta_areas.exits[i].area[0] == area || eta_areas.exits[i].area[1] == area)
++			{
++				eta_areas.list[count++] = i;
++			}
+ 		}
+-	}
+-	if (!count)
+-	{
+-		ETA_Speech_Say(va("Area %d has no doors out. O leads to the way out", eta_areas.number[area]));
+-		eta_areas.target = -1;
+-		return;
+-	}
+ 
+-	/* Nearest first, a floor counting double. */
+-	for (i = 0; i < count; i++)
+-	{
+-		for (j = i + 1; j < count; j++)
++		/* Nearest first, a floor counting double. */
++		for (i = 0; i < count; i++)
+ 		{
+-			const float *a = eta_areas.exits[order[i]].middle, *b = eta_areas.exits[order[j]].middle;
+-			float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
+-			float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
+-
+-			if (fb < fa)
++			for (j = i + 1; j < count; j++)
+ 			{
+-				int t = order[i];
++				const float *a = eta_areas.exits[eta_areas.list[i]].middle, *b = eta_areas.exits[eta_areas.list[j]].middle;
++				float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
++				float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
+ 
+-				order[i] = order[j];
+-				order[j] = t;
++				if (fb < fa)
++				{
++					int t = eta_areas.list[i];
++
++					eta_areas.list[i] = eta_areas.list[j];
++					eta_areas.list[j] = t;
++				}
+ 			}
+ 		}
++		eta_areas.listCount = count;
++		eta_areas.listArea  = area;
++		eta_areas.listPos   = -1;
++		if (!count)
++		{
++			ETA_Speech_Say(va("Area %d has no doors out. O leads to the way out", eta_areas.number[area]));
++			return;
++		}
+ 	}
+ 
+-	eta_areas.picks = again ? eta_areas.picks + 1 : 0;
+-	eta_areas.target     = order[eta_areas.picks % count];
+-	exit                 = &eta_areas.exits[eta_areas.target];
+-	eta_areas.targetSide = exit->area[0] == area ? 1 : 0;
+-	other                = exit->area[eta_areas.targetSide];
++	eta_areas.listPos = ( eta_areas.listPos + 1 ) % eta_areas.listCount;
++	exit              = &eta_areas.exits[eta_areas.list[eta_areas.listPos]];
++	side              = exit->area[0] == area ? 1 : 0;
++	other             = exit->area[side];
+ 
+ 	if (CG_AccessibilityExitPoint(ps->origin, wayOut))
+ 	{
+@@ -488,13 +470,13 @@ void CG_AccessibilityAreaExits(void)
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 
+ 	ETA_Speech_BeginReport();
+-	if (!eta_areas.picks)
++	if (fresh)
+ 	{
+ 		ETA_AreaDoorsText(area, doors, sizeof(doors));
+ 		ETA_Speech_Say(va("Area %d. %s", eta_areas.number[area], doors));
+ 	}
+-	ETA_Speech_Say(va("Door %d of %d, %s%s, %s, %d %s%s%s", eta_areas.picks % count + 1, count, where,
+-	                  exit->opens ? "" : ", locked",
++	ETA_Speech_Say(va("Door %d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
++	                  eta_areas.listCount, where, exit->opens ? "" : ", locked",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+ 	ETA_Speech_EndReport();
+@@ -507,8 +489,7 @@ void CG_AccessibilityAreaExits(void)
+ 	{
+ 		Q_strncpyz(name, "the door to a new area", sizeof(name));
+ 	}
+-	CG_AccessibilityMarkerSet(exit->side[eta_areas.targetSide], name);
+-	CG_AccessibilityFaceTheWay();
++	CG_AccessibilityChoose(exit->side[side], name);
+ }
+ 
+ #endif
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index ab4389fc..76351899 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -24,8 +24,8 @@
+  * in it. K and J say only what is near now. So everything K and J have
+  * had on their list - the things on the ground, the buttons and switches,
+  * the things to break - is kept for the whole level, until it is picked
+- * up, pressed or broken. T leads, by the ping and the walk guide, to the
+- * nearest one left; T again within a few seconds, to the next nearest.
++ * up, pressed or broken. T and Y go through those in the area, and O
++ * leads, by the ping and the walk guide, to the one chosen.
+  *
+  * And when a fight is over - no enemy in sight for a few seconds, after
+  * one was - where it began is kept as a waypoint, for L.
+@@ -35,7 +35,7 @@
+ #define ETA_THINGS_LOOK_MS   500     /* the list looked at this often */
+ #define ETA_THINGS_SAME      48.0f   /* this near another: the same thing */
+ #define ETA_THINGS_GONE      600.0f  /* this near, and not there: taken */
+-#define ETA_THINGS_PICK_MS   8000    /* T again this soon: the next one */
++#define ETA_THINGS_LIST_MS   30000   /* T or Y again this soon: on along the same list */
+ #define ETA_FIGHT_QUIET_MS   6000    /* no enemy in sight this long: over */
+ #define ETA_FIGHT_CALM_MS    10000   /* and before it, this long: a new one */
+ #define ETA_FIGHT_AWAY       160.0f  /* only said when this far from its start */
+@@ -72,8 +72,9 @@ static struct
+ 	int         lookedAt;
+ 	int         target;     /* the one T leads to, or -1 */
+ 	qboolean    seeded;     /* the map's own things put in */
+-	int         pressedAt;  /* T last pressed, choosing or turning */
+-	int         picks;
++	int         pressedAt;  /* T or Y last pressed */
++	int         list[ETA_THINGS_MAX];   /* T and Y's list, nearest first */
++	int         listCount, listPos, listArea;
+ 	int         secrets;    /* found, as the mission's figures last said */
+ 
+ 	/* The fight. */
+@@ -375,20 +376,6 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	}
+ }
+ 
+-/* Whether the marker is still on the thing T led to, not yet done. */
+-static qboolean ETA_ThingsMarkerOurs(void)
+-{
+-	vec3_t      origin;
+-	const char  *name;
+-
+-	if (eta_things.target < 0 || eta_things.target >= eta_things.count || eta_things.things[eta_things.target].done)
+-	{
+-		return qfalse;
+-	}
+-	return (qboolean)(CG_AccessibilityMarkerInfo(origin, &name)
+-	                  && Distance(origin, eta_things.things[eta_things.target].point) < 1.0f);
+-}
+-
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+@@ -396,19 +383,21 @@ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ }
+ 
+ /*
+- * T: to the nearest thing left, turned toward the way there as O turns
+- * the player toward the way out. T again within a few seconds of
+- * choosing, the next nearest; later, turned toward the way again. The
+- * tester followed T's ping as they follow O's, and pressed O to be
+- * turned toward it - which, since O leads on, took them to the way out.
++ * T and Y: the things left in the area, nearest first, next and back, as
++ * 1428 has keys to go through its items and another to be led to the one
++ * chosen. Choosing starts nothing: O leads to it, and O again turns the
++ * player toward it, as for a waypoint chosen with L. The tester, used to
++ * that from 1428, chose with T and walked; T pressed again on the way had
++ * gone on to the next thing instead. The list is the order it had when
++ * first asked for, so stepping through it does not jump about as the
++ * player moves; it is made again in a new area, or after a while.
+  */
+-void CG_AccessibilityThingsNext(void)
++static void ETA_ThingsStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 order[ETA_THINGS_MAX];
+ 	int                 count = 0, i, j, meters, hidden = 0, elsewhere = 0, area;
+ 	char                progress[160], name[80];
+-	qboolean            again;
++	qboolean            fresh;
+ 	eta_thing_t         *thing;
+ 	vec3_t              delta;
+ 
+@@ -418,85 +407,102 @@ void CG_AccessibilityThingsNext(void)
+ 	}
+ 	ETA_ThingsRecord();
+ 
+-	/* Pressed again soon, the next one; after a while, still on the way
+-	   to one, turned toward it. */
+-	again                = (qboolean)(cg.time >= eta_things.pressedAt && cg.time - eta_things.pressedAt < ETA_THINGS_PICK_MS);
++	area  = CG_AccessibilityAreaHere();
++	fresh = (qboolean)(cg.time < eta_things.pressedAt || cg.time - eta_things.pressedAt >= ETA_THINGS_LIST_MS
++	                   || area != eta_things.listArea || !eta_things.listCount);
+ 	eta_things.pressedAt = cg.time;
+-	if (!again && ETA_ThingsMarkerOurs())
+-	{
+-		CG_AccessibilityFaceTheWay();
+-		return;
+-	}
+ 
+-	area = CG_AccessibilityAreaHere();
+-	for (i = 0; i < eta_things.count; i++)
++	if (fresh)
+ 	{
+-		if (!ETA_ThingLeadable(&eta_things.things[i]))
+-		{
+-			hidden += !eta_things.things[i].done;
+-		}
+-		else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
++		for (i = 0; i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
+-			order[count++] = i;
++			if (!ETA_ThingLeadable(&eta_things.things[i]))
++			{
++				hidden += !eta_things.things[i].done;
++			}
++			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
++			{
++				eta_things.list[count++] = i;
++			}
++			else
++			{
++				elsewhere++;
++			}
+ 		}
+-		else
++
++		/* Nearest first, a floor counting double. */
++		for (i = 0; i < count; i++)
+ 		{
+-			elsewhere++;
++			for (j = i + 1; j < count; j++)
++			{
++				const float *a = eta_things.things[eta_things.list[i]].point, *b = eta_things.things[eta_things.list[j]].point;
++				float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
++				float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
++
++				if (fb < fa)
++				{
++					int t = eta_things.list[i];
++
++					eta_things.list[i] = eta_things.list[j];
++					eta_things.list[j] = t;
++				}
++			}
+ 		}
+-	}
+-	if (!count && elsewhere)
+-	{
+-		ETA_Speech_Say(va("Nothing left in this area. %d %s in other areas. X finds the doors out", elsewhere,
+-		                  elsewhere == 1 ? "thing" : "things"));
+-		eta_things.target = -1;
+-		return;
+-	}
+-	if (!count)
+-	{
+-		ETA_Speech_Say(hidden ? va("Everything else has been taken or used. %d secret %s still to find", hidden,
+-		                           hidden == 1 ? "area" : "areas")
+-		               : eta_things.count ? "Everything found has been taken or used. X finds the doors out"
+-		               : "Nothing found yet to take or use. X finds the doors out");
+-		eta_things.target = -1;
+-		return;
+-	}
++		eta_things.listCount = count;
++		eta_things.listArea  = area;
++		eta_things.listPos   = -1;
+ 
+-	/* Nearest first, a floor counting double. */
+-	for (i = 0; i < count; i++)
+-	{
+-		for (j = i + 1; j < count; j++)
++		if (!count)
+ 		{
+-			const float *a = eta_things.things[order[i]].point, *b = eta_things.things[order[j]].point;
+-			float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
+-			float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
+-
+-			if (fb < fa)
++			eta_things.target = -1;
++			if (elsewhere)
+ 			{
+-				int t = order[i];
+-
+-				order[i] = order[j];
+-				order[j] = t;
++				ETA_Speech_Say(va("Nothing left in this area. %d %s in other areas. X finds the doors out", elsewhere,
++				                  elsewhere == 1 ? "thing" : "things"));
++			}
++			else
++			{
++				ETA_Speech_Say(hidden ? va("Everything else has been taken or used. %d secret %s still to find", hidden,
++				                           hidden == 1 ? "area" : "areas")
++				               : eta_things.count ? "Everything found has been taken or used. X finds the doors out"
++				               : "Nothing found yet to take or use. X finds the doors out");
+ 			}
++			return;
+ 		}
+ 	}
+ 
+-	if (again)
++	/* The next one on the list not done since, either way round. */
++	for (i = 0; i < eta_things.listCount; i++)
+ 	{
+-		eta_things.picks++;
++		eta_things.listPos = eta_things.listPos < 0 ? ( step > 0 ? 0 : eta_things.listCount - 1 )
++		                     : ( eta_things.listPos + step + eta_things.listCount ) % eta_things.listCount;
++		if (!eta_things.things[eta_things.list[eta_things.listPos]].done)
++		{
++			break;
++		}
+ 	}
+-	else
++	if (i == eta_things.listCount)
+ 	{
+-		eta_things.picks = 0;
++		eta_things.listCount = 0;
++		eta_things.pressedAt = 0;
++		ETA_ThingsStep(step);
++		return;
+ 	}
+-	eta_things.target   = order[eta_things.picks % count];
+-	thing               = &eta_things.things[eta_things.target];
++	eta_things.target = eta_things.list[eta_things.listPos];
++	thing             = &eta_things.things[eta_things.target];
+ 
+ 	VectorSubtract(thing->point, ps->origin, delta);
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 	meters = meters < 1 ? 1 : meters;
+-	ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
+ 
+-	/* Close enough to reach: no ping, only what to do with it. */
++	ETA_Speech_BeginReport();
++	if (fresh)
++	{
++		ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
++		ETA_Speech_Say(progress);
++	}
++
++	/* Close enough to reach: only what to do with it. */
+ 	if (meters <= 4)
+ 	{
+ 		static const char *const what[ETA_THING_KINDS] =
+@@ -505,24 +511,31 @@ void CG_AccessibilityThingsNext(void)
+ 			"Its way in is hidden close by"
+ 		};
+ 
+-		ETA_Speech_BeginReport();
+-		ETA_Speech_Say(va("%s. %s: %s, %s, %d %s. %s", progress, eta_things.picks ? "Next" : "Nearest", thing->name,
++		ETA_Speech_Say(va("%d of %d, %s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, thing->name,
+ 		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters", what[thing->kind]));
+-		ETA_Speech_EndReport();
+-		return;
+ 	}
+-
+-	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s. %s: %s, %s, %d %s", progress, eta_things.picks ? "Next" : "Nearest",
+-	                  thing->name, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
+-	                  meters, meters == 1 ? "meter" : "meters"));
++	else
++	{
++		ETA_Speech_Say(va("%d of %d, %s, %s, %d %s. O leads there", eta_things.listPos + 1, eta_things.listCount,
++		                  thing->name, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
++		                  meters, meters == 1 ? "meter" : "meters"));
++	}
+ 	ETA_Speech_EndReport();
+ 
+ 	Q_strncpyz(name, thing->name, sizeof(name));
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+-	CG_AccessibilityMarkerSet(thing->point, name);
+-	CG_AccessibilityFaceTheWay();
++	CG_AccessibilityChoose(thing->point, name);
++}
++
++void CG_AccessibilityThingsNext(void)
++{
++	ETA_ThingsStep(1);
++}
++
++void CG_AccessibilityThingsPrev(void)
++{
++	ETA_ThingsStep(-1);
+ }
+ 
+ /* A secret area found - the mission's figures count one more - is the
+@@ -631,7 +644,7 @@ void CG_AccessibilityThingsFrame(void)
+ 			ETA_ThingsCount(area, counts, &left);
+ 			ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
+ 			ETA_Speech_BeginReport();
+-			ETA_Speech_Say(left ? va("Done. %s. T leads to the next", progress)
++			ETA_Speech_Say(left ? va("Done. %s. T chooses the next", progress)
+ 			               : all ? "Done. Nothing else in this area. X finds the doors out"
+ 			               : "Done. Nothing else found to take or use");
+ 			ETA_Speech_EndReport();
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 342b1f37..640b5494 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4412,14 +4412,19 @@ void CG_AccessibilityStuckFrame(playerState_t *ps, playerState_t *ops)
+ 
+ static void ETA_WorldRead(void);
+ 
+-/* Chosen with L, and led to once O is pressed - for a while: a choice
+-   left standing is forgotten, and O goes back to leading on. */
++/* Chosen with L, T, Y or X, and led to once O is pressed, as 1428 has
++   one key to be led to what was chosen. The choice stands until O takes
++   it, another is made, or Backspace lets go of it. */
+ static qboolean eta_chosenSet;
+ static int      eta_chosenAt;
+ static vec3_t   eta_chosenPoint;
+ static char     eta_chosenName[64];
+ 
+-#define ETA_CHOSEN_MS 20000
++/* Backspace: the choice let go of, with the marker. */
++void CG_AccessibilityChosenClear(void)
++{
++	eta_chosenSet = qfalse;
++}
+ 
+ /* Where O last led: the marker is O's own while it is still there. The
+    tester, led to a thing by T, pressed O to go on and was turned to the
+@@ -4467,24 +4472,13 @@ void CG_AccessibilityWayOut(void)
+ 	}
+ 	ETA_WorldRead();
+ 
+-	/* A place chosen with L: led there now. */
+-	if (eta_chosenSet && (cg.time - eta_chosenAt > ETA_CHOSEN_MS || cg.time < eta_chosenAt))
+-	{
+-		eta_chosenSet = qfalse;
+-	}
++	/* Something chosen: led there now, turned toward the way, as T
++	   turned the player before it only chose. */
+ 	if (eta_chosenSet)
+ 	{
+-		char what[64];
+-
+ 		eta_chosenSet = qfalse;
+-		VectorSubtract(eta_chosenPoint, ps->origin, delta);
+-		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+-		ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-		Q_strncpyz(what, eta_chosenName, sizeof(what));
+-		what[0] = (char)toupper((unsigned char)what[0]);
+-		ETA_Speech_Say(va("%s, %d meters%s%s. Follow the ping; O again turns you toward it", what,
+-		                  meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
+ 		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
++		CG_AccessibilityFaceTheWay();
+ 		return;
+ 	}
+ 
+@@ -4933,7 +4927,8 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 	return qfalse;
+ }
+ 
+-/* For the ways on (cg_accessibility_ways.c). */
++/* For the ways on (cg_accessibility_ways.c), and T, Y and X: chosen,
++   for O. */
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
+ 	VectorCopy(point, eta_chosenPoint);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 34f723d0..2f94df96 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2266,6 +2266,8 @@ qboolean CG_AccessibilityNewWayNearest( vec3_t lead, char *name, size_t nameSize
+ int CG_AccessibilityPlaceAt( const vec3_t at );
+ void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );
++void CG_AccessibilityThingsPrev( void );
++void CG_AccessibilityChosenClear( void );
+ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );
+ void CG_AccessibilityThingsProgress( char *out, size_t size );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index c460b1c2..1bebacc0 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8392,6 +8392,11 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   areas to explore. X is taken over only from the kick, which G
+ 		   keeps. */
+ 		{ 'x',          "accessibilityAreaExits",     16, "+kick" },
++		/* Back through the things and the waypoints, as 1428 has a key
++		   each way: Y beside T, K beside L. Both were let go of in the
++		   fifteenth generation, so only where they are still empty. */
++		{ 'y',          "accessibilityThingsPrev",    17, NULL },
++		{ 'k',          "accessibilityWaypointPrev",  17, NULL },
+ 	};
+ 
+ 	/*
