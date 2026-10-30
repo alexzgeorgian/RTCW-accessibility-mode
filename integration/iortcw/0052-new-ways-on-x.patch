@@ -1,0 +1,353 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 604f4303..721ae9b6 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -27,13 +27,14 @@
+  * it has areas to explore, each with its ways out. So has every map here:
+  * the compiler cuts it into areas, split where a door closes the way.
+  * The player is told the area they come into, new or again; X goes
+- * through the doors out of it, nearest first, saying where each leads -
+- * a new area, or one explored - and O leads to the one chosen; T keeps to
+- * what is in the area. Areas are numbered as the player first comes into them.
++ * through what there is to explore from it - its doors out, saying where
++ * each leads, and the ways in it not yet tried - and O leads to the one
++ * chosen; T keeps to what is in the area. Areas are numbered as the player first comes into them.
+  */
+ 
+ #define ETA_AREAS_MAX       1024
+ #define ETA_AREA_EXITS_MAX  256
++#define ETA_AREA_LIST_MAX   ( ETA_AREA_EXITS_MAX + 160 )
+ #define ETA_AREA_SETTLE_MS  700     /* in a new area this long: come into it */
+ #define ETA_AREA_LIST_MS    30000   /* X again this soon: on along the same list */
+ #define ETA_AREA_SAME_DOOR  136.0f  /* the other half of a double door */
+@@ -60,8 +61,8 @@ static struct
+ 	int            current;                 /* the map's own number, or -1 */
+ 	int            pending, pendingAt;
+ 	int            pressedAt;
+-	int            list[ETA_AREA_EXITS_MAX];   /* X's list, nearest first */
+-	int            listCount, listPos, listArea;
++	int            list[ETA_AREA_LIST_MAX];   /* X's list: what is new, then the doors back */
++	int            listCount, listPos, listArea, listWays;
+ } eta_areas;
+ 
+ /* The area a point is in: a point in a wall or in the floor - a switch,
+@@ -362,21 +363,66 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 	Com_sprintf(out, size, "In area %d, of %d explored. %s", eta_areas.number[area], eta_areas.numbered, doors);
+ }
+ 
++/* X's list holds a door out as its number, a way not yet tried as -1
++   less its number, and the nearest way in another area as this. */
++#define ETA_AREA_ELSEWHERE  (-100000)
++
++/* Whether a way not yet tried starts in the area, and is not one of its
++   doors out, which the list has already. */
++static qboolean ETA_AreaNewWayHere(int area, const vec3_t feature, const vec3_t lead)
++{
++	int there = ETA_AreaOf(lead), i;
++
++	if (there >= 0 ? there != area : ETA_AreaOf(feature) != area)
++	{
++		return qfalse;
++	}
++	for (i = 0; i < eta_areas.exitCount; i++)
++	{
++		const eta_areaExit_t *exit = &eta_areas.exits[i];
++
++		if ((exit->area[0] == area || exit->area[1] == area) && Distance(exit->middle, feature) < 128.0f)
++		{
++			return qfalse;
++		}
++	}
++	return qtrue;
++}
++
++/* Where an entry on X's list is, for its distance. */
++static qboolean ETA_AreaEntryAt(int entry, vec3_t at)
++{
++	vec3_t      lead;
++	const char *word;
++
++	if (entry >= 0)
++	{
++		VectorCopy(eta_areas.exits[entry].middle, at);
++		return qtrue;
++	}
++	return CG_AccessibilityNewWayAt(-1 - entry, at, lead, &word);
++}
++
+ /*
+- * X: the doors out of the area the player is in, nearest first, one
+- * after another and round again, as T goes through the things. Each is
+- * chosen, and O leads to it - just through it, into the area beyond. A
+- * door to an area not yet explored is said so, and so is the one toward
+- * the way out. The list keeps its order until the player is in another
+- * area, or a while has gone by.
++ * X: where to explore from the area the player is in, one after another
++ * and round again, as T goes through the things. First what is new,
++ * nearest first - the doors to areas not yet explored, and the ways in
++ * this area not yet tried: a doorway, a corridor, stairs - then the doors
++ * back to areas explored. The tester, with only the doors on X, found it
++ * hard to find new ways: an area can be a whole floor of rooms and
++ * corridors with no door the map counts. With nothing new here, the
++ * nearest way not yet tried in another area comes last. Each is chosen,
++ * and O leads to it. The list keeps its order until the player is in
++ * another area, or a while has gone by.
+  */
+ void CG_AccessibilityAreaExits(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 count = 0, area, wayOutArea = -1, i, j, meters, other, side;
+-	char                where[96], height[64], name[64], doors[96];
++	int                 count = 0, area, wayOutArea = -1, i, j, meters, other, side, entry = 0, fresh_new = 0, ways = 0;
++	char                where[128], height[64], name[64], doors[96], text[128];
++	const char          *word;
+ 	const eta_areaExit_t *exit;
+-	vec3_t              delta, wayOut;
++	vec3_t              delta, wayOut, at, lead;
+ 	qboolean            fresh;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -405,46 +451,157 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (fresh)
+ 	{
+-		for (i = 0; i < eta_areas.exitCount; i++)
++		int   newCount;
++		float far[ETA_AREA_LIST_MAX];
++
++		/* What is new, then the doors back. */
++		for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
+ 		{
+-			if (eta_areas.exits[i].area[0] == area || eta_areas.exits[i].area[1] == area)
++			exit = &eta_areas.exits[i];
++			if ((exit->area[0] == area || exit->area[1] == area)
++			    && !eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
+ 			{
+ 				eta_areas.list[count++] = i;
+ 			}
+ 		}
++		for (i = 0; i < CG_AccessibilityNewWayCount() && count < ETA_AREA_LIST_MAX; i++)
++		{
++			if (CG_AccessibilityNewWayAt(i, at, lead, &word) && ETA_AreaNewWayHere(area, at, lead))
++			{
++				eta_areas.list[count++] = -1 - i;
++				ways++;
++			}
++		}
++		newCount = count;
++		for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
++		{
++			exit = &eta_areas.exits[i];
++			if ((exit->area[0] == area || exit->area[1] == area)
++			    && eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
++			{
++				eta_areas.list[count++] = i;
++			}
++		}
++		if (!newCount && count < ETA_AREA_LIST_MAX
++		    && CG_AccessibilityNewWayNearest(lead, name, sizeof(name), text, sizeof(text)))
++		{
++			eta_areas.list[count++] = ETA_AREA_ELSEWHERE;
++		}
+ 
+-		/* Nearest first, a floor counting double. */
++		/* Nearest first within each part, a floor counting double. */
++		for (i = 0; i < count; i++)
++		{
++			far[i] = 0.0f;
++			if (eta_areas.list[i] != ETA_AREA_ELSEWHERE && ETA_AreaEntryAt(eta_areas.list[i], at))
++			{
++				far[i] = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
++			}
++		}
+ 		for (i = 0; i < count; i++)
+ 		{
+ 			for (j = i + 1; j < count; j++)
+ 			{
+-				const float *a = eta_areas.exits[eta_areas.list[i]].middle, *b = eta_areas.exits[eta_areas.list[j]].middle;
+-				float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
+-				float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
+-
+-				if (fb < fa)
++				if (( i < newCount ) == ( j < newCount ) && far[j] < far[i])
+ 				{
+-					int t = eta_areas.list[i];
++					int   t  = eta_areas.list[i];
++					float ft = far[i];
+ 
+ 					eta_areas.list[i] = eta_areas.list[j];
+ 					eta_areas.list[j] = t;
++					far[i]            = far[j];
++					far[j]            = ft;
+ 				}
+ 			}
+ 		}
+ 		eta_areas.listCount = count;
+ 		eta_areas.listArea  = area;
+ 		eta_areas.listPos   = -1;
++		eta_areas.listWays  = ways;
++		fresh_new           = newCount;
+ 		if (!count)
+ 		{
+-			ETA_Speech_Say(va("Area %d has no doors out. O leads to the way out", eta_areas.number[area]));
++			ETA_Speech_Say(va("Area %d: no doors out, and no way found here not yet tried. O leads to the way out",
++			                  eta_areas.number[area]));
+ 			return;
+ 		}
+ 	}
+ 
+-	eta_areas.listPos = ( eta_areas.listPos + 1 ) % eta_areas.listCount;
+-	exit              = &eta_areas.exits[eta_areas.list[eta_areas.listPos]];
+-	side              = exit->area[0] == area ? 1 : 0;
+-	other             = exit->area[side];
++	/* The next one still there: a way tried since is passed over. */
++	for (i = 0; i < eta_areas.listCount; i++)
++	{
++		eta_areas.listPos = ( eta_areas.listPos + 1 ) % eta_areas.listCount;
++		entry             = eta_areas.list[eta_areas.listPos];
++		if (entry >= 0 || entry == ETA_AREA_ELSEWHERE || ETA_AreaEntryAt(entry, at))
++		{
++			break;
++		}
++	}
++	if (i == eta_areas.listCount)
++	{
++		eta_areas.listCount = 0;
++		eta_areas.pressedAt = 0;
++		CG_AccessibilityAreaExits();
++		return;
++	}
++
++	ETA_Speech_BeginReport();
++	if (fresh)
++	{
++		ETA_AreaDoorsText(area, doors, sizeof(doors));
++		if (eta_areas.listWays)
++		{
++			ETA_Speech_Say(va("Area %d. %s. %d new %s here", eta_areas.number[area], doors, eta_areas.listWays,
++			                  eta_areas.listWays == 1 ? "way" : "ways"));
++		}
++		else
++		{
++			ETA_Speech_Say(va("Area %d. %s", eta_areas.number[area], doors));
++		}
++		if (!fresh_new)
++		{
++			ETA_Speech_Say("Nothing new in this area");
++		}
++	}
++
++	/* The nearest way not yet tried, in another area. */
++	if (entry == ETA_AREA_ELSEWHERE)
++	{
++		if (!CG_AccessibilityNewWayNearest(lead, name, sizeof(name), text, sizeof(text)))
++		{
++			ETA_Speech_Say("No way left not yet tried");
++			ETA_Speech_EndReport();
++			return;
++		}
++		ETA_Speech_Say(va("%d of %d, in another area. %s. O leads there", eta_areas.listPos + 1, eta_areas.listCount,
++		                  text));
++		ETA_Speech_EndReport();
++		CG_AccessibilityChoose(lead, name);
++		return;
++	}
++
++	/* A way not yet tried, in this area. */
++	if (entry < 0)
++	{
++		CG_AccessibilityNewWayAt(-1 - entry, at, lead, &word);
++		Q_strncpyz(text, word, sizeof(text));
++		text[0] = (char)tolower((unsigned char)text[0]);
++		VectorSubtract(at, ps->origin, delta);
++		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++		meters = meters < 1 ? 1 : meters;
++		ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++		ETA_Speech_Say(va("%d of %d, new %s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1, eta_areas.listCount,
++		                  text, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)), meters,
++		                  meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
++		ETA_Speech_EndReport();
++		Com_sprintf(name, sizeof(name), "the new %s", text);
++		CG_AccessibilityChoose(lead, name);
++		return;
++	}
++
++	/* A door out. */
++	exit  = &eta_areas.exits[entry];
++	side  = exit->area[0] == area ? 1 : 0;
++	other = exit->area[side];
+ 
+ 	if (CG_AccessibilityExitPoint(ps->origin, wayOut))
+ 	{
+@@ -453,11 +610,11 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (eta_areas.number[other])
+ 	{
+-		Com_sprintf(where, sizeof(where), "back to area %d", eta_areas.number[other]);
++		Com_sprintf(where, sizeof(where), "door back to area %d", eta_areas.number[other]);
+ 	}
+ 	else
+ 	{
+-		Q_strncpyz(where, "to a new area", sizeof(where));
++		Q_strncpyz(where, "door to a new area", sizeof(where));
+ 	}
+ 	if (other == wayOutArea && wayOutArea != area)
+ 	{
+@@ -469,13 +626,7 @@ void CG_AccessibilityAreaExits(void)
+ 	meters = meters < 1 ? 1 : meters;
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 
+-	ETA_Speech_BeginReport();
+-	if (fresh)
+-	{
+-		ETA_AreaDoorsText(area, doors, sizeof(doors));
+-		ETA_Speech_Say(va("Area %d. %s", eta_areas.number[area], doors));
+-	}
+-	ETA_Speech_Say(va("Door %d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
++	ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
+ 	                  eta_areas.listCount, where, exit->opens ? "" : ", locked",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 1e0ebebc..c91a4099 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1586,6 +1586,25 @@ qboolean CG_AccessibilityNewWayNearest(vec3_t lead, char *name, size_t nameSize,
+ 	return qtrue;
+ }
+ 
++/* For X: the ways found and never tried - where each starts, where O
++   would lead, past its start, and what it is. qfalse for one tried. */
++int CG_AccessibilityNewWayCount(void)
++{
++	return eta_frontier.count;
++}
++
++qboolean CG_AccessibilityNewWayAt(int index, vec3_t feature, vec3_t lead, const char **word)
++{
++	if (index < 0 || index >= eta_frontier.count || eta_frontier.ways[index].tried)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_frontier.ways[index].feature, feature);
++	VectorCopy(eta_frontier.ways[index].lead, lead);
++	*word = eta_wayWords[eta_frontier.ways[index].kind];
++	return qtrue;
++}
++
+ /* How far a way is, for choosing the nearest: a floor up or down counts
+    double, as it does for the way out. */
+ static float ETA_FrontierFar(const vec3_t from, const vec3_t to)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 2f94df96..961f1c02 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2264,6 +2264,8 @@ void CG_AccessibilityExploreProgress( char *out, size_t size );
+ void CG_AccessibilityWaysSummaryText( char *out, size_t size );
+ qboolean CG_AccessibilityNewWayNearest( vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ int CG_AccessibilityPlaceAt( const vec3_t at );
++int CG_AccessibilityNewWayCount( void );
++qboolean CG_AccessibilityNewWayAt( int index, vec3_t feature, vec3_t lead, const char **word );
+ void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );
+ void CG_AccessibilityThingsPrev( void );

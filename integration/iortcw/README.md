@@ -1182,3 +1182,18 @@ Checked in the first level: T, T, T, Y said items 1, 2, 3 and 2 of 7;
 O then said "Facing the way. 5 meters, then right. Switch, 54 meters, 6
 meters above you"; X and X said doors 1 and 2 of 2; Backspace and O led
 to the way out; Y, K and X were bound in a config from before.
+
+## 0052: the new ways on X
+
+The tester found it hard to find new ways to explore: with the areas,
+L no longer had the ways on or the nearest way not yet tried, and X had
+only the doors the map counts between areas - and an area can be a
+whole floor of rooms and corridors. X's list is now what is new, nearest
+first - the doors to areas not yet explored, and the ways found in this
+area and never tried (CG_AccessibilityNewWayAt, from the frontier V
+kept), less any at one of its doors - then the doors back to areas
+explored. With nothing new in the area, the nearest way not yet tried
+in another area (CG_AccessibilityNewWayNearest) comes last. A way tried
+since the list was made is passed over. The first X in an area says
+how many new ways there are: "Area 1. 2 doors out, 2 to new areas. 1
+new way here. 1 of 3, new doorway, ahead, 4 meters. O leads there".
