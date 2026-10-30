@@ -1,0 +1,236 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 721ae9b6..0db7d664 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -204,6 +204,114 @@ static void ETA_AreasDoors(void)
+ 	}
+ }
+ 
++/*
++ * What has been explored, kept in a file of its own, so that a death, a
++ * save loaded or the level started again does not make it all new: the
++ * tester, after a reload, was led by X through doors "to a new area" into
++ * places they knew. The areas come into, with their numbers, and the ways
++ * found, tried or not. Only for one level - the one last played: coming
++ * to another level, it starts again.
++ */
++#define ETA_EXPLORED_FILE    "accessibility_explored.txt"
++#define ETA_EXPLORED_SAVE_MS 2000
++
++static qboolean eta_exploredDirty;
++static int      eta_exploredSavedAt;
++
++void CG_AccessibilityExploredChanged(void)
++{
++	eta_exploredDirty = qtrue;
++}
++
++static void ETA_ExploredSave(void)
++{
++	fileHandle_t f;
++	char         line[256];
++	vec3_t       feature, lead;
++	int          i, kind;
++	qboolean     tried;
++
++	eta_exploredDirty   = qfalse;
++	eta_exploredSavedAt = cg.time;
++	if (trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_WRITE) < 0 || !f)
++	{
++		return;
++	}
++	Com_sprintf(line, sizeof(line), "map %s\n", cgs.mapname);
++	trap_FS_Write(line, strlen(line), f);
++	for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
++	{
++		if (eta_areas.number[i])
++		{
++			Com_sprintf(line, sizeof(line), "area %d %d\n", i, eta_areas.number[i]);
++			trap_FS_Write(line, strlen(line), f);
++		}
++	}
++	for (i = 0; CG_AccessibilityFrontierGet(i, feature, lead, &kind, &tried); i++)
++	{
++		Com_sprintf(line, sizeof(line), "way %d %d %.0f %.0f %.0f %.0f %.0f %.0f\n", kind, tried ? 1 : 0,
++		            feature[0], feature[1], feature[2], lead[0], lead[1], lead[2]);
++		trap_FS_Write(line, strlen(line), f);
++	}
++	trap_FS_FCloseFile(f);
++}
++
++static void ETA_ExploredLoad(void)
++{
++	static char  text[32768];
++	fileHandle_t f;
++	char         *line, *next, map[MAX_QPATH];
++	int          length;
++
++	eta_exploredDirty = qfalse;
++	length            = trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_READ);
++	if (length <= 0 || !f)
++	{
++		if (f)
++		{
++			trap_FS_FCloseFile(f);
++		}
++		return;
++	}
++	if (length >= (int)sizeof(text))
++	{
++		length = sizeof(text) - 1;
++	}
++	trap_FS_Read(text, length, f);
++	trap_FS_FCloseFile(f);
++	text[length] = '\0';
++
++	/* Another level's: nothing explored here yet. */
++	if (sscanf(text, "map %63s", map) != 1 || Q_stricmp(map, cgs.mapname))
++	{
++		return;
++	}
++	for (line = text; line && *line; line = next)
++	{
++		int    a, n, kind, tried;
++		vec3_t feature, lead;
++
++		next = strchr(line, '\n');
++		if (next)
++		{
++			*next++ = '\0';
++		}
++		if (sscanf(line, "area %d %d", &a, &n) == 2 && a >= 0 && a < ETA_AREAS_MAX && n > 0)
++		{
++			eta_areas.number[a] = n;
++			if (n > eta_areas.numbered)
++			{
++				eta_areas.numbered = n;
++			}
++		}
++		else if (sscanf(line, "way %d %d %f %f %f %f %f %f", &kind, &tried, &feature[0], &feature[1], &feature[2],
++		                &lead[0], &lead[1], &lead[2]) == 8)
++		{
++			CG_AccessibilityFrontierPut(feature, lead, kind, (qboolean)(tried != 0));
++		}
++	}
++}
++
+ /* From cg_accessibility_world.c, once the map's areas are read. */
+ void CG_AccessibilityAreasLoaded(int count)
+ {
+@@ -215,6 +323,7 @@ void CG_AccessibilityAreasLoaded(int count)
+ 	{
+ 		ETA_AreasDoors();
+ 	}
++	ETA_ExploredLoad();
+ 	CG_Printf("eta: %s has %d areas, %d doors between them\n", cgs.mapname, count, eta_areas.exitCount);
+ }
+ 
+@@ -300,6 +409,10 @@ void CG_AccessibilityAreasFrame(void)
+ 	qboolean            first;
+ 	int                 area;
+ 
++	if (eta_exploredDirty && ( cg.time - eta_exploredSavedAt >= ETA_EXPLORED_SAVE_MS || cg.time < eta_exploredSavedAt ))
++	{
++		ETA_ExploredSave();
++	}
+ 	if (!eta_areas.loaded || !cg.snap || ps->pm_type != PM_NORMAL || ps->groundEntityNum == ENTITYNUM_NONE)
+ 	{
+ 		return;
+@@ -328,6 +441,7 @@ void CG_AccessibilityAreasFrame(void)
+ 	if (!eta_areas.number[area])
+ 	{
+ 		eta_areas.number[area] = ++eta_areas.numbered;
++		eta_exploredDirty      = qtrue;
+ 		if (first || !eta_waysCallouts.integer)
+ 		{
+ 			return;
+@@ -443,6 +557,7 @@ void CG_AccessibilityAreaExits(void)
+ 	if (!eta_areas.number[area])
+ 	{
+ 		eta_areas.number[area] = ++eta_areas.numbered;
++		eta_exploredDirty      = qtrue;
+ 	}
+ 
+ 	fresh = (qboolean)(cg.time < eta_areas.pressedAt || cg.time - eta_areas.pressedAt >= ETA_AREA_LIST_MS
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index c91a4099..bb20c828 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -930,9 +930,10 @@ static void ETA_FrontierRecord(void)
+ 		}
+ 		if (j < eta_frontier.count)
+ 		{
+-			if (way->status)
++			if (way->status && !eta_frontier.ways[j].tried)
+ 			{
+ 				eta_frontier.ways[j].tried = qtrue;
++				CG_AccessibilityExploredChanged();
+ 			}
+ 			continue;
+ 		}
+@@ -945,6 +946,7 @@ static void ETA_FrontierRecord(void)
+ 		eta_frontier.ways[eta_frontier.count].kind  = way->kind;
+ 		eta_frontier.ways[eta_frontier.count].tried = (qboolean)(way->status != 0);
+ 		eta_frontier.count++;
++		CG_AccessibilityExploredChanged();
+ 	}
+ }
+ 
+@@ -1586,6 +1588,35 @@ qboolean CG_AccessibilityNewWayNearest(vec3_t lead, char *name, size_t nameSize,
+ 	return qtrue;
+ }
+ 
++/* The ways found, tried or not, kept with the areas explored so that a
++   save loaded or a death does not make them new again
++   (cg_accessibility_areas.c). */
++qboolean CG_AccessibilityFrontierGet(int index, vec3_t feature, vec3_t lead, int *kind, qboolean *tried)
++{
++	if (index < 0 || index >= eta_frontier.count)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_frontier.ways[index].feature, feature);
++	VectorCopy(eta_frontier.ways[index].lead, lead);
++	*kind  = (int)eta_frontier.ways[index].kind;
++	*tried = eta_frontier.ways[index].tried;
++	return qtrue;
++}
++
++void CG_AccessibilityFrontierPut(const vec3_t feature, const vec3_t lead, int kind, qboolean tried)
++{
++	if (eta_frontier.count >= ETA_FRONTIER_MAX || kind < 0 || kind > ETA_WAY_LADDER_DOWN)
++	{
++		return;
++	}
++	VectorCopy(feature, eta_frontier.ways[eta_frontier.count].feature);
++	VectorCopy(lead, eta_frontier.ways[eta_frontier.count].lead);
++	eta_frontier.ways[eta_frontier.count].kind  = (eta_wayKind_t)kind;
++	eta_frontier.ways[eta_frontier.count].tried = tried;
++	eta_frontier.count++;
++}
++
+ /* For X: the ways found and never tried - where each starts, where O
+    would lead, past its start, and what it is. qfalse for one tried. */
+ int CG_AccessibilityNewWayCount(void)
+@@ -1752,6 +1783,7 @@ static void ETA_FrontierFrame(void)
+ 		    || ETA_FrontierNear(ps->origin, way->lead, ETA_FRONTIER_AT))
+ 		{
+ 			way->tried = qtrue;
++			CG_AccessibilityExploredChanged();
+ 			if (i == eta_frontier.target)
+ 			{
+ 				char progress[160];
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 961f1c02..c5f99ced 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2265,6 +2265,9 @@ void CG_AccessibilityWaysSummaryText( char *out, size_t size );
+ qboolean CG_AccessibilityNewWayNearest( vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ int CG_AccessibilityPlaceAt( const vec3_t at );
+ int CG_AccessibilityNewWayCount( void );
++qboolean CG_AccessibilityFrontierGet( int index, vec3_t feature, vec3_t lead, int *kind, qboolean *tried );
++void CG_AccessibilityFrontierPut( const vec3_t feature, const vec3_t lead, int kind, qboolean tried );
++void CG_AccessibilityExploredChanged( void );
+ qboolean CG_AccessibilityNewWayAt( int index, vec3_t feature, vec3_t lead, const char **word );
+ void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );

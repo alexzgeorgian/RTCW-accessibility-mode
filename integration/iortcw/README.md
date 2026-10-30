@@ -1197,3 +1197,19 @@ in another area (CG_AccessibilityNewWayNearest) comes last. A way tried
 since the list was made is passed over. The first X in an area says
 how many new ways there are: "Area 1. 2 doors out, 2 to new areas. 1
 new way here. 1 of 3, new doorway, ahead, 4 meters. O leads there".
+
+## 0053: what was explored, kept through a reload
+
+The tester died or loaded a save, and X then called doors "to a new
+area" that led into places they knew: the areas explored and the ways
+found lived only as long as the cgame. They are now written, two
+seconds after a change at most, to accessibility_explored.txt in the
+home folder - the map's name, each area come into with its number, and
+each way found with whether it was tried (CG_AccessibilityFrontierGet) -
+and read back when the map's areas are read (CG_AccessibilityFrontierPut).
+A file from another map is ignored, so coming to another level starts
+fresh.
+
+Checked in the first level: through the door from the start's area,
+then the level started again: X said "2 doors out, 1 to a new area" and
+"door back to area 2", and F1 "In area 1, of 2 explored".
