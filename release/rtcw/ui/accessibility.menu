@@ -122,7 +122,7 @@ menuDef {
 	ETA_YESNO(32, "Walls, doors, stairs and drops ahead", "eta_environmentCallouts")
 	ETA_YESNO(50, "Openings to the side as you walk", "eta_openingCallouts")
 	ETA_YESNO(68, "The kind of place you walk into", "eta_placeCallouts")
-	ETA_YESNO(86, "New place and its ways on", "eta_waysCallouts")
+	ETA_YESNO(86, "New area and its doors out", "eta_waysCallouts")
 	ETA_YESNO(104, "Enemies and friends near you", "eta_playerCallouts")
 	ETA_YESNO(122, "Things on the ground", "eta_groundCallouts")
 	ETA_YESNO(140, "Furniture as you pass it", "eta_furnitureCallouts")

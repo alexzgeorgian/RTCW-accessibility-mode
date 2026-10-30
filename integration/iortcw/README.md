@@ -1109,3 +1109,47 @@ behind, new", then the doorway, the locked door, "Nearest way not yet
 tried: Doorway, behind, 107 meters", and the way out; F1 ended its place
 with "facing west"; and a config with generation 14 had F3, V, K, J, I,
 Y and H let go of, and kept L, O, T and U.
+
+## 0050: areas to explore, as in 1428
+
+With the six keys of 0049 the tester was more lost than before: L had
+the ways on, a new way, the way out and the waypoints all on one list,
+and T had every thing in the level. They asked for the level to be
+treated as areas to explore, as 1428: Shadows over Silesia has, with a
+key set of its size - not too many, not too few.
+
+The map compiler already cuts every map into areas, split only where a
+door closes the way (an area portal). src/accessibility/map/bsp_areas.c
+reads the map's planes, nodes and leaves, forward only as the ladders
+are read, and finds a point's area by walking the tree down to its leaf.
+cg_accessibility_areas.c finds each door's area on either side
+(CG_AccessibilityDoorBox: the model's box moved to a turning door's
+origin), merges the halves of a double door, and:
+
+- says the area come into, once the player has been in it 0.7 seconds:
+  "New area, area 3. 2 doors out, 1 to a new area. 4 things left here",
+  or "Back in area 3. 1 thing left here". Areas are numbered as first
+  come into; the first is not said over the start. The menu's "New area
+  and its doors out" (eta_waysCallouts) keeps it quiet, and the numbered
+  places are not said where a map has areas.
+- X (bind generation 16, taken over only from +kick, which G keeps): the
+  doors out of this area, nearest first, each "to a new area" or "back
+  to area 2", "where the way out is" for the one into the way out's
+  area, "locked" for one that will not open by hand; the marker goes
+  just through it, and the player is turned toward the way, as T does.
+  X again within 8 seconds and within 80 units of where it was pressed
+  is the next door; X while walking toward one turns toward it again.
+- T keeps to the area: "3 things left in this area", and with none,
+  "Nothing left in this area. 12 things in other areas. X finds the
+  doors out". A thing whose point is in a wall is looked for a little
+  way off; one with no area found counts as here within 400 units.
+- L is the waypoints alone; O has the way out and X the doors out.
+- F1 says "In area 3, of 5 explored. 2 doors out, 1 to a new area" in
+  place of the place and the ways tried, and the things left in the
+  level.
+
+Checked in the first level: 13 areas and 18 doors between them; at the
+start X said "Area 1. 2 doors out, 2 to new areas. Door 1 of 2, to a
+new area, ahead right, 59 meters, 10 meters above you" and turned the
+player toward the way; T said "7 things left in this area: 4 items, 3
+switches" of the level's 40.

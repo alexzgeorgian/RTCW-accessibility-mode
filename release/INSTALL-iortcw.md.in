@@ -92,22 +92,28 @@ objectives, then the orders. **Press Enter to begin the mission.**
 
 ### Keys in a mission
 
-Getting around takes six keys: **O** to go on, **L** to choose where to
-go, **T** for things to take or use, **F** to use, **U** to fight, and
-**F1** for where you are. The keys there were before - F3, V,
-semicolon, K, J, I, Y and H - are folded into these, and are let go of
-the first time this version starts, unless you had put something else
-on them.
+Getting around is done as in 1428: Shadows over Silesia, where a level
+is a set of areas to explore. The game's own maps are made of areas -
+rooms and halls joined to each other by doors - and you are told each
+one you come into: "New area, area 3. 2 doors out, 1 to a new area. 4
+things left here". It takes eight keys: **O** to go on to the way out,
+**X** for the doors out of the area you are in, **T** for the things in
+it, **L** for your waypoints and **P** to set one, **F** to use, **U**
+to fight, and **F1** for where you are. The keys there were before -
+F3, V, semicolon, K, J, I, Y and H - are folded into these, and are let
+go of the first time this version starts, unless you had put something
+else on them.
 
 | Key | What it does |
 | --- | --- |
-| F1 | Your status: health, armor, weapon and ammo, what you carry, how many objectives are done, which place you are in and which way you face, how far you have explored, and the things left: "In place 3, by the switch, of 5 found, facing west. 2 new ways left, 4 tried, 3 of 25 doors gone through. 3 things left: 1 item, 1 switch, 1 to break" |
+| F1 | Your status: health, armor, weapon and ammo, what you carry, how many objectives are done, which area you are in and which way you face, and the things left in the level: "In area 3, of 5 explored. 2 doors out, 1 to a new area, facing west. 6 things left in the level: 1 treasure, 3 items, 2 switches" |
 | F2 | The objectives, each with whether it is done. If none are found, it says why, so you can pass that on |
-| T | The things left to take, press or break, anywhere in the level, and the secret areas: "6 things left: 1 treasure, 2 items, 1 switch, 1 to break, 1 secret area. Nearest: Button for a door, ahead, 9 meters", and you are turned toward the way there, as O turns you toward the way out: "Facing the way. 6 meters, then left. Button for a door, 9 meters". T knows the level's items, treasure, switches, buttons and secret areas from the moment it starts, as the map lays them out - a lever you have never been near is on the list too - and adds everything else K and J have on their list, such as things to break. Treasure is said as treasure. A secret area says what its way in is when the map shows it: "Secret area, behind a door a switch opens", or "through something to break". Each stays until you pick it up, press it with F, break it, or find it. T again within a few seconds chooses the next nearest; T later, while you are on your way to one, turns you toward the way to it again. One within reach is said with what to do: "Walk onto it", "F uses it". When it is done: "Done. 2 things left. T leads to the next". Coming within about 10 meters of a secret area you have not found, you hear "A secret area is near, 8 meters, left" |
-| O | The way on: the way out of the level - how far, which way, and how far up or down. O always leads on through the level: T and L lead you elsewhere, and O takes you back to the way out from wherever you are. The one exception is a place you have just chosen with L: O within 20 seconds goes there. A ping plays from the way to go, round the walls, until you get there: turn until it is in front of you, and walk. While you walk the way, the ping is quiet; it sounds when the way is off to a side or behind you, and when you stop. Press O again, at any time, and you are turned toward the way - always to somewhere you can walk: if a wall or a drop is in the way's direction, you are turned to the nearest opening beside it, "Facing the opening nearest the way". Then you hear where the way turns next, and how far it is to the way out: "Facing the way. 6 meters, then left. The way out, 35 meters". Where the way goes through a closed door just ahead, you are turned to the door: "Facing the way. A door: F opens it". See "Following the way" below |
+| T | The things left to take, press or break in the area you are in, and its secret areas: "3 things left in this area: 1 treasure, 1 item, 1 switch. Nearest: Button for a door, ahead, 9 meters", and you are turned toward the way there, as O turns you toward the way out: "Facing the way. 6 meters, then left. Button for a door, 9 meters". T knows the level's items, treasure, switches, buttons and secret areas from the moment it starts, as the map lays them out - a lever you have never been near is on the list too - and adds everything else K and J have on their list, such as things to break. Treasure is said as treasure. A secret area says what its way in is when the map shows it: "Secret area, behind a door a switch opens", or "through something to break". Each stays until you pick it up, press it with F, break it, or find it. T again within a few seconds chooses the next nearest; T later, while you are on your way to one, turns you toward the way to it again. One within reach is said with what to do: "Walk onto it", "F uses it". When it is done: "Done. 2 things left in this area. T leads to the next". With nothing left in the area: "Nothing left in this area. 12 things in other areas. X finds the doors out". Coming within about 10 meters of a secret area you have not found, you hear "A secret area is near, 8 meters, left" |
+| X | The doors out of the area you are in, nearest first, and you are turned toward the way to the first, with its ping, as T does for things: "Area 1. 2 doors out, 2 to new areas. Door 1 of 2, to a new area, ahead right, 59 meters, 10 meters above you". Each door says where it leads: "to a new area", or "back to area 2" for one you have explored, and "where the way out is" for the one toward the level's way out; a door that will not open by hand is said as "locked". X again, standing where you pressed it, chooses the next door; X while you are walking toward one turns you toward the way to it again. When you get through, you hear the area you came into: "New area, area 2", or "Back in area 1" |
+| O | The way on: the way out of the level - how far, which way, and how far up or down. O always leads on through the level: T, X and L lead you elsewhere, and O takes you back to the way out from wherever you are. The one exception is a place you have just chosen with L: O within 20 seconds goes there. A ping plays from the way to go, round the walls, until you get there: turn until it is in front of you, and walk. While you walk the way, the ping is quiet; it sounds when the way is off to a side or behind you, and when you stop. Press O again, at any time, and you are turned toward the way - always to somewhere you can walk: if a wall or a drop is in the way's direction, you are turned to the nearest opening beside it, "Facing the opening nearest the way". Then you hear where the way turns next, and how far it is to the way out: "Facing the way. 6 meters, then left. The way out, 35 meters". Where the way goes through a closed door just ahead, you are turned to the door: "Facing the way. A door: F opens it". See "Following the way" below |
 | Backspace | Takes the marker away, and its ping stops: "Marker removed". O sets the way out again |
 | P | Marks where you stand as a waypoint, named by what is beside it: "Waypoint 2 set, by the button". Up to nine; the oldest goes for a tenth. A locked door that F turns you to, or that opens only from the other side, is kept as a waypoint by itself - "Waypoint 3: locked door. L finds it again" - so once you have found its switch, L leads you back to it |
-| L | The one key for where to go. It steps through the places to go, and goes round to the first again after the last. In a new place it first says how many ways on there are, of each kind, then the ways on from where you stand, nearest first: "3 ways on: 2 doors, 1 doorway. Door 1 of 2, ahead, 4 meters, new. O leads there". Each says where it is, how far, and whether you have been through it: "new", "been there", or "where you came from"; "toward the way out" marks the one that brings you nearest the level's way out. Then the nearest way you have found anywhere in the level and never tried: "Nearest way not yet tried: Door, behind left, 30 meters". Then the way out, then each waypoint, each said with its name, how far and where: "Waypoint 3, locked door, 20 meters, behind left, on the way out". Walk somewhere else and the list starts again from the ways on there. Choosing starts nothing: no ping until you press O, which then leads you to the one you chose; O again turns you toward it. A choice you do not take with O within 20 seconds is forgotten, and O leads on again. When you walk into a new place with three ways on or more, or one with a switch, it is given a number and named by what is in it: "New place 4, by the switch. 3 ways on: 2 doors, 1 doorway"; when you come back to it, "Back in place 4, by the switch". "New place and its ways on" in the Accessibility menu keeps that quiet |
+| L | Your waypoints, one after another, going round to the first again after the last. Each is said with its name, how far and where, and whether it is on the way out or back the way you came: "Waypoint 3, locked door, 20 meters, behind left". Choosing starts nothing: no ping until you press O, which then leads you to the one you chose; O again turns you toward it. A choice you do not take with O within 20 seconds is forgotten, and O leads on again. With none set: "No waypoints yet. P marks where you stand" |
 | Left and Right arrows | A tap turns you to the next compass point and says it; two taps, a quarter turn. Held, they turn smoothly as before, and each point is said as you pass it |
 | F or Enter | Uses what is in front of you, as before. With nothing there, it turns you to the nearest thing to use, if it is close - within about 4 meters - a door, a button or a switch, a mounted gun, something on the ground, something you can break, a ladder, stairs - and says what it is and where: "Door, ahead left, 3 meters". F is always the nearest one; pressing it again stays on it. With nothing close, F says "Nothing close. T finds things further off". If the thing is out of reach, you are kept facing it while you walk, and you hear "in reach, F to use" when you get there. At a ladder, F climbs it, up or down, and says when you reach the top or the bottom; F again stops the climb |
 | Breakables | Crates, windows, boards and other things that break are on the F and T lists too: "Breakable wood, ahead, 3 meters", or "Breakable glass", "Breakable, needs dynamite". F turns you to face it, aimed at it, so you can shoot it or knife it. Nothing is pressed |
@@ -123,7 +129,7 @@ on them.
 
 The game's own keys are as the game sets them: W, A, S and D or the
 arrows to move, Control or the left mouse button to fire, Enter or F to
-use, R to reload, the number keys for weapons, G and X to kick. F does
+use, R to reload, the number keys for weapons, G to kick. F does
 not use the same thing twice by accident - a button pressed twice works
 its door twice: pressed again within 15 seconds, near what it just
 used, it says "Just used. F twice quickly uses it again".
@@ -178,9 +184,9 @@ way is told as you go:
 - "Getting closer", "Getting further" or "Not getting closer", every
   twelve seconds or so while you walk - along the way round the walls,
   once it is worked out - so you know you are not going round in circles.
-- "New place 4, by the switch", as you come to a room or a crossing,
-  and "Back in place 4, by the switch" when you come back to it; F1 says
-  which place you are in. "You were here 3 minutes ago", when you walk
+- "New area, area 4. 2 doors out, 1 to a new area. 3 things left
+  here", as you come into an area, and "Back in area 4. 1 thing left
+  here" when you come back to it; F1 says which area you are in. "You were here 3 minutes ago", when you walk
   back onto somewhere else you were at a minute or more ago, marker or
   none; and "Back at waypoint 2, by the button" when you come back to
   one of your waypoints.
@@ -279,8 +285,8 @@ the menu Escape opens during a mission. It has four pages, each a list
 of settings, Up and Down to go through them and Enter to change one:
 
 - **What you are told**: walls, doors, stairs and drops ahead; openings
-  to the side as you walk; the kind of place you walk into; a new place
-  and its ways on; enemies and friends near you; things on the ground;
+  to the side as you walk; the kind of place you walk into; a new area
+  and its doors out; enemies and friends near you; things on the ground;
   furniture as you pass it; and the direction as you turn.
 - **Sounds**: door, ladder, pickup and bump sounds, the crosshair
   ticks, the enemies' sound and the marker's ping.
