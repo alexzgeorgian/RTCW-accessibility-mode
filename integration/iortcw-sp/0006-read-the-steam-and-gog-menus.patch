@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Accessibility mode <noreply@example.invalid>
+Date: Sun, 18 Oct 2026 16:02:14 +0000
+Subject: [PATCH] read the Steam and GOG menus
+
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index b965c93e..ed84098a 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -6192,6 +6192,20 @@ qboolean ItemParse_bordersize( itemDef_t *item, int handle ) {
+ 	return qtrue;
+ }
+ 
++/*
++ * "scralign stretchAll", in the menus of the Steam and GOG releases'
++ * sp_pak4.pk3: how their own engine stretches a piece of the menu across
++ * a wide screen. This engine draws the menus at their own 640 by 480 and
++ * scales the whole, so the keyword and its word are read and set aside -
++ * left unread, every one was an error, and the tester heard menus that
++ * were not the game's.
++ */
++qboolean ItemParse_scralign( itemDef_t *item, int handle ) {
++	pc_token_t token;
++
++	return (qboolean)trap_PC_ReadToken( handle, &token );
++}
++
+ qboolean ItemParse_visible( itemDef_t *item, int handle ) {
+ 	int i;
+ 
+@@ -6658,6 +6672,7 @@ qboolean ItemParse_hideCvar( itemDef_t *item, int handle ) {
+ 
+ 
+ keywordHash_t itemParseKeywords[] = {
++	{"scralign", ItemParse_scralign, NULL},
+ 	{"name", ItemParse_name, NULL},
+ 	{"text", ItemParse_text, NULL},
+ 	{"textfile", ItemParse_textfile, NULL},  //----(SA)	added
+@@ -7226,6 +7241,7 @@ qboolean MenuParse_execKeyInt( itemDef_t *item, int handle ) {
+ // -NERVE - SMF
+ 
+ keywordHash_t menuParseKeywords[] = {
++	{"scralign", ItemParse_scralign, NULL},
+ 	{"font", MenuParse_font, NULL},
+ 	{"name", MenuParse_name, NULL},
+ 	{"fullscreen", MenuParse_fullscreen, NULL},
+diff --git a/SP/code/ui/ui_shared.h b/SP/code/ui/ui_shared.h
+index 20b9ec82..b0a12b4a 100644
+--- a/SP/code/ui/ui_shared.h
++++ b/SP/code/ui/ui_shared.h
+@@ -206,7 +206,7 @@ typedef struct editFieldDef_s {
+ 	int paintOffset;                //
+ } editFieldDef_t;
+ 
+-#define MAX_MULTI_CVARS 32
++#define MAX_MULTI_CVARS 64   /* the Steam release's video modes are 36 */
+ 
+ typedef struct multiDef_s {
+ 	const char *cvarList[MAX_MULTI_CVARS];

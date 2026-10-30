@@ -1,0 +1,977 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index c2c22106..ec738065 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -615,10 +615,13 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i done", done, count ) );
+ 	}
+ 
+-	/* How far the exploring has got, as V says it. */
++	/* Where the player is, and how far the exploring has got, as V
++	   says it. */
+ 	{
+ 		char progress[160];
+ 
++		CG_AccessibilityPlaceText( progress, sizeof( progress ) );
++		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+ 		CG_AccessibilityExploreProgress( progress, sizeof( progress ) );
+ 		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+ 		CG_AccessibilityThingsProgress( progress, sizeof( progress ) );
+@@ -1299,8 +1302,12 @@ void CG_AccessibilityFrame( void ) {
+ 		const char *name = CG_AccessibilityHintName( hint );
+ 
+ 		/* The crosshair slipping off the edge of a door and back is the
+-		   same door: said again only after a pause. */
+-		if ( name && ( hint != eta.spokenHint || cg.time - eta.spokenHintTime > 2000 ) ) {
++		   same door: said again only after a pause. By the word said: a
++		   door's handle and the door itself are two hints, both "Door",
++		   and walking through doors once said "Door" eight times over. */
++		const char *spoken = CG_AccessibilityHintName( eta.spokenHint );
++
++		if ( name && ( !spoken || Q_stricmp( name, spoken ) || cg.time - eta.spokenHintTime > 2000 ) ) {
+ 			/* The exit shows the mission's figures as it comes in view. */
+ 			if ( hint >= HINT_EXIT && hint <= HINT_NOEXIT_FAR && CG_AccessibilityMissionStatsText()[0] ) {
+ 				CG_AccessibilitySay( va( "%s. %s", name, CG_AccessibilityMissionStatsText() ) );
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 7d8025ca..9abc93f8 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2366,6 +2366,8 @@ static struct
+ 	int    stillAt;
+ 	int    switchDoor;
+ 	int    switchAt;
++	int    turnSide;  /* the turn ahead last said */
++	int    turnAt;
+ } eta_wayCue;
+ 
+ static void ETA_WayCueSwitch(void)
+@@ -2428,6 +2430,50 @@ static void ETA_WayCueSwitch(void)
+ 	ETA_AimSay("This door opens with a switch. F turns to it. Switch", opener);
+ }
+ 
++/* " 6 meters, then left.": the way's next turn, for O facing the way,
++   or nothing when it goes on straight or is not known. */
++static const char *ETA_TurnAheadText(void)
++{
++	float distance;
++	int   side, meters;
++
++	if (!CG_AccessibilityMarkerTurn(&distance, &side))
++	{
++		return "";
++	}
++	meters = (int)(distance * ETA_QU_TO_METERS + 0.5f);
++	if (meters < 1)
++	{
++		return va(" %s here.", side == 2 ? "Back" : side < 0 ? "Left" : "Right");
++	}
++	return va(" %d %s, then %s.", meters, meters == 1 ? "meter" : "meters",
++	          side == 2 ? "back" : side < 0 ? "left" : "right");
++}
++
++/* Walking up to a turn of the way, the turn is said as it comes - "Left"
++   - rather than once the player has gone past it: told after, the
++   tester was already metres on. */
++#define ETA_WAYCUE_TURN_AT 80.0f
++
++static void ETA_WayCueTurn(void)
++{
++	float distance;
++	int   side;
++
++	if (!CG_AccessibilityMarkerTurn(&distance, &side) || distance > ETA_WAYCUE_TURN_AT)
++	{
++		return;
++	}
++	if (side == eta_wayCue.turnSide && cg.time - eta_wayCue.turnAt < ETA_WAYCUE_REPEAT_MS && cg.time >= eta_wayCue.turnAt)
++	{
++		return;
++	}
++	eta_wayCue.turnSide = side;
++	eta_wayCue.turnAt   = cg.time;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(side == 2 ? "Back" : side < 0 ? "Left" : "Right");
++}
++
+ static void ETA_WayCueFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -2452,6 +2498,8 @@ static void ETA_WayCueFrame(void)
+ 		return;
+ 	}
+ 
++	ETA_WayCueTurn();
++
+ 	/* Positive is to the left: the engine's own sense. */
+ 	rel  = AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW]);
+ 	side = fabs(rel) < 35.0f ? 0 : fabs(rel) > 125.0f ? 2 : (rel > 0.0f ? -1 : 1);
+@@ -2655,6 +2703,32 @@ static qboolean ETA_OpeningToward(float wanted, float *yaw)
+ 	return qfalse;
+ }
+ 
++/* The door, if one stands closed just ahead along a yaw: its entity, or
++   -1. */
++#define ETA_DOOR_TOWARD 96.0f
++
++static int ETA_DoorToward(float yaw)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	trace_t             trace;
++	vec3_t              eye, end, dir;
++	qboolean            opens;
++	int                 model;
++
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++	VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++	VectorMA(eye, ETA_DOOR_TOWARD, dir, end);
++	CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_PLAYERSOLID);
++	if (trace.fraction >= 1.0f || trace.entityNum >= ENTITYNUM_WORLD
++	    || cg_entities[trace.entityNum].currentState.eType != ET_MOVER)
++	{
++		return -1;
++	}
++	model = cg_entities[trace.entityNum].currentState.modelindex;
++	return CG_AccessibilityDoorModel(model, &opens) ? trace.entityNum : -1;
++}
++
+ static void ETA_FaceTheWayNow(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -2676,6 +2750,36 @@ static void ETA_FaceTheWayNow(void)
+ 	{
+ 		VectorSubtract(target, ps->origin, delta);
+ 		delta[2] = 0.0f;
++
++		/* A closed door the way goes through, just ahead: no opening is
++		   found through it, and the nearest one either side led away from
++		   it - or, with none, the marker's whole report was said. It is
++		   faced, and F opens it. */
++		if (VectorLength(delta) >= 16.0f)
++		{
++			int door = ETA_DoorToward(vectoyaw(delta));
++
++			if (door >= 0)
++			{
++				int            model = cg_entities[door].currentState.modelindex;
++				etaAimTarget_t way;
++				vec3_t         dir, doorAt, opener;
++
++				memset(&way, 0, sizeof(way));
++				way.entityNum = -1;
++				VectorNormalize2(delta, dir);
++				VectorMA(ps->origin, 256.0f, dir, way.point);
++				way.point[2] = ps->origin[2] + ps->viewheight;
++				ETA_AimStartSnap(&way, NULL);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				VectorAdd(cg_entities[door].lerpOrigin, cgs.inlineModelMidpoints[model], doorAt);
++				ETA_Speech_Say(CG_AccessibilityDoorOpener(model, doorAt, opener)
++				               ? "Facing the way. A door, that opens with a switch"
++				               : "Facing the way. A door: F opens it");
++				return;
++			}
++		}
++
+ 		if (VectorLength(delta) >= 16.0f && ETA_OpeningToward(vectoyaw(delta), &yaw))
+ 		{
+ 			etaAimTarget_t way;
+@@ -2705,10 +2809,10 @@ static void ETA_FaceTheWayNow(void)
+ 					ETA_HudNarrator_HeightText(toward[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 					Q_strncpyz(what, name, sizeof(what));
+ 					what[0] = (char)toupper((unsigned char)what[0]);
+-					ETA_Speech_Say(va("%s. %s, %d meters%s%s",
++					ETA_Speech_Say(va("%s.%s %s, %d meters%s%s",
+ 					                  fabsf(AngleSubtract(yaw, vectoyaw(delta))) > 15.0f
+ 					                  ? "Facing the opening nearest the way" : "Facing the way",
+-					                  what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++					                  ETA_TurnAheadText(), what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
+ 				}
+ 				else
+ 				{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 6660911a..9a135585 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -164,6 +164,7 @@ typedef struct
+ 	qboolean done;        /* the current search has finished */
+ 	int      doneAt;
+ 	vec3_t   steer;       /* the point along the way */
++	int      steerIndex;  /* which of the way's points it is */
+ 	qboolean steering;    /* steer is from the way, not the straight line */
+ 	vec3_t   aim;         /* where the ping and the turn words point */
+ 	qboolean aimSet;
+@@ -576,6 +577,8 @@ static qboolean ETA_RouteLineAvoided(const float from[3], const float to[3])
+  */
+ #define ETA_ROUTE_SHIFT 8.0f
+ 
++static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3]);
++
+ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ {
+ 	static const float shifts[5] = { 0.0f, ETA_ROUTE_SHIFT, -ETA_ROUTE_SHIFT,
+@@ -618,6 +621,10 @@ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ 		}
+ 
+ 		kind = ETA_RouteMoveExact(context, from, tried);
++		if (kind != ETA_PATH_NONE && ETA_RouteThroughLocked(from, tried))
++		{
++			continue;
++		}
+ 
+ 		if (kind == ETA_PATH_WALK)
+ 		{
+@@ -640,6 +647,97 @@ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ 	return found;
+ }
+ 
++/*
++ * The doors locked for good, closed: walls to the way. The way is the
++ * map's own collision, which has no doors in it - a door opens - so it
++ * went through a door the map locks, the one only the soldiers open near
++ * the end of the first level. From one side of it the way said to go
++ * through; from the door itself, held shut, it was found round; and back
++ * again, it said through. The tester went round and round. One a soldier
++ * has opened stands open, and the way goes through while it does.
++ */
++#define ETA_ROUTE_LOCKED_MAX 32
++
++static struct
++{
++	clipHandle_t clip;
++	vec3_t       origin;
++	vec3_t       mins, maxs;   /* where it stands, and a body's width round it */
++} eta_routeLocked[ETA_ROUTE_LOCKED_MAX];
++static int eta_routeLockedCount;
++
++static void ETA_RouteLockedDoors(void)
++{
++	vec3_t origin, mins, maxs;
++	int    index, model, n, k;
++
++	eta_routeLockedCount = 0;
++	for (index = 0; eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX && CG_AccessibilityLockedDoor(index, &model, origin);
++	     index++)
++	{
++		qboolean open = qfalse;
++
++		for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++		{
++			const entityState_t *es = &cg.snap->entities[n];
++
++			if (es->eType == ET_MOVER && es->modelindex == model)
++			{
++				open = (qboolean)(es->apos.trType != TR_STATIONARY || es->pos.trType != TR_STATIONARY
++				                  || VectorLength(es->apos.trBase) > 1.0f || Distance(es->pos.trBase, origin) > 1.0f);
++				break;
++			}
++		}
++		if (open)
++		{
++			continue;
++		}
++
++		trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++		eta_routeLocked[eta_routeLockedCount].clip = trap_CM_InlineModel(model);
++		VectorCopy(origin, eta_routeLocked[eta_routeLockedCount].origin);
++		for (k = 0; k < 3; k++)
++		{
++			eta_routeLocked[eta_routeLockedCount].mins[k] = origin[k] + mins[k] - 32.0f;
++			eta_routeLocked[eta_routeLockedCount].maxs[k] = origin[k] + maxs[k] + 32.0f;
++		}
++		eta_routeLockedCount++;
++	}
++}
++
++/* Whether a walk from one point to another goes into a door locked shut. */
++static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3])
++{
++	static const vec3_t mins = { -ETA_ROUTE_HALF_WIDTH, -ETA_ROUTE_HALF_WIDTH, -24.0f + 18.0f };
++	static const vec3_t maxs = { ETA_ROUTE_HALF_WIDTH, ETA_ROUTE_HALF_WIDTH, 24.0f };
++	int i, k;
++
++	for (i = 0; i < eta_routeLockedCount; i++)
++	{
++		trace_t trace;
++
++		for (k = 0; k < 3; k++)
++		{
++			if ((from[k] < eta_routeLocked[i].mins[k] && to[k] < eta_routeLocked[i].mins[k])
++			    || (from[k] > eta_routeLocked[i].maxs[k] && to[k] > eta_routeLocked[i].maxs[k]))
++			{
++				break;
++			}
++		}
++		if (k < 3)
++		{
++			continue;
++		}
++		trap_CM_TransformedBoxTrace(&trace, from, to, mins, maxs, eta_routeLocked[i].clip, MASK_PLAYERSOLID,
++		                            eta_routeLocked[i].origin, vec3_origin);
++		if (trace.startsolid || trace.fraction < 1.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /**
+  * @brief How far a player could walk straight from one place toward
+  * another, up to the whole way: the fraction of it that is walkable.
+@@ -762,7 +860,8 @@ static float ETA_RouteWalkable(const vec3_t from, const vec3_t to)
+ 
+ static qboolean ETA_RouteClear(const vec3_t from, const vec3_t to)
+ {
+-	return (qboolean)(ETA_RouteWalkable(from, to) >= 1.0f && !ETA_RouteLineAvoided(from, to));
++	return (qboolean)(ETA_RouteWalkable(from, to) >= 1.0f && !ETA_RouteLineAvoided(from, to)
++	                  && !ETA_RouteThroughLocked(from, to));
+ }
+ 
+ /**
+@@ -842,13 +941,70 @@ int CG_AccessibilityRouteStep(const float from[3], float to[3])
+ 	return ETA_RouteMove(NULL, from, to);
+ }
+ 
++/*
++ * Where the search starts: where the player stands, or a little off it,
++ * where the search's box fits and a step can be taken from. Standing on
++ * the step before a door near the end of the first level, no step from
++ * the player's feet was taken - the box met the door frame - and O said
++ * "No way found from here yet" however often it was pressed.
++ */
++static qboolean ETA_RouteStartFrom(const float at[3])
++{
++	static const vec3_t mins = { -ETA_ROUTE_HALF_WIDTH, -ETA_ROUTE_HALF_WIDTH, -24.0f + 18.0f };
++	static const vec3_t maxs = { ETA_ROUTE_HALF_WIDTH, ETA_ROUTE_HALF_WIDTH, 24.0f };
++	trace_t trace;
++	int     k;
++
++	trap_CM_BoxTrace(&trace, at, at, mins, maxs, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid)
++	{
++		return qfalse;
++	}
++	for (k = 0; k < 8; k++)
++	{
++		float to[3];
++
++		to[0] = at[0] + ETA_ROUTE_CELL * cosf(DEG2RAD(45.0f * k));
++		to[1] = at[1] + ETA_ROUTE_CELL * sinf(DEG2RAD(45.0f * k));
++		to[2] = at[2];
++		if (ETA_RouteMove(NULL, at, to) != ETA_PATH_NONE)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++static void ETA_RouteStartAt(const vec3_t origin, float out[3])
++{
++	static const float offsets[17][2] =
++	{
++		{ 0, 0 },
++		{ 8, 0 }, { -8, 0 }, { 0, 8 }, { 0, -8 }, { 8, 8 }, { -8, 8 }, { -8, -8 }, { 8, -8 },
++		{ 16, 0 }, { -16, 0 }, { 0, 16 }, { 0, -16 }, { 16, 16 }, { -16, 16 }, { -16, -16 }, { 16, -16 }
++	};
++	int lift, i;
++
++	for (lift = 0; lift <= 16; lift += 8)
++	{
++		for (i = 0; i < 17; i++)
++		{
++			VectorSet(out, origin[0] + offsets[i][0], origin[1] + offsets[i][1], origin[2] + lift);
++			if (ETA_RouteStartFrom(out))
++			{
++				return;
++			}
++		}
++	}
++	VectorCopy(origin, out);
++}
++
+ static void ETA_RoutePlanWith(qboolean jumps)
+ {
+ 	float start[3], goal[3];
+ 
+-	start[0] = cg.predictedPlayerState.origin[0];
+-	start[1] = cg.predictedPlayerState.origin[1];
+-	start[2] = cg.predictedPlayerState.origin[2];
++	ETA_RouteLockedDoors();
++	ETA_RouteStartAt(cg.predictedPlayerState.origin, start);
+ 	goal[0]  = eta_marker.origin[0];
+ 	goal[1]  = eta_marker.origin[1];
+ 	goal[2]  = eta_marker.origin[2];
+@@ -1317,6 +1473,7 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ 
+ 	ETA_PathFinder_Point(best, point);
+ 	VectorCopy(point, eta_route.steer);
++	eta_route.steerIndex = best;
+ 	eta_route.steering = qtrue;
+ 	eta_route.overEdge = (qboolean)(best == special);
+ }
+@@ -1942,6 +2099,60 @@ qboolean CG_AccessibilityMarkerSteerPoint(vec3_t out)
+ 	return qtrue;
+ }
+ 
++/*
++ * The next turn of the way: how far ahead, and which way it goes - -1
++ * left, 1 right, 2 back. The point the ping is on is the furthest along
++ * the way the player can walk to straight; past it, the way bends. The
++ * tester, turned to face the way, was told only how far the marker was,
++ * and walked on past the corner. qfalse with no way known, or none to
++ * turn.
++ */
++#define ETA_ROUTE_TURN_PAST  64.0f   /* this far on past the point: the way's new heading */
++#define ETA_ROUTE_TURN_ANGLE 35.0f
++
++qboolean CG_AccessibilityMarkerTurn(float *distance, int *side)
++{
++	const playerState_t *ps    = &cg.predictedPlayerState;
++	int                 count = ETA_PathFinder_PointCount(), i;
++	vec3_t              point, toSteer, past;
++	float               heading, rel;
++
++	if (!eta_marker.active || !eta_route.done || !eta_route.steering || eta_route.aimSet || eta_route.overEdge
++	    || eta_route.steerIndex <= 0 || eta_route.steerIndex >= count - 1)
++	{
++		return qfalse;
++	}
++
++	VectorSubtract(eta_route.steer, ps->origin, toSteer);
++	toSteer[2] = 0.0f;
++	for (i = eta_route.steerIndex + 1; i < count; i++)
++	{
++		ETA_PathFinder_Point(i, point);
++		VectorSubtract(point, eta_route.steer, past);
++		past[2] = 0.0f;
++		if (VectorLength(past) >= ETA_ROUTE_TURN_PAST)
++		{
++			break;
++		}
++	}
++	if (i >= count)
++	{
++		return qfalse;
++	}
++
++	/* Right on the point, the way there has no direction: the player's
++	   own heading is the way they came to it. */
++	heading = VectorLength(toSteer) < 24.0f ? ps->viewangles[YAW] : vectoyaw(toSteer);
++	rel     = AngleNormalize180(vectoyaw(past) - heading);
++	if (fabsf(rel) < ETA_ROUTE_TURN_ANGLE)
++	{
++		return qfalse;
++	}
++	*side     = fabsf(rel) > 125.0f ? 2 : rel > 0.0f ? -1 : 1;
++	*distance = VectorLength(toSteer);
++	return qtrue;
++}
++
+ /**
+  * @brief Where the marker is and what it is called, for the words said
+  * when the player is turned to face the way. qfalse with no marker.
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 4d86fe4f..a0b688e6 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -28,7 +28,7 @@
+  * nearest one left; T again within a few seconds, to the next nearest.
+  *
+  * And when a fight is over - no enemy in sight for a few seconds, after
+- * one was - O leads back to where the player was when it began.
++ * one was - where it began is kept as a waypoint, for L.
+  */
+ 
+ #define ETA_THINGS_MAX       160
+@@ -487,9 +487,11 @@ void CG_AccessibilityThingsFrame(void)
+ 				eta_things.fighting = qfalse;
+ 				if (!ETA_ThingNear(ps->origin, eta_things.fightFrom, ETA_FIGHT_AWAY))
+ 				{
+-					CG_AccessibilityChoose(eta_things.fightFrom, "where the fight began");
++					/* Kept as a waypoint, for L: O stays the way on. */
++					int number = CG_AccessibilityWaypointAt(eta_things.fightFrom, "where the fight began");
++
+ 					ETA_Speech_BeginReport();
+-					ETA_Speech_Say("Fight over. O leads back to where it began");
++					ETA_Speech_Say(va("Fight over. Waypoint %d is where it began. T finds what is left, O leads on", number));
+ 					ETA_Speech_EndReport();
+ 				}
+ 			}
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 8eee9d75..6fc03596 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -63,8 +63,6 @@
+ 
+ /* The new-place callout. */
+ #define ETA_WAYS_SCAN_MOVED 160.0f  /* walked this far: looked again */
+-#define ETA_WAYS_SAY_EVERY  20000
+-#define ETA_WAYS_SAY_MOVED  320.0f
+ #define ETA_WAYS_KNOWN      120.0f  /* the trail this near: not a new place */
+ 
+ typedef enum
+@@ -172,8 +170,6 @@ static struct
+ 	qboolean      keyWaiting;
+ 
+ 	/* The new-place callout. */
+-	int           saidAt;
+-	vec3_t        saidFrom;
+ 	qboolean      background;
+ } eta_ways;
+ 
+@@ -1693,6 +1689,227 @@ static qboolean ETA_WaysKnownPlace(const vec3_t at)
+ 	return qfalse;
+ }
+ 
++/*
++ * Places: the rooms and crossings of the level, numbered as they are come
++ * to and named by what is in them - "New place 4, by the switch. 3 ways
++ * on: 2 doors, 1 doorway", and coming back, "Back in place 4, by the
++ * switch".
++ *
++ * The tester, near the end of a level, could not tell which room they
++ * were in, or whether they had been in it before: "New place" said only
++ * that it was new. They had numbered the places they had to find in
++ * 1428, to know them again. A place is where the look for the ways on
++ * found somewhere to choose - three ways on or more - or a switch; it is
++ * the player's while they are near where it was found and can see it.
++ */
++#define ETA_PLACES_MAX     64
++#define ETA_PLACE_NEAR     240.0f   /* this near, and in sight: in it */
++#define ETA_PLACE_THING    160.0f   /* a thing this near it names it */
++#define ETA_PLACE_BACK_MS  8000     /* "Back in" no oftener */
++
++static struct
++{
++	vec3_t at[ETA_PLACES_MAX];
++	char   name[ETA_PLACES_MAX][48];
++	int    count;
++	int    current;   /* the place the player is in, 1 up, or 0 */
++	int    backAt;
++} eta_places;
++
++static qboolean ETA_PlaceInSight(const vec3_t from, const vec3_t to)
++{
++	trace_t trace;
++	vec3_t  a, b;
++
++	VectorCopy(from, a);
++	VectorCopy(to, b);
++	a[2] += 32.0f;
++	b[2] += 32.0f;
++	trap_CM_BoxTrace(&trace, a, b, vec3_origin, vec3_origin, 0, MASK_SOLID);
++	return (qboolean)(trace.fraction >= 0.97f);
++}
++
++/* The place at a point: the nearest one found there, 1 up, or 0. */
++static int ETA_PlaceAt(const vec3_t at)
++{
++	int   i, best = 0;
++	float bestFar = ETA_PLACE_NEAR;
++
++	for (i = 0; i < eta_places.count; i++)
++	{
++		float dx = eta_places.at[i][0] - at[0], dy = eta_places.at[i][1] - at[1];
++		float far = sqrtf(dx * dx + dy * dy);
++
++		if (far < bestFar && fabsf(eta_places.at[i][2] - at[2]) < ETA_WAYS_SAME_FLOOR
++		    && ETA_PlaceInSight(at, eta_places.at[i]))
++		{
++			best    = i + 1;
++			bestFar = far;
++		}
++	}
++	return best;
++}
++
++/* What a place is known by: a switch in it, or else a thing lying in
++   it, or else its ways. "" when it has no switch and asked for one. */
++static void ETA_PlaceName(const vec3_t at, qboolean switchOnly, char *out, size_t size)
++{
++	vec3_t   point;
++	char     name[64], bestName[64] = "";
++	qboolean item, bestItem = qtrue;
++	float    bestFar = 0.0f;
++	int      i, kind, most = 0, mostKind = 0;
++
++	for (i = 0; CG_AccessibilityMapThing(i, point, name, sizeof(name), &item); i++)
++	{
++		float far = Distance(point, at);
++
++		if (!name[0] || (item && switchOnly) || far >= ETA_PLACE_THING || fabsf(point[2] - at[2]) > 96.0f)
++		{
++			continue;
++		}
++		/* A switch before anything lying about; the nearest of each. */
++		if ((!bestName[0] || (!item && bestItem) || (item == bestItem && far < bestFar))
++		    && ETA_PlaceInSight(at, point))
++		{
++			Q_strncpyz(bestName, name, sizeof(bestName));
++			bestItem = item;
++			bestFar  = far;
++		}
++	}
++	if (bestName[0])
++	{
++		/* "Switch for a door": by the switch is enough to know it by. */
++		char *cut = (char *)Q_stristr(bestName, " for a door");
++
++		if (cut)
++		{
++			*cut = '\0';
++		}
++		bestName[0] = (char)tolower((unsigned char)bestName[0]);
++		Com_sprintf(out, size, "by the %s", bestName);
++		return;
++	}
++	if (switchOnly)
++	{
++		out[0] = '\0';
++		return;
++	}
++
++	for (kind = 0; kind < (int)ARRAY_LEN(eta_wayWords); kind++)
++	{
++		int n = 0;
++
++		for (i = 0; i < eta_ways.wayCount; i++)
++		{
++			n += eta_ways.ways[i].kind == (eta_wayKind_t)kind;
++		}
++		if (n > most)
++		{
++			most     = n;
++			mostKind = kind;
++		}
++	}
++	if (most == 1)
++	{
++		Q_strncpyz(name, eta_wayWords[mostKind], sizeof(name));
++		name[0] = (char)tolower((unsigned char)name[0]);
++		Com_sprintf(out, size, "with %s %s", strchr("aeiou", name[0]) ? "an" : "a", name);
++	}
++	else
++	{
++		Com_sprintf(out, size, "with %d %s", most, eta_wayWordsMany[mostKind]);
++	}
++}
++
++/* After a look on its own: a place come to, new or again. */
++static void ETA_PlaceLook(void)
++{
++	char summary[256], name[48];
++	int  at = ETA_PlaceAt(eta_ways.start);
++
++	if (at)
++	{
++		if (at != eta_places.current)
++		{
++			eta_places.current = at;
++			if (eta_waysCallouts.integer
++			    && (cg.time - eta_places.backAt >= ETA_PLACE_BACK_MS || cg.time < eta_places.backAt))
++			{
++				eta_places.backAt = cg.time;
++				ETA_Speech_BeginReport();
++				ETA_Speech_Say(va("Back in place %d, %s", at, eta_places.name[at - 1]));
++				ETA_Speech_EndReport();
++			}
++		}
++		return;
++	}
++
++	name[0] = '\0';
++	if (eta_ways.wayCount < 3)
++	{
++		ETA_PlaceName(eta_ways.start, qtrue, name, sizeof(name));
++		if (!name[0])
++		{
++			/* A corridor, or a room with one way in and one out: no
++			   place of its own, and none the player is in. */
++			if (eta_places.current && Distance(eta_ways.start, eta_places.at[eta_places.current - 1]) > ETA_PLACE_NEAR)
++			{
++				eta_places.current = 0;
++			}
++			return;
++		}
++	}
++	if (eta_places.count >= ETA_PLACES_MAX)
++	{
++		return;
++	}
++	if (!name[0])
++	{
++		ETA_PlaceName(eta_ways.start, qfalse, name, sizeof(name));
++	}
++
++	VectorCopy(eta_ways.start, eta_places.at[eta_places.count]);
++	Q_strncpyz(eta_places.name[eta_places.count], name, sizeof(eta_places.name[0]));
++	eta_places.count++;
++	eta_places.current = eta_places.count;
++	eta_places.backAt  = cg.time;
++
++	if (eta_waysCallouts.integer)
++	{
++		ETA_WaysSummary(summary, sizeof(summary));
++		ETA_Speech_BeginReport();
++		ETA_Speech_Say(va("%s %d, %s. %s", ETA_WaysKnownPlace(eta_ways.start) ? "Place" : "New place",
++		                  eta_places.count, name, summary));
++		ETA_Speech_EndReport();
++	}
++}
++
++/* The place at a point, for the trail (cg_accessibility_world.c): 1 up,
++   or 0. */
++int CG_AccessibilityPlaceAt(const vec3_t at)
++{
++	return ETA_PlaceAt(at);
++}
++
++/* For F1: "In place 3, by the switch, of 5 found". */
++void CG_AccessibilityPlaceText(char *out, size_t size)
++{
++	if (!eta_places.count)
++	{
++		Q_strncpyz(out, "No places found yet", size);
++	}
++	else if (eta_places.current)
++	{
++		Com_sprintf(out, size, "In place %d, %s, of %d found", eta_places.current,
++		            eta_places.name[eta_places.current - 1], eta_places.count);
++	}
++	else
++	{
++		Com_sprintf(out, size, "Between places, %d found", eta_places.count);
++	}
++}
++
+ /**
+  * @brief Each frame: the look F3 is waiting on, and a look on its own
+  * after the player has walked a way, for "New place, 3 ways on".
+@@ -1730,19 +1947,9 @@ void CG_AccessibilityWaysFrame(void)
+ 			return;
+ 		}
+ 
+-		if (eta_ways.background && eta_waysCallouts.integer && eta_ways.wayCount >= 3
+-		    && (cg.time - eta_ways.saidAt >= ETA_WAYS_SAY_EVERY || cg.time < eta_ways.saidAt)
+-		    && Distance(eta_ways.start, eta_ways.saidFrom) >= ETA_WAYS_SAY_MOVED
+-		    && !ETA_WaysKnownPlace(eta_ways.start))
++		if (eta_ways.background)
+ 		{
+-			char summary[256];
+-
+-			eta_ways.saidAt = cg.time;
+-			VectorCopy(eta_ways.start, eta_ways.saidFrom);
+-			ETA_WaysSummary(summary, sizeof(summary));
+-			ETA_Speech_BeginReport();
+-			ETA_Speech_Say(va("New place, %s", summary));
+-			ETA_Speech_EndReport();
++			ETA_PlaceLook();
+ 		}
+ 		return;
+ 	}
+@@ -1760,9 +1967,9 @@ void CG_AccessibilityWaysFrame(void)
+ void CG_AccessibilityWaysReset(void)
+ {
+ 	memset(&eta_ways, 0, sizeof(eta_ways));
+-	VectorSet(eta_ways.saidFrom, 99999.0f, 99999.0f, 99999.0f);
+ 	memset(&eta_frontier, 0, sizeof(eta_frontier));
+ 	eta_frontier.target = -1;
++	memset(&eta_places, 0, sizeof(eta_places));
+ }
+ 
+ #endif
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 18716d46..865ad86c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4250,11 +4250,37 @@ void CG_AccessibilityStuckFrame(playerState_t *ps, playerState_t *ops)
+ 
+ static void ETA_WorldRead(void);
+ 
+-/* Chosen with L, and led to once O is pressed. */
++/* Chosen with L, and led to once O is pressed - for a while: a choice
++   left standing is forgotten, and O goes back to leading on. */
+ static qboolean eta_chosenSet;
++static int      eta_chosenAt;
+ static vec3_t   eta_chosenPoint;
+ static char     eta_chosenName[64];
+ 
++#define ETA_CHOSEN_MS 20000
++
++/* Where O last led: the marker is O's own while it is still there. The
++   tester, led to a thing by T, pressed O to go on and was turned to the
++   thing instead - every key that led somewhere shared O. */
++static vec3_t eta_oPoint;
++static char   eta_oName[64];
++
++static qboolean ETA_MarkerIsO(void)
++{
++	vec3_t      origin;
++	const char *name;
++
++	return (qboolean)(CG_AccessibilityMarkerInfo(origin, &name) && eta_oName[0]
++	                  && !Q_stricmp(name, eta_oName) && Distance(origin, eta_oPoint) < 1.0f);
++}
++
++static void ETA_MarkerSetByO(const vec3_t point, const char *name)
++{
++	CG_AccessibilityMarkerSet(point, name);
++	VectorCopy(point, eta_oPoint);
++	Q_strncpyz(eta_oName, name, sizeof(eta_oName));
++}
++
+ static qboolean ETA_ExitPoint(int model, vec3_t out)
+ {
+ 	if (model <= 0 || model >= MAX_MODELS)
+@@ -4280,6 +4306,10 @@ void CG_AccessibilityWayOut(void)
+ 	ETA_WorldRead();
+ 
+ 	/* A place chosen with L: led there now. */
++	if (eta_chosenSet && (cg.time - eta_chosenAt > ETA_CHOSEN_MS || cg.time < eta_chosenAt))
++	{
++		eta_chosenSet = qfalse;
++	}
+ 	if (eta_chosenSet)
+ 	{
+ 		char what[64];
+@@ -4292,13 +4322,14 @@ void CG_AccessibilityWayOut(void)
+ 		what[0] = (char)toupper((unsigned char)what[0]);
+ 		ETA_Speech_Say(va("%s, %d meters%s%s. Follow the ping; O again turns you toward it", what,
+ 		                  meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
+-		CG_AccessibilityMarkerSet(eta_chosenPoint, eta_chosenName);
++		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
+ 		return;
+ 	}
+ 
+ 	/* Pressed again on the way: turned toward the way, and how far it
+-	   is - the walking is the player's. */
+-	if (CG_AccessibilityMarkerActive())
++	   is - the walking is the player's. Only on O's own way: where T, V
++	   or anything else put the marker, O leads on instead. */
++	if (ETA_MarkerIsO())
+ 	{
+ 		CG_AccessibilityFaceTheWay();
+ 		return;
+@@ -4330,7 +4361,7 @@ void CG_AccessibilityWayOut(void)
+ 	                  height[0] ? ", " : "", height));
+ 
+ 	/* The marker goes on it, and its sound leads the way round the walls. */
+-	CG_AccessibilityMarkerSet(best, "the way out");
++	ETA_MarkerSetByO(best, "the way out");
+ }
+ 
+ 
+@@ -4428,6 +4459,13 @@ void CG_AccessibilityWaypointRemember(const vec3_t at, const char *name)
+ 	ETA_Speech_Say(va("Waypoint %d: %s. L finds it again", ETA_WaypointAdd(spot, name), name));
+ }
+ 
++/* A waypoint kept by itself where something happened, as it stands:
++   the number it was given, nothing said. */
++int CG_AccessibilityWaypointAt(const vec3_t at, const char *name)
++{
++	return ETA_WaypointAdd(at, name);
++}
++
+ void CG_AccessibilityWaypointPlace(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -4568,6 +4606,7 @@ static void ETA_DestinationStep(int step)
+ 		VectorCopy(point, eta_chosenPoint);
+ 		Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+ 		eta_chosenSet = qtrue;
++		eta_chosenAt  = cg.time;
+ 		return;
+ 	}
+ 
+@@ -4625,6 +4664,7 @@ static void ETA_DestinationStep(int step)
+ 	VectorCopy(point, eta_chosenPoint);
+ 	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+ 	eta_chosenSet = qtrue;
++	eta_chosenAt  = cg.time;
+ }
+ 
+ void CG_AccessibilityWaypointNext(void)
+@@ -4690,6 +4730,27 @@ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ 	VectorCopy(point, eta_chosenPoint);
+ 	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+ 	eta_chosenSet = qtrue;
++	eta_chosenAt  = cg.time;
++}
++
++/* A door the map locks for good - "key" -1, which only the soldiers' own
++   door triggers open - and where it stands closed: for the way
++   (cg_accessibility_route.c), which goes round it. qfalse past the last. */
++qboolean CG_AccessibilityLockedDoor(int index, int *model, vec3_t origin)
++{
++	int i;
++
++	ETA_WorldRead();
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		if (eta_doorLocked[i] == 1 && index-- == 0)
++		{
++			*model = i;
++			VectorCopy(eta_doorOrigins[i], origin);
++			return qtrue;
++		}
++	}
++	return qfalse;
+ }
+ 
+ qboolean CG_AccessibilityExitPoint(const vec3_t from, vec3_t out)
+@@ -4826,7 +4887,8 @@ static void ETA_TrailFrame(void)
+ 			}
+ 		}
+ 
+-		if (ago >= 0)
++		/* In a place of the ways' own, "Back in place 3" says it. */
++		if (ago >= 0 && !CG_AccessibilityPlaceAt(ps->origin))
+ 		{
+ 			eta_trail.saidAt = cg.time;
+ 			VectorCopy(ps->origin, eta_trail.saidFrom);
+@@ -4867,6 +4929,7 @@ void CG_AccessibilityWorldInit(void)
+ 	eta_destinationStamp = -2;
+ 	memset(&eta_trail, 0, sizeof(eta_trail));
+ 	eta_chosenSet     = qfalse;
++	eta_oName[0]      = '\0';
+ 	CG_AccessibilityMarkerReset();
+ 	CG_AccessibilityWaysReset();
+ 	CG_AccessibilityThingsReset();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 875bc8f3..ca24da35 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2223,6 +2223,7 @@ void CG_AccessibilitySurroundings( void );
+ void CG_AccessibilityWayOut( void );
+ void CG_AccessibilityFacing_f( void );
+ void CG_AccessibilityWaypointRemember( const vec3_t at, const char *name );
++int CG_AccessibilityWaypointAt( const vec3_t at, const char *name );
+ void CG_AccessibilityEnemyLock_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );
+@@ -2243,6 +2244,7 @@ qboolean CG_AccessibilityMarkerLadderNext( void );
+ qboolean CG_AccessibilityMarkerInfo( vec3_t origin, const char **name );
+ void CG_AccessibilityFaceTheWay( void );
+ qboolean CG_AccessibilityMarkerWayKnown( void );
++qboolean CG_AccessibilityMarkerTurn( float *distance, int *side );
+ void CG_AccessibilityMarkerBlocked( const vec3_t at, float radius );
+ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+@@ -2251,6 +2253,7 @@ void CG_AccessibilityMarkerClear( void );
+ int CG_AccessibilityRouteStep( const float from[3], float to[3] );
+ void CG_AccessibilityChoose( const vec3_t point, const char *name );
+ qboolean CG_AccessibilityExitPoint( const vec3_t from, vec3_t out );
++qboolean CG_AccessibilityLockedDoor( int index, int *model, vec3_t origin );
+ float CG_AccessibilityWayOutFar( const vec3_t from, const vec3_t exitPoint );
+ int CG_AccessibilityTrailPoint( int index, vec3_t out );
+ void CG_AccessibilityWaysOn( void );
+@@ -2258,6 +2261,8 @@ void CG_AccessibilityWaysFrame( void );
+ void CG_AccessibilityWaysReset( void );
+ void CG_AccessibilityExplore( void );
+ void CG_AccessibilityExploreProgress( char *out, size_t size );
++int CG_AccessibilityPlaceAt( const vec3_t at );
++void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );
+ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );

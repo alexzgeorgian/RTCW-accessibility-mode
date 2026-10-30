@@ -1,0 +1,54 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 6d9a3149..a8f91eda 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -178,6 +178,7 @@ static void UI_AccessibilityMenus( void );
+ static void UI_AccessibilityCloseMenus( void );
+ static void UI_AccessibilityLeave( void );
+ static qboolean UI_AccessibilitySetupPage( const char *name );
++static qboolean UI_AccessibilityIngamePage( const char *name );
+ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+ static qboolean UI_AccessibilityKey( int key );
+ static void UI_AccessibilityUpdateFrame( int realtime );
+@@ -7033,6 +7034,15 @@ void _UI_KeyEvent( int key, qboolean down ) {
+ 			Menus_ActivateByName( "setup_menu" );
+ 			return;
+ 		}
++		/* The same in the paused game: Escape on Save, Load, Controls,
++		   Options or System goes back to the paused game's menu, not out
++		   of the menus and into the fight. */
++		if ( down && key == K_ESCAPE && menu && menu->window.name && !g_waitingForKey
++			 && UI_AccessibilityIngamePage( menu->window.name ) ) {
++			Menus_CloseByName( menu->window.name );
++			Menus_ActivateByName( "ingame" );
++			return;
++		}
+ #endif
+ 		if ( menu ) {
+ 			if ( key == K_ESCAPE && down && !Menus_AnyFullScreenVisible()
+@@ -8178,6 +8188,25 @@ static qboolean UI_AccessibilitySetupPage( const char *name ) {
+ 	return qfalse;
+ }
+ 
++/* A page of the paused game's menu, open over it. */
++static qboolean UI_AccessibilityIngamePage( const char *name ) {
++	static const char *pages[] = {
++		"ingame_save", "ingame_load", "ingame_controls", "ingame_options", "ingame_system", "ingame_leave"
++	};
++	menuDef_t *ingame = Menus_FindByName( "ingame" );
++	int i;
++
++	if ( !ingame || !( ingame->window.flags & WINDOW_VISIBLE ) ) {
++		return qfalse;
++	}
++	for ( i = 0; i < (int)ARRAY_LEN( pages ); i++ ) {
++		if ( !Q_stricmp( name, pages[i] ) ) {
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static void UI_AccessibilityMenus( void ) {
+ 	pc_token_t token;
+ 	int handle;

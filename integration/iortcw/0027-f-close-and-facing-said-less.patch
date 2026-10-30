@@ -1,0 +1,87 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 636f6f69..2820e78f 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -61,7 +61,7 @@ static const struct {
+ 	const char *defaultValue;
+ } etaSettings[] = {
+ 	{ &eta_environmentCallouts, "eta_environmentCallouts", "1" },
+-	{ &eta_facingCallouts,      "eta_facingCallouts",      "1" },
++	{ &eta_facingCallouts,      "eta_facingCallouts",      "0" },
+ 	{ &eta_placeCallouts,       "eta_placeCallouts",       "1" },
+ 	{ &eta_openingCallouts,     "eta_openingCallouts",     "1" },
+ 	{ &eta_doorCues,            "eta_doorCues",            "1" },
+@@ -679,6 +679,22 @@ void CG_AccessibilityInit( void ) {
+ 	}
+ 	CG_AccessibilityWorldInit();
+ 
++	/* Settings whose default has changed since a player's config was
++	   written, changed once for them: the facing callouts, said while
++	   turning, which the tester found too much (H says it on asking).
++	   eta_settingsVersion records it, so a player who turns them back on
++	   keeps them on. */
++	{
++		vmCvar_t version;
++
++		trap_Cvar_Register( &version, "eta_settingsVersion", "0", CVAR_ARCHIVE );
++		if ( version.integer < 1 ) {
++			trap_Cvar_Set( "eta_facingCallouts", "0" );
++			trap_Cvar_Update( &eta_facingCallouts );
++			trap_Cvar_Set( "eta_settingsVersion", "1" );
++		}
++	}
++
+ 	trap_AddCommand( "accessibilityStatus" );
+ 	trap_AddCommand( "accessibilityObjectives" );
+ 	trap_AddCommand( "accessibilityRepeat" );
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f96e1e4a..5fde3ff4 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -159,12 +159,12 @@ static void ETA_TurnStopStep(qboolean arrived)
+ 		   remove. Marked held so the compass does not say it again. */
+ 		ETA_HudNarrator_SetFacingHeld(facing);
+ 
+-		if (eta_facingCallouts.integer)
+-		{
+-			ETA_Speech_BeginReport();
+-			ETA_HudNarrator_SpeakFacing(facing);
+-			ETA_Speech_EndReport();
+-		}
++		/* Asked for with a tap, so said whatever the facing callouts are:
++		   those, said while turning any other way, are off by default
++		   now - the tester found them too much - and H says it. */
++		ETA_Speech_BeginReport();
++		ETA_HudNarrator_SpeakFacing(facing);
++		ETA_Speech_EndReport();
+ 	}
+ }
+ 
+@@ -1141,6 +1141,9 @@ static void ETA_FollowFrame(void)
+  *     chosen with K and J;
+  *   - with nothing close by at all, the key does what it always did.
+  */
++/* How near the nearest thing must be for F alone to turn to it. */
++#define ETA_F_CLOSE_METERS 4.0f
++
+ /* Whether the game's icon under the crosshair is something use does
+    something with. */
+ static qboolean ETA_HintUsable(int hint)
+@@ -1340,6 +1343,17 @@ void CG_AccessibilityActivateDown_f(void)
+ 	eta_aim.cycleIndex = index;
+ 	eta_aim.cycleAt    = cg.time;
+ 
++	/* F is for what is close; further off, up to fifteen metres, is K's
++	   and J's - the tester asked for the two to be kept apart. Use is
++	   still pressed, as the plain key would. */
++	if (list[index].meters > ETA_F_CLOSE_METERS)
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("Nothing close. K finds things further off");
++		ETA_UseKey(qtrue);
++		return;
++	}
++
+ 	/* Stairs: turned to their foot, and from there up or down them. */
+ 	if (list[index].stairs)
+ 	{

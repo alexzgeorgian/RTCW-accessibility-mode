@@ -1,0 +1,698 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 489da7e..ecc839b 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -24,6 +24,7 @@
+ #include "speech/speech_manager.h"
+ 
+ #define ETA_MAX_OBJECTIVES 8
++#define ETA_PENDING_LINES 6
+ 
+ static struct {
+ 	qboolean started;
+@@ -41,8 +42,26 @@ static struct {
+ 	int numObjectiveTexts;
+ 	char objectiveText[ETA_MAX_OBJECTIVES][256];
+ 	char objectivesWhy[256];
++	char cameraName[MAX_QPATH];  /* the cutscene shot playing */
++	int cameraShot;              /* eta_cameraShots: pictures taken of it */
++	int cameraShotTime;
++	int cameraCount;             /* shots started on this map */
++	struct {
++		char text[512];
++		int due;                 /* cg.time it may be said from */
++		int shot;                /* the shot it belongs to */
++	} pending[ETA_PENDING_LINES]; /* descriptions waiting their moment */
++	int numPending;
++	qboolean announceCutscene;   /* "Cutscene. Escape skips it" still to say */
++	int cutsceneStarted;
++	int voiceUntil;              /* a character is speaking until then */
++	int describingUntil;         /* our own last line, roughly, until then */
+ } eta;
+ 
++#include "cg_accessibility_cutscenes.h"
++
++static qboolean etaCutsceneSaid[ARRAY_LEN( etaCutsceneLines )];
++
+ static void CG_AccessibilitySay( const char *text ) {
+ 	if ( text && text[0] ) {
+ 		ETA_Speech_Say( text );
+@@ -497,6 +516,7 @@ static void CG_AccessibilityReadScreen_f( void ) {
+ void CG_AccessibilityInit( void ) {
+ 	ETA_AccessibilityRuntime_Init();
+ 	memset( &eta, 0, sizeof( eta ) );
++	memset( etaCutsceneSaid, 0, sizeof( etaCutsceneSaid ) );
+ 	eta.weapon = -1;
+ 	eta.health = -1;
+ 
+@@ -566,6 +586,211 @@ void CG_AccessibilityPickup( int itemNum ) {
+ 	}
+ }
+ 
++/*
++ * How long a sound file plays, from its WAV header: the data's size over
++ * its rate, channels and sample size. Read once a file, then kept.
++ */
++#define ETA_VOICE_CACHE 256
++
++static struct {
++	char name[MAX_QPATH];
++	int ms;
++} etaVoiceLengths[ETA_VOICE_CACHE];
++static int etaVoiceLengthCount;
++
++static int CG_AccessibilitySoundLength( const char *file ) {
++	fileHandle_t f;
++	byte header[512];
++	int len, read, i, rate = 0, channels = 0, bits = 0, data = 0;
++
++	for ( i = 0; i < etaVoiceLengthCount; i++ ) {
++		if ( !Q_stricmp( etaVoiceLengths[i].name, file ) ) {
++			return etaVoiceLengths[i].ms;
++		}
++	}
++
++	len = trap_FS_FOpenFile( file, &f, FS_READ );
++	if ( !f ) {
++		return 0;
++	}
++	read = len < (int)sizeof( header ) ? len : (int)sizeof( header );
++	trap_FS_Read( header, read, f );
++	trap_FS_FCloseFile( f );
++
++	/* RIFF, then chunks: "fmt " for the rate, "data" for the size. */
++	for ( i = 12; i + 8 <= read; ) {
++		int size = header[i + 4] | ( header[i + 5] << 8 ) | ( header[i + 6] << 16 ) | ( header[i + 7] << 24 );
++
++		if ( !memcmp( header + i, "fmt ", 4 ) && i + 24 <= read ) {
++			channels = header[i + 10] | ( header[i + 11] << 8 );
++			rate = header[i + 12] | ( header[i + 13] << 8 ) | ( header[i + 14] << 16 ) | ( header[i + 15] << 24 );
++			bits = header[i + 22] | ( header[i + 23] << 8 );
++		} else if ( !memcmp( header + i, "data", 4 ) ) {
++			data = size;
++			break;
++		}
++		if ( size < 0 ) {
++			break;
++		}
++		i += 8 + size + ( size & 1 );
++	}
++
++	if ( rate <= 0 || channels <= 0 || bits <= 0 || data <= 0 ) {
++		/* Not one we can read - compressed, say: a few seconds. */
++		data = 0;
++	}
++	i = data ? (int)( (double)data * 1000.0 / ( (double)rate * channels * ( bits / 8 ) ) ) : 3000;
++
++	if ( etaVoiceLengthCount < ETA_VOICE_CACHE ) {
++		Q_strncpyz( etaVoiceLengths[etaVoiceLengthCount].name, file, sizeof( etaVoiceLengths[0].name ) );
++		etaVoiceLengths[etaVoiceLengthCount].ms = i;
++		etaVoiceLengthCount++;
++	}
++	return i;
++}
++
++/*
++ * A character speaking, in a cutscene: the descriptions wait until they
++ * have finished, and say what is seen in the gap after.
++ */
++static const char *etaVoiceEffects[] = { "sound/movers/", "slide_eject", "knock", "soldiers_running", "scuffle",
++										   "misc_da_dum", "misc_whistle", "crypt_shiver", "sound/world/",
++										   "lightning", "thunder", "misc_cough", "door_close", "eg_solo_loop",
++										   "ss_powerup", "war_giant", "pillar_raise", "heinr127" };
++
++void CG_AccessibilityVoice( const char *soundFile ) {
++	int until, i;
++
++	if ( !cg.cameraMode || !soundFile || !strstr( soundFile, ".wav" ) ) {
++		return;
++	}
++	/* Sound effects on the voice channel are not anyone talking, and
++	   a description may be said over them. */
++	for ( i = 0; i < (int)ARRAY_LEN( etaVoiceEffects ); i++ ) {
++		if ( strstr( soundFile, etaVoiceEffects[i] ) ) {
++			return;
++		}
++	}
++	until = cg.time + CG_AccessibilitySoundLength( soundFile );
++	if ( until > eta.voiceUntil ) {
++		eta.voiceUntil = until;
++	}
++}
++
++/* A gap long enough to say something in. */
++#define ETA_DESCRIBE_GAP_MS 250
++
++/*
++ * Every frame of a cutscene: the next description whose moment has come,
++ * once nobody is speaking - neither a character, nor our last line.
++ * "Cutscene. Escape skips it" goes with the first, as one line, for
++ * VoiceOver; alone, if no description comes in the first moments.
++ */
++static void CG_AccessibilityDescribe( void ) {
++	int i, next = -1;
++
++	for ( i = 0; i < eta.numPending; i++ ) {
++		if ( eta.pending[i].due <= cg.time && ( next < 0 || eta.pending[i].due < eta.pending[next].due ) ) {
++			next = i;
++		}
++	}
++
++	if ( cg.time < eta.voiceUntil + ETA_DESCRIBE_GAP_MS || cg.time < eta.describingUntil ) {
++		/* Someone is speaking. A start not yet announced still is, after
++		   a moment, so the player knows the keys have stopped. */
++		if ( eta.announceCutscene && cg.time - eta.cutsceneStarted > 1500 && next < 0
++			 && cg.time >= eta.describingUntil ) {
++			CG_AccessibilitySay( "Cutscene. Escape skips it" );
++			eta.announceCutscene = qfalse;
++		}
++		return;
++	}
++
++	if ( next < 0 ) {
++		if ( eta.announceCutscene && cg.time - eta.cutsceneStarted > 1500 ) {
++			CG_AccessibilitySay( "Cutscene. Escape skips it" );
++			eta.announceCutscene = qfalse;
++		}
++		return;
++	}
++
++	{
++		const char *text = eta.announceCutscene
++						   ? va( "Cutscene. Escape skips it. %s", eta.pending[next].text )
++						   : eta.pending[next].text;
++
++		CG_AccessibilitySay( text );
++		eta.describingUntil = cg.time + ETA_Speech_EstimateDurationMs( text );
++		eta.announceCutscene = qfalse;
++		eta.pending[next] = eta.pending[--eta.numPending];
++	}
++}
++
++/*
++ * A cutscene shot starting: the camera file's name, which the shot's
++ * description is kept under.
++ */
++void CG_AccessibilityCamera( const char *name ) {
++	char *dot;
++	int i;
++
++	Q_strncpyz( eta.cameraName, name ? name : "", sizeof( eta.cameraName ) );
++	dot = strrchr( eta.cameraName, '.' );
++	if ( dot ) {
++		*dot = '\0';
++	}
++	eta.cameraShot = 0;
++	eta.cameraShotTime = cg.time + 700;
++	eta.cameraCount++;
++	if ( !eta.map[0] ) {
++		CG_AccessibilityMapName();
++	}
++
++	/* A line from an earlier shot, held back by the talking, is still
++	   said in this one if it is fresh; one long overdue would describe
++	   what is no longer on the screen. */
++	for ( i = 0; i < eta.numPending; ) {
++		if ( cg.time - eta.pending[i].due < 4000 ) {
++			i++;
++			continue;
++		}
++		eta.pending[i] = eta.pending[--eta.numPending];
++	}
++
++	for ( i = 0; i < (int)ARRAY_LEN( etaCutsceneLines ) && eta.numPending < ETA_PENDING_LINES; i++ ) {
++		if ( !CG_AccessibilitySameName( etaCutsceneLines[i].map, eta.map ) ) {
++			continue;
++		}
++		if ( etaCutsceneLines[i].camera
++			 ? CG_AccessibilitySameName( etaCutsceneLines[i].camera, eta.cameraName ) && !etaCutsceneSaid[i]
++			 : etaCutsceneLines[i].shot == eta.cameraCount ) {
++			/* A mission's camera used again later is the same place:
++			   said the first time. */
++			etaCutsceneSaid[i] = qtrue;
++			Q_strncpyz( eta.pending[eta.numPending].text, etaCutsceneLines[i].text,
++						sizeof( eta.pending[eta.numPending].text ) );
++			eta.pending[eta.numPending].due = cg.time + etaCutsceneLines[i].delay;
++			eta.pending[eta.numPending].shot = eta.cameraCount;
++			eta.numPending++;
++		}
++	}
++	CG_Printf( "eta: camera %i %s on %s at %i\n", eta.cameraCount, eta.cameraName, eta.map, cg.time );
++}
++
++/* For writing the descriptions: eta_cameraShots 1 takes a picture of each
++   shot as it starts and every two and a half seconds after. */
++static void CG_AccessibilityCameraShots( void ) {
++	char value[16];
++
++	trap_Cvar_VariableStringBuffer( "eta_cameraShots", value, sizeof( value ) );
++	if ( !atoi( value ) || !eta.cameraName[0] || cg.time < eta.cameraShotTime ) {
++		return;
++	}
++	trap_SendConsoleCommand( va( "screenshotJPEG %s_%02i_%s_%02i\n", eta.map, eta.cameraCount, eta.cameraName, eta.cameraShot ) );
++	eta.cameraShot++;
++	eta.cameraShotTime = cg.time + 2500;
++}
++
+ void CG_AccessibilityFrame( void ) {
+ 	playerState_t *ps;
+ 	int health, hint, bits, mail;
+@@ -590,9 +815,18 @@ void CG_AccessibilityFrame( void ) {
+ 	/* A cutscene: the game takes every key but the three that skip it. */
+ 	if ( cg.cameraMode != eta.camera ) {
+ 		eta.camera = cg.cameraMode;
+-		CG_AccessibilitySay( eta.camera ? "Cutscene. Escape skips it" : "Cutscene over" );
++		if ( eta.camera ) {
++			eta.announceCutscene = qtrue;
++			eta.cutsceneStarted = cg.time;
++		} else {
++			eta.numPending = 0;
++			eta.announceCutscene = qfalse;
++			CG_AccessibilitySay( "Cutscene over" );
++		}
+ 	}
+ 	if ( eta.camera ) {
++		CG_AccessibilityDescribe();
++		CG_AccessibilityCameraShots();
+ 		return;
+ 	}
+ 
+diff --git a/SP/code/cgame/cg_accessibility_cutscenes.h b/SP/code/cgame/cg_accessibility_cutscenes.h
+new file mode 100644
+index 0000000..8503c15
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility_cutscenes.h
+@@ -0,0 +1,160 @@
++/*
++ * Audio description of the campaign's cutscenes: what is seen, said as a
++ * shot starts, or as long into it as what it says takes to happen, and
++ * held while a character is speaking: said in the gap after. In the cutscene
++ * maps each is keyed to the shot's number, counting from one as each
++ * camera starts (the game plays them in the same order every time, and
++ * the same camera is used again for another moment). In a mission, which
++ * a saved game may be loaded into part way, to the camera's name. A shot
++ * with nothing new to see - the same faces, talking - has no line.
++ *
++ * Written by watching each cutscene; eta_cameraShots 1 takes the
++ * pictures they were written from. Each line is timed against the
++ * cutscene's recorded dialogue (the scripts play it the same every time)
++ * to start when what it describes is seen and to end before the next
++ * character speaks, so most are short, and a shot whose talking leaves
++ * no gap goes undescribed rather than talked over.
++ */
++static const struct {
++	const char *map;
++	int shot;           /* in a cutscene map: the shot's number */
++	const char *camera; /* in a mission, which a saved game may be loaded
++	                       into part way: the camera's own name */
++	int delay;          /* ms into the shot: said when it happens, not before */
++	const char *text;
++} etaCutsceneLines[] = {
++	/* The start of the campaign: the OSA learns its agents are taken. */
++{ "cutscene1", 1, NULL, 0, "Night. A red-brick mansion behind lamplit gates, American and British flags flying" },
++	{ "cutscene1", 2, NULL, 0, "A dark office. The Director sits alone at his desk" },
++	{ "cutscene1", 2, NULL, 9500, "Jack, in a grey suit and glasses, comes in" },
++	{ "cutscene1", 6, NULL, 300, "The picture fades to black" },
++	{ "cutscene1", 7, NULL, 0, "A briefing room. Jack at a screen" },
++	{ "cutscene1", 12, NULL, 0, "SS officers" },
++	{ "cutscene1", 14, NULL, 0, "A woman officer" },
++	{ "cutscene1", 15, NULL, 4700, "An SS officer" },
++	{ "cutscene1", 19, NULL, 5100, "Ruined stone walls" },
++	{ "cutscene1", 23, NULL, 0, "Two agents' files on the screen, with photographs and fingerprints" },
++	{ "cutscene1", 26, NULL, 5800, "The picture fades to black" },
++
++	/* Between missions 2 and 3: the OSA meets again. */
++{ "cutscene6", 1, NULL, 0, "The briefing room" },
++	{ "cutscene6", 22, NULL, 0, "The room: the Director at his desk, Jack, and two officers at the table. The picture fades to black" },
++
++	/* Between missions 3 and 4: the Director's office. */
++	{ "cutscene9", 1, NULL, 0, "The Director's office. He sits alone at his desk" },
++	{ "cutscene9", 1, NULL, 6500, "Jack comes in and crosses to the Director's desk" },
++	{ "cutscene9", 16, NULL, 5800, "The office through the curtains again. The picture fades to black" },
++
++	/* Between missions 4 and 5: the Director's office. */
++	{ "cutscene11", 1, NULL, 0, "The office" },
++	{ "cutscene11", 2, NULL, 3800, "Jack at the desk" },
++	{ "cutscene11", 12, NULL, 5500, "Through the curtains, Jack stands at the desk while the Director sits. The picture fades to black" },
++
++	/* Between missions 5 and 6: the office, then the briefing room. */
++	{ "cutscene14", 1, NULL, 0, "The office" },
++	{ "cutscene14", 7, NULL, 0, "Later, the briefing room, Jack and the officers" },
++	{ "cutscene14", 15, NULL, 10600, "A German letter is on screen" },
++	{ "cutscene14", 32, NULL, 5000, "The picture fades to black" },
++
++	/* The end of the campaign: the OSA, then the castle. */
++	{ "cutscene19", 1, NULL, 0, "Daylight. The red-brick mansion behind its gates, the American and British flags flying" },
++	{ "cutscene19", 2, NULL, 0, "The Director's office" },
++	{ "cutscene19", 2, NULL, 7000, "Jack comes in and crosses to the desk" },
++	{ "cutscene19", 13, NULL, 0, "A ruined castle courtyard" },
++	{ "cutscene19", 13, NULL, 3200, "German soldiers run out of the smoke" },
++	{ "cutscene19", 15, NULL, 2400, "Blazkowicz, pistol in hand, walks away. The picture fades to black" },
++
++	/* Mission 1 opens: the castle's dungeon. */
++	{ "escape1", 0, "cs01a_01", 0, "A dungeon, from above" },
++	{ "escape1", 0, "cs01a_01", 6800, "Barred cells. A guard walks past" },
++	{ "escape1", 0, "cs01a_01", 12900, "Torches burn by a spiral stair" },
++	{ "escape1", 0, "cs01a_02", 600, "Through the bars of a cell: shelves of skulls across the passage" },
++	{ "escape1", 0, "cs01a_03", 0, "A torture room: a prisoner on a table" },
++	{ "escape1", 0, "cs01a_05", 0, "The doctor in a green coat bends over the prisoner. A machine crackles on the wall" },
++	{ "escape1", 0, "cs01a_08", 3500, "In a stone hall, a skeleton slumps in an iron cage hung from the ceiling" },
++	{ "escape1", 0, "cs01a_09", 0, "A misty stone corridor, a Nazi banner at its end" },
++	{ "escape1", 0, "cs01a_11", 0, "A guard with a pistol opens a cell door" },
++	{ "escape1", 0, "cs01a_11d", 0, "The picture goes black" },
++
++	/* Mission 2 opens: the village in winter. */
++	{ "village1", 0, "vill1_01", 0, "A snowy village square, stone houses" },
++	{ "village1", 0, "vill1_01", 24200, "Soldiers in white winter uniforms walk the square, round a railed garden, among dark pines" },
++	{ "village1", 0, "vill1_01d", 0, "Under a wooden porch, looking out across the snowy square" },
++
++	/* Mission 2's catacombs open. */
++	{ "crypt1", 0, "crypt01", 0, "A severed arm lies in blood" },
++	{ "crypt1", 0, "crypt05", 1800, "From above, soldiers file round a great stone pillar" },
++	{ "crypt1", 0, "crypt06", 0, "Soldiers run through torchlit catacombs" },
++	{ "crypt1", 0, "crypt08", 700, "A pillared hall: one soldier runs, another waits by crates" },
++	{ "crypt1", 0, "crypt10", 1900, "A wounded soldier crouches behind a ledge, gun ready, another behind him" },
++
++	/* Mission 2, the church. */
++	{ "church", 0, "cs04_01", 0, "A tall stone church, stained glass high above" },
++	{ "church", 0, "cs04_01", 4500, "Someone comes in through a door below" },
++	{ "church", 0, "cs04_03d", 0, "Helga and a man in glasses stand by a tomb with a dead warrior on it. A woman in black leather watches, pistol in hand" },
++
++	/* Mission 2, the tomb. */
++	{ "boss1", 0, "cs05_02", 0, "Night. Looking up past iron spikes at broken stone walls and arches" },
++	{ "boss1", 0, "cs05_03", 8900, "Through iron railings: the man in glasses lies still on the ground, Helga standing over him" },
++
++	/* Mission 4 opens: the secret weapons facility. */
++	{ "swf", 0, "cs10_01", 0, "A concrete pen, a grey submarine moored" },
++	{ "swf", 0, "cs10_03d", 0, "A pilot in goggles, and a bald officer with a monocle in a black leather coat" },
++
++	/* Mission 5, the X-Labs. */
++	{ "xlabs", 0, "xlabs01", 0, "A laboratory hall: tiled floors, catwalks above. On the tables, body parts and machines. Technicians in blue coats, and the bald officer in black" },
++	{ "xlabs", 0, "xlabs04", 0, "Scientists in blue work round dissection tables, an officer in a pale coat among them" },
++	{ "xlabs", 0, "xlabs07", 0, "The bald officer, monocle in his eye, raises a finger as he speaks" },
++	{ "xlabs", 0, "xlabs_10", 0, "A bearded officer in a pale coat and a black cap" },
++	{ "xlabs", 0, "xlabs05", 0, "A technician works a wall of dials while the others bend over the tables" },
++	{ "xlabs", 0, "xlabs12", 0, "The bald officer walks away through the laboratory" },
++
++	/* Mission 6 opens: the dam. */
++	{ "dam", 0, "damb25_01", 0, "A bomber" },
++	{ "dam", 0, "dam_01", 0, "A great dam at night: a control tower, floodlights, a truck by the road, spillways below" },
++	{ "dam", 0, "dam_03d", 0, "Through a wire fence, a guard in a helmet faces a man in an olive flying suit beside a truck" },
++
++	/* Mission 6, unhallowed ground. */
++	{ "dark", 0, "cs15_01", 0, "Fog at night: tall standing stones and dead twisted trees" },
++	{ "dark", 0, "cs15_01", 6500, "A blonde woman in black leather walks among the stones" },
++	{ "dark", 0, "cs15_01", 11500, "Below, two soldiers by a lamp" },
++	{ "dark", 0, "cs15_06", 0, "She walks away into the fog, toward the stones" },
++
++	/* Mission 7, the end: Heinrich. */
++	{ "end", 0, "cs16_01", 0, "Under a full moon, a ring of stone arches and columns on a great stone platform. Fires burn in iron bowls" },
++	{ "end", 0, "cs16_02", 0, "A pale woman with dark-painted eyes, dressed in black, a red cape behind her, among the stones" },
++	{ "end", 0, "cs16_06", 0, "A giant armoured super soldier with a double-barrelled gun towers against the moon" },
++	{ "end", 0, "cs16_05", 0, "The armoured giant faces the woman in red across the platform" },
++	{ "end", 0, "cs16_15", 0, "Black smoke billows up from the ground, and shapes rise out of it" },
++	{ "end", 0, "cs16_08", 0, "A dead warrior climbs out of the earth, with a spear and a round shield" },
++	{ "end", 0, "cs16_07", 0, "A rotting warrior, its skin like old leather, turns its head" },
++	{ "end", 0, "cs16_09", 0, "Another raises a great axe and a round shield" },
++	{ "end", 0, "cs16_11", 0, "The dead warriors stand round the woman in red, among the burning bowls" },
++	{ "end", 0, "cs16_03", 0, "Heinrich rises in spiked armour" },
++	{ "end", 0, "cs16_12", 3300, "She collapses on the stones" },
++	{ "end", 0, "cs16_13", 2600, "Under the arches, Heinrich and his dead warriors. Black smoke rises round them" },
++	{ "end", 0, "cs16_10d", 2500, "Heinrich looks down from beneath the moon" },
++
++	/* Scenes part way through the missions. Played on their own to be
++	   watched, without whatever the characters do in them in play, so
++	   these say the place more than what happens there. */
++	{ "escape1", 0, "cs01a_06", 0, "From above, the torture room: the prisoner strapped to the table, blood on the stones" },
++	{ "tram", 0, "cs02_02", 0, "A stone room under a timbered roof, lamps hanging: wooden doors, benches, war posters on the wall" },
++	{ "church", 0, "cs04_04", 0, "A raised stone floor in the church, torches burning on the pillars" },
++	{ "church", 0, "cs04_08", 0, "A carved stone doorway, a stained-glass window beside it" },
++	{ "boss1", 0, "cs05_01", 0, "Looking up past iron spikes at the tomb's walls and broken arches" },
++	{ "boss1", 0, "cs05_04", 0, "The tomb's high walls and flying buttresses, an iron gate at their foot" },
++	{ "boss1", 0, "cs05_07", 0, "Through an iron gate, the courtyard before the tomb, a body lying on the stones" },
++	{ "boss1", 0, "boss1b25_01", 0, "A bomber flies through the night over snowy mountains, the moon beside it" },
++	{ "forest", 0, "forest02", 0, "A concrete gate set into a green mountainside, an eagle over its door, a striped sentry box beside it" },
++	{ "forest", 0, "forest03", 0, "Between high walls, the way runs up to the gate in the mountain" },
++	{ "assault", 0, "cs08_01", 0, "Looking up a tall shaft of red-lit panels to a hatch far above" },
++	{ "assault", 0, "cs08_02", 0, "From high above, a square hatch open in a grassy hillside" },
++	{ "swf", 0, "swfend2", 0, "Through wire mesh, a bare concrete room with two crates" },
++	{ "boss2", 0, "xss01", 0, "A tiled laboratory: walkways along the walls, windows behind wire mesh" },
++	{ "boss2", 0, "xss02", 0, "A great riveted steel door with an eagle crest, set in a tiled wall" },
++	{ "dam", 0, "dam_08", 0, "At the dam's gate, a man in an olive flying suit stands by a truck, the guard tower above" },
++	{ "dam", 0, "dam_09", 0, "The dam's buildings through the pines, a searchlight sweeping over them" },
++	{ "dam", 0, "dam_10", 0, "The road along the dam: a truck by the gate, the tower, lamps along the top" },
++	{ "end", 0, "cs18_04", 0, "At night on a forest road, a grey six-wheeled staff car stands among the pines" },
++};
+diff --git a/SP/code/cgame/cg_consolecmds.c b/SP/code/cgame/cg_consolecmds.c
+index ece014a..e7d06a0 100644
+--- a/SP/code/cgame/cg_consolecmds.c
++++ b/SP/code/cgame/cg_consolecmds.c
+@@ -282,6 +282,9 @@ void CG_StartCamera( const char *name, qboolean startBlack ) {
+ 		trap_Cvar_Set( "cg_letterbox", "1" ); // go letterbox
+ 		trap_SendClientCommand( "startCamera" );	// camera on in game
+ 		trap_startCamera( CAM_PRIMARY, cg.time );	// camera on in client
++#ifdef FEATURE_ACCESSIBILITY
++		CG_AccessibilityCamera( name );
++#endif
+ 	} else {
+ 		//----(SA)	removed check for cams in main dir
+ 		cg.cameraMode = qfalse;                 // camera off in cgame
+diff --git a/SP/code/cgame/cg_event.c b/SP/code/cgame/cg_event.c
+index 00d552c..b04e27d 100644
+--- a/SP/code/cgame/cg_event.c
++++ b/SP/code/cgame/cg_event.c
+@@ -2303,6 +2303,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
+ 			//s = tempStr;
+ 		}
+ 		// done.
++#ifdef FEATURE_ACCESSIBILITY
++		CG_AccessibilityVoice( CG_ConfigString( CS_SOUNDS + es->eventParm ) );
++#endif
+ 		if ( cgs.gameSounds[ es->eventParm ] ) {
+ 			trap_S_StartSound( NULL, es->number, CHAN_VOICE, cgs.gameSounds[ es->eventParm ] );
+ 		} else {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f8c3f5c..a6c2b09 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2204,6 +2204,8 @@ void CG_AccessibilityFrame( void );
+ qboolean CG_AccessibilityCommand( const char *cmd );
+ void CG_AccessibilityCenterPrint( const char *text );
+ void CG_AccessibilityPickup( int itemNum );
++void CG_AccessibilityCamera( const char *name );
++void CG_AccessibilityVoice( const char *soundFile );
+ #endif
+ void CG_InitConsoleCommands( void );
+ 
+diff --git a/SP/code/cgame/cg_sound.c b/SP/code/cgame/cg_sound.c
+index 21f73d7..47e6804 100644
+--- a/SP/code/cgame/cg_sound.c
++++ b/SP/code/cgame/cg_sound.c
+@@ -148,6 +148,11 @@ void CG_SoundPickOldestRandomSound( soundScript_t *sound, vec3_t org, int entnum
+ 			trap_S_StartLocalSound( oldestSound->sfxHandle, sound->channel );
+ 		}
+ 		oldestSound->lastPlayed = cg.time;
++#ifdef FEATURE_ACCESSIBILITY
++		if ( sound->channel == CHAN_VOICE ) {
++			CG_AccessibilityVoice( oldestSound->filename );
++		}
++#endif
+ 		//
+ 		// shake the view?
+ 		if ( sound->shakeScale ) {
+diff --git a/SP/code/client/cl_cin.c b/SP/code/client/cl_cin.c
+index 698251f..3903c58 100644
+--- a/SP/code/client/cl_cin.c
++++ b/SP/code/client/cl_cin.c
+@@ -1725,6 +1725,11 @@ void CL_PlayCinematic_f( void ) {
+ 
+ 	S_StopAllSounds();
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	/* Which movie, for its description (UI_ACCESSIBILITY_CINEMATIC). */
++	Cvar_Set( "eta_cinematic", arg );
++#endif
++
+ 	if ( bits & CIN_letterBox ) {
+ 		CL_handle = CIN_PlayCinematic( arg, 0, LETTERBOX_OFFSET, SCREEN_WIDTH, SCREEN_HEIGHT - ( LETTERBOX_OFFSET * 2 ), bits );
+ 	} else {
+@@ -1739,6 +1744,16 @@ void CL_PlayCinematic_f( void ) {
+ }
+ 
+ 
++#ifdef FEATURE_ACCESSIBILITY
++/* [Accessibility]: how long the full-screen movie has played, -1 none. */
++int CIN_AccessibilityElapsed( void ) {
++	if ( CL_handle < 0 || CL_handle >= MAX_VIDEO_HANDLES || cinTable[CL_handle].status != FMV_PLAY ) {
++		return -1;
++	}
++	return CL_ScaledMilliseconds() - cinTable[CL_handle].startTime;
++}
++#endif
++
+ void SCR_DrawCinematic( void ) {
+ 	if ( CL_handle >= 0 && CL_handle < MAX_VIDEO_HANDLES ) {
+ 		CIN_DrawCinematic( CL_handle );
+diff --git a/SP/code/client/cl_scrn.c b/SP/code/client/cl_scrn.c
+index 741cb95..4c6a6ae 100644
+--- a/SP/code/client/cl_scrn.c
++++ b/SP/code/client/cl_scrn.c
+@@ -497,6 +497,12 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
+ 			break;
+ 		case CA_CINEMATIC:
+ 			SCR_DrawCinematic();
++#ifdef FEATURE_ACCESSIBILITY
++			/* The movie's own description, said by the ui, which speaks. */
++			if ( uivm && CIN_AccessibilityElapsed() >= 0 ) {
++				VM_Call( uivm, UI_ACCESSIBILITY_CINEMATIC, CIN_AccessibilityElapsed() );
++			}
++#endif
+ 			break;
+ 		case CA_DISCONNECTED:
+ 			// force menu up
+diff --git a/SP/code/client/client.h b/SP/code/client/client.h
+index cf12352..1b4c13d 100644
+--- a/SP/code/client/client.h
++++ b/SP/code/client/client.h
+@@ -668,6 +668,9 @@ void    SCR_DrawSmallChar( int x, int y, int ch );
+ //
+ 
+ void CL_PlayCinematic_f( void );
++#ifdef FEATURE_ACCESSIBILITY
++int CIN_AccessibilityElapsed( void );
++#endif
+ void SCR_DrawCinematic( void );
+ void SCR_RunCinematic( void );
+ void SCR_StopCinematic( void );
+diff --git a/SP/code/ui/ui_accessibility_intro.h b/SP/code/ui/ui_accessibility_intro.h
+new file mode 100644
+index 0000000..509d009
+--- /dev/null
++++ b/SP/code/ui/ui_accessibility_intro.h
+@@ -0,0 +1,34 @@
++/*
++ * The intro movie's description, for eta_movieLines in ui_main.c: the
++ * movie's file, the time into it in milliseconds, and what is seen then.
++ *
++ * Each line starts when what it describes happens, and is short enough
++ * to end before the next one. The movie speaks four times - from 70 to
++ * 83 seconds, 105 to 108, 124 to 130 and 152 to 161 - and no line is
++ * said over those.
++ */
++	{ "wolfintro.RoQ", 0, "Intro movie. Escape skips it. Rain falls on dark rubble. An id Software game" },
++	{ "wolfintro.RoQ", 4600, "Produced by Activision" },
++	{ "wolfintro.RoQ", 9800, "Developed by Gray Matter Studios" },
++	{ "wolfintro.RoQ", 14000, "Return to Castle Wolfenstein" },
++	{ "wolfintro.RoQ", 19500, "943 AD. Ruins in a storm at night" },
++	{ "wolfintro.RoQ", 24000, "A hooded figure with a tall staff stands among broken stone pillars" },
++	{ "wolfintro.RoQ", 30000, "He walks through rubble and fallen bodies" },
++	{ "wolfintro.RoQ", 36000, "A battle in the rain: soldiers in helmets fight armoured warriors" },
++	{ "wolfintro.RoQ", 44000, "A torch burns on the hooded man's staff as warriors fall around him" },
++	{ "wolfintro.RoQ", 50000, "An armoured knight with an axe strides through the ruins" },
++	{ "wolfintro.RoQ", 60000, "Armoured warriors loom in the dark" },
++	{ "wolfintro.RoQ", 66000, "Their leader steps forward in spiked armour" },
++	{ "wolfintro.RoQ", 83200, "Lightning bursts from the hooded man's hand and strikes Heinrich" },
++	{ "wolfintro.RoQ", 87500, "Hooded monks watch from the ruins" },
++	{ "wolfintro.RoQ", 92000, "A sword with a glowing blade lies on the ground" },
++	{ "wolfintro.RoQ", 98000, "Close on the hooded man's face; purple sparks swirl around him" },
++	{ "wolfintro.RoQ", 102400, "He draws a glowing rune on the rock" },
++	{ "wolfintro.RoQ", 108000, "Heinrich is hurled back. A vortex swirls open" },
++	{ "wolfintro.RoQ", 112000, "Heinrich is engulfed in white light. The hooded man raises a glowing amulet" },
++	{ "wolfintro.RoQ", 120000, "Rocks fly in a storm of lightning, then a white flash" },
++	{ "wolfintro.RoQ", 130000, "The hooded man stands alone in the ruins. Around him the ground bursts and stones rise" },
++	{ "wolfintro.RoQ", 140000, "Darkness" },
++	{ "wolfintro.RoQ", 146000, "1943 AD. Daylight. Tall grass and rocks; men dig with shovels behind them" },
++	{ "wolfintro.RoQ", 160600, "A soldier with a red armband uncovers a carved symbol" },
++	{ "wolfintro.RoQ", 164000, "Return to Castle Wolfenstein" },
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index feba7e3..1db9a39 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -182,6 +182,9 @@ void _UI_KeyEvent( int key, qboolean down );
+ void _UI_MouseEvent( int dx, int dy );
+ void _UI_Refresh( int realtime );
+ qboolean _UI_IsFullscreen( void );
++#ifdef FEATURE_ACCESSIBILITY
++void UI_AccessibilityCinematic( int elapsedMs );
++#endif
+ 
+ Q_EXPORT intptr_t vmMain( intptr_t command, intptr_t arg0, intptr_t arg1, intptr_t arg2, intptr_t arg3, intptr_t arg4, intptr_t arg5, intptr_t arg6, intptr_t arg7, intptr_t arg8, intptr_t arg9, intptr_t arg10, intptr_t arg11  ) {
+ 	switch ( command ) {
+@@ -226,6 +229,11 @@ Q_EXPORT intptr_t vmMain( intptr_t command, intptr_t arg0, intptr_t arg1, intptr
+ 		return 0;
+ 	case UI_HASUNIQUECDKEY:             // mod authors need to observe this
+ 		return qtrue;
++#ifdef FEATURE_ACCESSIBILITY
++	case UI_ACCESSIBILITY_CINEMATIC:
++		UI_AccessibilityCinematic( arg0 );
++		return 0;
++#endif
+ 
+ 	}
+ 
+@@ -7947,6 +7955,47 @@ static const struct {
+ 	{ "cdkey_menu",             "CD key",                         qfalse },
+ };
+ 
++/*
++ * The intro movie, described as it plays: each line at its moment, in
++ * the movie's quiet stretches, written by watching it. Called every frame
++ * the movie plays (UI_ACCESSIBILITY_CINEMATIC); a key skips the movie, as
++ * it always has.
++ */
++static const struct {
++	const char *movie;
++	int ms;
++	const char *text;
++} eta_movieLines[] = {
++#include "ui_accessibility_intro.h"
++};
++
++void UI_AccessibilityCinematic( int elapsedMs ) {
++	static char playing[MAX_QPATH];
++	static int next, lastMs;
++	char movie[MAX_QPATH];
++	int i;
++
++	trap_Cvar_VariableStringBuffer( "eta_cinematic", movie, sizeof( movie ) );
++	if ( Q_stricmp( movie, playing ) || elapsedMs < lastMs ) {
++		/* A new movie, or the same one again. */
++		Q_strncpyz( playing, movie, sizeof( playing ) );
++		next = 0;
++	}
++	lastMs = elapsedMs;
++
++	for ( i = next; i < (int)( sizeof( eta_movieLines ) / sizeof( eta_movieLines[0] ) ); i++ ) {
++		if ( Q_stricmp( eta_movieLines[i].movie, movie ) ) {
++			continue;
++		}
++		if ( eta_movieLines[i].ms > elapsedMs ) {
++			break;
++		}
++		ETA_Speech_SayLong( eta_movieLines[i].text );
++		next = i + 1;
++		break;
++	}
++}
++
+ /*
+  * The mission's orders, before it starts. The screen waits on a click
+  * on an arrow that only appears under the pointer, so the keyboard could
+diff --git a/SP/code/ui/ui_public.h b/SP/code/ui/ui_public.h
+index bf59c72..6356fd3 100644
+--- a/SP/code/ui/ui_public.h
++++ b/SP/code/ui/ui_public.h
+@@ -224,6 +224,13 @@ typedef enum {
+ 	UI_DRAW_CONNECT_SCREEN,
+ //	void	UI_DrawConnectScreen( qboolean overlay );
+ 	UI_HASUNIQUECDKEY
++#ifdef FEATURE_ACCESSIBILITY
++	,
++	UI_ACCESSIBILITY_CINEMATIC
++//	void	UI_AccessibilityCinematic( int elapsedMs );
++// [Accessibility]: called every frame a movie plays, with how long it has
++// played; eta_cinematic names it. The intro is described as it plays.
++#endif
+ // if !overlay, the background will be drawn, otherwise it will be
+ // overlayed over whatever the cgame has drawn.
+ // a GetClientState syscall will be made to get the current strings

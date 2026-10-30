@@ -1,0 +1,144 @@
+name: RTCW story game test build
+
+# The story game made from the novel, on RTCW's single player with the
+# accessibility mode: builds the Windows download and publishes it as a
+# prerelease of this repository, rtcw-story-test-N, keeping only the
+# newest. It stays in this private repository while it is a test.
+#
+# The levels are compiled against RTCW's own textures, which come from
+# the "RTCW files package" draft release here; nothing of RTCW's is
+# packed into the download.
+
+on:
+  push:
+    branches:
+      - 'claude/rtcw-story-game'
+    paths:
+      - 'integration/iortcw-sp/**'
+      - 'story/**'
+      - 'release/build-rtcw-story.sh'
+      - 'release/RTCW-STORY-README.txt.in'
+      - 'release/make-cue-sounds.py'
+      - 'src/accessibility/**'
+      - '.github/workflows/rtcw-story-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rtcw-story-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TAG: rtcw-story-test-${{ github.run_number }}
+  # The draft release holding RTCW.files.zip.
+  RTCW_FILES_RELEASE: 412639196
+
+jobs:
+  build:
+    name: Build the story game for Windows, and publish a test build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Install the compilers and libraries
+        timeout-minutes: 15
+        run: |
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            if sudo timeout 300 apt-get $apt_opts update \
+               && sudo timeout 300 apt-get $apt_opts install -y --no-install-recommends \
+                    gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 gcc-multilib \
+                    libglib2.0-dev libxml2-dev libpng-dev libjpeg-dev zip unzip; then
+              exit 0
+            fi
+            echo "::warning::installing the compilers failed or stalled (attempt $attempt of 3)"
+            sleep 10
+          done
+          exit 1
+
+      - name: Build the map tools
+        working-directory: accessibility-mode
+        run: ./story/build-tools.sh "$RUNNER_TEMP/tools"
+
+      - name: Fetch RTCW's game data, to compile the levels against
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RTCW_FILES_RELEASE/assets" \
+                  --jq '.[] | select(.name == "RTCW.files.zip") | .id')
+          [ -n "$asset" ] || { echo "::error::the RTCW files package has no RTCW.files.zip"; exit 1; }
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" \
+            > "$RUNNER_TEMP/rtcw.zip"
+          mkdir -p "$RUNNER_TEMP/rtcw"
+          unzip -q -j "$RUNNER_TEMP/rtcw.zip" '*/pak0.pk3' '*/sp_pak1.pk3' '*/sp_pak2.pk3' '*/sp_pak3.pk3' \
+            -d "$RUNNER_TEMP/rtcw"
+          rm "$RUNNER_TEMP/rtcw.zip"
+          ls -la "$RUNNER_TEMP/rtcw"
+
+      - name: Fetch the NVDA controller client
+        working-directory: accessibility-mode
+        run: ./release/fetch-nvda-client.sh "$RUNNER_TEMP/nvda"
+
+      - name: Build the download
+        working-directory: accessibility-mode
+        run: |
+          ./release/build-rtcw-story.sh --rtcw "$RUNNER_TEMP/rtcw" \
+            --q3map2 "$RUNNER_TEMP/tools/q3map2" --bspc "$RUNNER_TEMP/tools/bspc" \
+            --nvda "$RUNNER_TEMP/nvda" --version "$TAG" --out "$RUNNER_TEMP/out"
+
+      - name: Check the download is what it claims
+        working-directory: ${{ runner.temp }}/out
+        run: |
+          set -e
+          bundle="wolfs-lair-rtcw-$TAG-windows"
+          unzip -q "$bundle.zip" -d extracted
+          for f in ioWolfSP.x64.exe SDL264.dll OpenAL64.dll renderer_sp_opengl1_x64.dll \
+                   nvdaControllerClient.dll nvda/LICENSE.txt iortcw-COPYING.txt README.txt \
+                   "Play the prologue.bat" main/cgame_sp_x64.dll main/ui_sp_x64.dll \
+                   main/qagame_sp_x64.dll main/zzz_story.pk3 main/zzz_accessibility.pk3; do
+            test -s "extracted/$bundle/$f" || { echo "::error::$f is not in the download"; exit 1; }
+          done
+          for f in maps/wl_prologue.bsp maps/wl_prologue_b0.aas maps/wl_prologue.ai; do
+            unzip -l "extracted/$bundle/main/zzz_story.pk3" "$f" > /dev/null \
+              || { echo "::error::$f is not in the story pk3"; exit 1; }
+          done
+          if unzip -l "$bundle.zip" | grep -qiE 'pak0\.pk3|sp_pak[0-9]\.pk3'; then
+            echo "::error::RTCW's own game data is in the download"; exit 1
+          fi
+          if grep -q "@[A-Z_]*@" "extracted/$bundle/README.txt"; then
+            echo "::error::the guide has a placeholder left in it"; exit 1
+          fi
+          sha256sum "$bundle.zip" > SHA256SUMS
+          rm -rf extracted
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtcw-story-test
+          path: ${{ runner.temp }}/out
+
+      - name: Publish as a prerelease here
+        working-directory: ${{ runner.temp }}/out
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          cat > notes.md <<EOF
+          **Test build, not for players yet.** The story game made from "Bârlogul lupilor: Sfârșitul terorii", on Return to Castle Wolfenstein's single player with the accessibility mode. This build has the prologue, The Silent Shock.
+
+          Download \`wolfs-lair-rtcw-$TAG-windows.zip\` and unzip it. Copy RTCW's own \`pak0.pk3\`, \`sp_pak1.pk3\`, \`sp_pak2.pk3\`, \`sp_pak3.pk3\` and \`sp_pak4.pk3\` into its \`main\` folder (the game will not start without \`sp_pak4.pk3\`), then run "Play the prologue". The README in the zip has the keys.
+
+          Built from ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}.
+          EOF
+          gh release create "$TAG" "wolfs-lair-rtcw-$TAG-windows.zip" SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease \
+            --title "Wolf's Lair story game, $TAG (Windows)" --notes-file notes.md
+          # Only the newest test build stays.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+            --jq '.[].tagName' | grep '^rtcw-story-test-' | grep -vx "$TAG" | while read -r old; do
+              gh release delete "$old" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done

@@ -1,0 +1,126 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index b0b7683e..5b1ef5a2 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -249,6 +249,7 @@ typedef struct
+ 	etaAimTarget_t follow;      /* the chosen thing being walked to */
+ 	qboolean      saidReach;
+ 	int           refreshAt;
++	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
+ } eta_aim_t;
+ 
+ static eta_aim_t eta_aim;
+@@ -720,6 +721,10 @@ void CG_AccessibilityEnemyPrev_f(void)
+ 	ETA_EnemyChooseStep(-1);
+ }
+ 
++/* Turned to a thing, the view stays on it this long at the least: no
++   enemy's lock takes it meanwhile (ETA_ItemFocused). */
++#define ETA_ITEM_FOCUS_MS 6000
++
+ /* Turns to a thing to use and says what it is - or, with no label,
+    quietly, leaving the game's own use icon to name it. */
+ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+@@ -731,9 +736,10 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ 	}
+ 
+ 	ETA_AimStop();
+-	eta_aim.mode      = ETA_AIM_SNAP;
+-	eta_aim.entityNum = target->entityNum;
+-	eta_aim.started   = cg.time;
++	eta_aim.mode           = ETA_AIM_SNAP;
++	eta_aim.entityNum      = target->entityNum;
++	eta_aim.started        = cg.time;
++	eta_aim.itemFocusUntil = cg.time + ETA_ITEM_FOCUS_MS;
+ 	eta_aim.lift      = 0.0f;
+ 	eta_aim.itemTry   = -1;
+ 	VectorSet(eta_aim.itemAim, 0.0f, 0.0f, 8.0f);
+@@ -959,6 +965,33 @@ static int ETA_ChooseTake(const etaAimTarget_t *list, int count, int *index)
+ 	return ETA_CHOOSE_DONE;
+ }
+ 
++/**
++ * @brief Whether the player is on a thing to use, and the enemy lock
++ * keeps off the aim.
++ *
++ * Things and enemies shared one aim. The tester chose a thing with K and
++ * pressed F; F turned to it - and the lock that takes an enemy in sight
++ * by itself took the aim the moment the turn was done, and turned them
++ * to a soldier. Being shot did the same. So while a thing chosen with K
++ * or J is held, while F keeps the player facing a thing they walk to,
++ * and for a few seconds after F turns to one, the lock does not take
++ * the aim by itself; being shot is said, and Insert locks on when the
++ * player wants it.
++ */
++static qboolean ETA_ItemFocused(void)
++{
++	if (eta_aim.mode == ETA_AIM_FOLLOW || eta_aim.mode == ETA_AIM_SNAP)
++	{
++		return qtrue;
++	}
++	if (cg.time < eta_aim.itemFocusUntil && eta_aim.itemFocusUntil - cg.time <= ETA_ITEM_FOCUS_MS)
++	{
++		return qtrue;
++	}
++	return (qboolean)(eta_choose.held && eta_choose.byPlayer && cg.time >= eta_choose.at
++	                  && cg.time - eta_choose.at < ETA_CHOOSE_HOLD_MS);
++}
++
+ /* Whether use, pressed now, reaches a thing on the list: a thing on the
+    ground by the eyes (ETA_USE_EYE_REACH), anything else as it was. */
+ static qboolean ETA_UseInReach(const etaAimTarget_t *target)
+@@ -1378,8 +1411,9 @@ void CG_AccessibilityAimLockDown_f(void)
+ 	}
+ 
+ 	ETA_AimStop();
+-	eta_aim.mode    = ETA_AIM_LOCK;
+-	eta_aim.started = cg.time;
++	eta_aim.mode           = ETA_AIM_LOCK;
++	eta_aim.started        = cg.time;
++	eta_aim.itemFocusUntil = 0;
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
+@@ -1417,6 +1451,12 @@ static void ETA_AutoLock(void)
+ 		return;
+ 	}
+ 
++	/* Nor does it take the aim off a thing the player is on. */
++	if (ETA_ItemFocused())
++	{
++		return;
++	}
++
+ 	/* Ten looks a second is plenty, and spares the traces. */
+ 	if (cg.time < eta_aim.nextSearch && eta_aim.nextSearch - cg.time <= 100)
+ 	{
+@@ -2488,6 +2528,7 @@ static void ETA_HitFrame(void)
+ 	const playerState_t *ps = &cg.snap->ps;
+ 	int                 attacker;
+ 	vec3_t              point;
++	qboolean            focused;
+ 
+ 	if (!eta_hit.primed || ps->damageEvent == eta_hit.damageEvent)
+ 	{
+@@ -2504,14 +2545,19 @@ static void ETA_HitFrame(void)
+ 		return;
+ 	}
+ 
++	focused = ETA_ItemFocused();
++
+ 	if (cg.time - eta_hit.saidAt > ETA_HIT_SAY_MS || cg.time < eta_hit.saidAt)
+ 	{
+ 		eta_hit.saidAt = cg.time;
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_AimSay(va("Hit by %s", CG_AccessibilityCharacterName(attacker)), cg_entities[attacker].lerpOrigin);
++		ETA_AimSay(va(focused && eta_autoLock.integer ? "Hit by %s. Insert turns to them" : "Hit by %s",
++		              CG_AccessibilityCharacterName(attacker)),
++		           cg_entities[attacker].lerpOrigin);
+ 	}
+ 
+-	if (!eta_autoLock.integer || eta_climb.active || cg.cameraMode
++	/* On a thing the player chose: said, but the aim stays theirs. */
++	if (focused || !eta_autoLock.integer || eta_climb.active || cg.cameraMode
+ 	    || (eta_aim.mode == ETA_AIM_LOCK && (!eta_aim.automatic || eta_aim.entityNum == attacker))
+ 	    || !CG_AccessibilityEnemyAimPoint(attacker, point))
+ 	{

@@ -1,0 +1,271 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index fa5c3222..c2bf64bf 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -261,8 +261,25 @@ static struct
+ 	qboolean pending;   /* use it on arriving */
+ 	qboolean held;      /* the player's key is still down */
+ 	int      releaseAt;
++	int      usedAt;    /* last pressed on something, for the player */
++	vec3_t   usedFrom;  /* where the player stood */
++	int      fAt;       /* F last pressed */
+ } eta_use;
+ 
++/* Something F has just used is not used again by the next F: a button
++   pressed twice works its door twice, and the tester, pressing F again
++   near the button, heard the door they had opened lock again. Within
++   this long and this near, F says so; F twice quickly uses it again. */
++#define ETA_USE_AGAIN_MS     15000
++#define ETA_USE_AGAIN_NEAR   96.0f
++#define ETA_USE_DOUBLE_MS    1500
++
++static void ETA_UseRemember(void)
++{
++	eta_use.usedAt = cg.time;
++	VectorCopy(cg.predictedPlayerState.origin, eta_use.usedFrom);
++}
++
+ static void ETA_UseKey(qboolean down)
+ {
+ 	if (down == eta_use.pressed)
+@@ -1217,6 +1234,25 @@ void CG_AccessibilityActivateDown_f(void)
+ 		return;
+ 	}
+ 
++	/* Just used something here, and not a second press straight after:
++	   said, and nothing pressed. A thing chosen with K or J is the
++	   player's to use, and goes ahead. */
++	{
++		qboolean doubled = (qboolean)(eta_use.fAt && cg.time >= eta_use.fAt
++		                              && cg.time - eta_use.fAt < ETA_USE_DOUBLE_MS);
++
++		eta_use.fAt = cg.time;
++		if (!doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
++		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
++		    && Distance(cg.predictedPlayerState.origin, eta_use.usedFrom) < ETA_USE_AGAIN_NEAR
++		    && !(eta_choose.held && eta_choose.byPlayer))
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("Just used. F twice quickly uses it again");
++			return;
++		}
++	}
++
+ 	/* Something chosen with the bracket keys comes before anything
+ 	   else - before what the crosshair is on, and before a ladder in
+ 	   reach. */
+@@ -1310,6 +1346,10 @@ void CG_AccessibilityActivateDown_f(void)
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			ETA_Speech_Say("Nothing to use within 15 meters");
+ 		}
++		if (hint)
++		{
++			ETA_UseRemember();
++		}
+ 		ETA_UseKey(qtrue);
+ 		return;
+ 	}
+@@ -2882,14 +2922,17 @@ void CG_AccessibilityAimFrame(void)
+ 
+ 			ETA_AimStop();
+ 
+-			/* Used: what was chosen has done its job. */
+-			if (use && eta_choose.held && eta_choose.target.entityNum >= 0 && eta_choose.target.entityNum == body)
++			/* Used: what was chosen has done its job - a switch with no
++			   entity of its own too, which stayed chosen and was pressed
++			   again by the next F. */
++			if (use && eta_choose.held)
+ 			{
+ 				eta_choose.held = qfalse;
+ 			}
+ 
+ 			if (use)
+ 			{
++				ETA_UseRemember();
+ 				ETA_UseKey(qtrue);
+ 				if (!eta_use.held)
+ 				{
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 257b0151..4846e149 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1435,6 +1435,34 @@ static float ETA_PropFlatDistance(const ETA_BspProp *prop, const vec3_t at)
+ 	return sqrt(dx * dx + dy * dy);
+ }
+ 
++/* The name of the thing nearest a point on its floor, within a reach;
++   NULL for none. */
++static const char *ETA_PropNearName(const vec3_t at, float reach)
++{
++	const char *best = NULL;
++	float       bestDistance = reach;
++	int         i;
++
++	for (i = 0; i < eta_mapPropCount; i++)
++	{
++		const ETA_BspProp *prop = &eta_mapProps[i];
++		float              distance;
++
++		if (prop->maxs[2] < at[2] - 32.0f || prop->mins[2] > at[2] + 64.0f)
++		{
++			continue;
++		}
++		distance = ETA_PropFlatDistance(prop, at);
++		if (distance <= bestDistance)
++		{
++			bestDistance = distance;
++			best         = prop->name;
++		}
++	}
++
++	return best;
++}
++
+ static void ETA_NarrateFurniture(void)
+ {
+ 	static int          lastTime;
+@@ -4175,6 +4203,11 @@ void CG_AccessibilityStuckFrame(playerState_t *ps, playerState_t *ops)
+ 
+ static void ETA_WorldRead(void);
+ 
++/* Chosen with L, and led to once O is pressed. */
++static qboolean eta_chosenSet;
++static vec3_t   eta_chosenPoint;
++static char     eta_chosenName[64];
++
+ static qboolean ETA_ExitPoint(int model, vec3_t out)
+ {
+ 	if (model <= 0 || model >= MAX_MODELS)
+@@ -4199,8 +4232,25 @@ void CG_AccessibilityWayOut(void)
+ 	}
+ 	ETA_WorldRead();
+ 
+-	/* Pressed again on the way: which way to turn, and how far it is -
+-	   the turning and the walking are the player's. */
++	/* A place chosen with L: led there now. */
++	if (eta_chosenSet)
++	{
++		char what[64];
++
++		eta_chosenSet = qfalse;
++		VectorSubtract(eta_chosenPoint, ps->origin, delta);
++		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++		ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++		Q_strncpyz(what, eta_chosenName, sizeof(what));
++		what[0] = (char)toupper((unsigned char)what[0]);
++		ETA_Speech_Say(va("%s, %d meters%s%s. Follow the ping; O again turns you toward it", what,
++		                  meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++		CG_AccessibilityMarkerSet(eta_chosenPoint, eta_chosenName);
++		return;
++	}
++
++	/* Pressed again on the way: turned toward the way, and how far it
++	   is - the walking is the player's. */
+ 	if (CG_AccessibilityMarkerActive())
+ 	{
+ 		CG_AccessibilityFaceTheWay();
+@@ -4322,19 +4372,56 @@ void CG_AccessibilityWaypointPlace(void)
+ 		return;
+ 	}
+ 
+-	/* Named by the thing to use beside it, if there is one: "by the
+-	   locked door", "by the button". */
++	/* Named for what is there, as 1428 names its points, so the list
++	   says where the player has been: the thing to use nearest it -
++	   "by the locked door", "by the stairs up" - or a thing the map names
++	   in the room, or else the kind of place. */
+ 	name[0] = '\0';
+ 	count   = CG_AccessibilityUseTargets(near, 16);
+ 	for (i = 0; i < count; i++)
+ 	{
+-		if (!near[i].stairs && near[i].meters <= 3.0f)
++		if (near[i].meters <= 6.0f)
+ 		{
+-			Com_sprintf(name, sizeof(name), "by the %s", near[i].name);
+-			name[7] = (char)tolower((unsigned char)name[7]);
++			char thing[64];
++			int  k;
++
++			/* "Stairs up, 3 meters": the name only. */
++			Q_strncpyz(thing, near[i].name, sizeof(thing));
++			for (k = 0; thing[k]; k++)
++			{
++				if (thing[k] == ',')
++				{
++					thing[k] = '\0';
++					break;
++				}
++			}
++			thing[0] = (char)tolower((unsigned char)thing[0]);
++			Com_sprintf(name, sizeof(name), "by the %s", thing);
+ 			break;
+ 		}
+ 	}
++	if (!name[0])
++	{
++		const char *prop = ETA_PropNearName(ps->origin, 160.0f);
++
++		if (prop)
++		{
++			Com_sprintf(name, sizeof(name), "by the %s", prop);
++			name[7] = (char)tolower((unsigned char)name[7]);
++		}
++	}
++	if (!name[0])
++	{
++		ETA_Place   place;
++		const char *kind;
++
++		CG_AccessibilityPlace(ps->origin, &place);
++		kind = ETA_Place_KindName(place.kind);
++		if (kind && Q_stricmp(kind, "indoors"))
++		{
++			Com_sprintf(name, sizeof(name), "on the %s", kind);
++		}
++	}
+ 
+ 	i = ETA_WaypointAdd(ps->origin, name);
+ 	ETA_Speech_Say(name[0] ? va("Waypoint %d set, %s. L chooses where to go", i, name)
+@@ -4406,11 +4493,17 @@ void CG_AccessibilityWaypointNext(void)
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 	name[0] = (char)toupper((unsigned char)name[0]);
+-	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O turns you toward it", name, meters < 1 ? 1 : meters,
++	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O leads there", name, meters < 1 ? 1 : meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  height[0] ? ", " : "", height));
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+-	CG_AccessibilityMarkerSet(point, name);
++
++	/* Chosen, not yet gone to: the marker, and its ping, wait for O. The
++	   tester, stepping through the waypoints to hear where each was,
++	   had the ping start at every one. */
++	VectorCopy(point, eta_chosenPoint);
++	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
++	eta_chosenSet = qtrue;
+ }
+ 
+ /**
+@@ -4424,6 +4517,7 @@ void CG_AccessibilityWorldInit(void)
+ {
+ 	eta_worldRead     = qfalse;
+ 	eta_waypointCount = eta_waypointNext = eta_destination = 0;
++	eta_chosenSet     = qfalse;
+ 	CG_AccessibilityMarkerReset();
+ }
+ 
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index b0ce79a1..8d4c060f 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8170,6 +8170,10 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* The marker taken away, and its ping with it, as Keypad star does
+ 		   in the Enemy Territory mode: a laptop has no keypad. */
+ 		{ K_BACKSPACE,  "accessibilityMarkerClear",   9, NULL },
++		/* G kicked, beside F: a kick works a button as use does, and the
++		   tester, catching G, locked again the door they had opened. G
++		   is let go of; X still kicks. */
++		{ 'g',          "",                           10, "+kick" },
+ 	};
+ 
+ 	vmCvar_t installed;

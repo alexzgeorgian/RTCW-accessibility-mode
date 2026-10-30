@@ -1,0 +1,614 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 978b9a0e..0727532d 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -46,6 +46,7 @@ vmCvar_t eta_bumpCues;
+ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
+ vmCvar_t eta_autoSteer;
++vmCvar_t eta_stairKeeper;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+ vmCvar_t eta_ladderVolume;
+@@ -75,6 +76,7 @@ static const struct {
+ 	{ &eta_markerCues,          "eta_markerCues",          "1" },
+ 	{ &eta_autoLock,            "eta_autoLock",            "1" },
+ 	{ &eta_autoSteer,           "eta_autoSteer",           "0" },
++	{ &eta_stairKeeper,         "eta_stairKeeper",         "1" },
+ 	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+ 	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+ 	{ &eta_crosshairVolume,     "eta_crosshairVolume",     "100" },
+@@ -671,6 +673,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityReadScreen" );
+ 	trap_AddCommand( "accessibilitySurroundings" );
+ 	trap_AddCommand( "accessibilityWayOut" );
++	trap_AddCommand( "accessibilityFacing" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+@@ -703,6 +706,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilitySurroundings_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWayOut" ) ) {
+ 		CG_AccessibilityWayOut();
++	} else if ( !Q_stricmp( cmd, "accessibilityFacing" ) ) {
++		CG_AccessibilityFacing_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
+ 		CG_AccessibilityWaypointPlace();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 2f85a169..96a1aaf7 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1802,6 +1802,294 @@ static void ETA_GuideFrame(void)
+ 	}
+ }
+ 
++/**
++ * @brief The stair keeper: up and round a bending flight with W alone.
++ *
++ * A straight flight is walked like a ramp: W, and the game steps up each
++ * riser. A flight that bends - the stairs of a tower, a stair that turns
++ * at a landing - a sighted player follows with the mouse, turning as the
++ * steps turn. The tester, with only W, walked into the outer wall at
++ * every turn of it, and once off the open side.
++ *
++ * So, on stairs and with the walk key down, the way ahead is tried as the
++ * game would walk it - a stride at a time, up each riser and down onto
++ * the next - straight on and then a little either side. Straight on going
++ * on up (or down) the flight, nothing is done. Straight on into the wall,
++ * or off an edge, the view is turned the least way that keeps on the
++ * steps, and "Stairs bend left" said at the bend. Nothing either side -
++ * the top, the foot, a real wall - and it lets go.
++ *
++ * Only on stairs - the player rose or fell a step's worth or more in the
++ * last moment, walking - and never while the player turns, strafes, or
++ * anything else has the turn keys. eta_stairKeeper 0 turns it off.
++ */
++#define ETA_STAIRS_KEEP_STEP     16.0f   /* the probe's stride */
++#define ETA_STAIRS_KEEP_STEPUP   18.0f   /* the game's STEPSIZE: a riser stepped */
++#define ETA_STAIRS_KEEP_STRIDES  8       /* this many: about three metres */
++#define ETA_STAIRS_KEEP_CLEAR    56.0f   /* this far walked on, the way is open */
++#define ETA_STAIRS_KEEP_DROP     40.0f   /* lower than this in one stride: an edge */
++#define ETA_STAIRS_KEEP_WIDEST   110     /* degrees either side tried: past a square corner */
++#define ETA_STAIRS_KEEP_EVERY    100     /* ms between looks */
++#define ETA_STAIRS_KEEP_RISE     14.0f   /* this much up or down... */
++#define ETA_STAIRS_KEEP_OVER     700     /* ...over this long, walking: on stairs */
++#define ETA_STAIRS_KEEP_HOLD     1500    /* and still on them this long after */
++#define ETA_STAIRS_KEEP_SAMPLES  12
++#define ETA_STAIRS_KEEP_SAY_MS   2500    /* a bend said no oftener */
++#define ETA_STAIRS_KEEP_LANDING  600     /* this long with no step: off the steps */
++
++static struct
++{
++	vec3_t   at[ETA_STAIRS_KEEP_SAMPLES];  /* where the player was, every ETA_STAIRS_KEEP_EVERY */
++	int      atTime[ETA_STAIRS_KEEP_SAMPLES];
++	int      head;
++	int      sense;     /* 1 going up, -1 going down, 0 not on stairs */
++	int      until;     /* on stairs till then */
++	int      stepAt;    /* last stepped up or down */
++	int      lookAt;
++	qboolean active;    /* holds the turn keys */
++	qboolean turning;
++	float    yaw;       /* turning to this */
++	int      side;      /* the way the flight last bent: -1 left, 1 right */
++	int      saidAt;    /* "Stairs bend left" last said */
++} eta_stairKeep;
++
++/* How far along a yaw the player walks, a stride at a time as the game
++   steps them, before a wall or an edge; and how far up or down that is. */
++static float ETA_StairsKeepProbe(float yaw, float *rise, qboolean *edge)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              mins, maxs, at, dir;
++	float               walked = 0.0f, rad = DEG2RAD(yaw);
++	int                 s;
++
++	VectorCopy(ps->mins, mins);
++	VectorCopy(ps->maxs, maxs);
++	mins[0] += 2.0f;
++	mins[1] += 2.0f;
++	maxs[0] -= 2.0f;
++	maxs[1] -= 2.0f;
++	VectorSet(dir, cosf(rad), sinf(rad), 0.0f);
++	VectorCopy(ps->origin, at);
++	*edge = qfalse;
++
++	for (s = 0; s < ETA_STAIRS_KEEP_STRIDES; s++)
++	{
++		trace_t trace;
++		vec3_t  up, ahead, down;
++
++		VectorCopy(at, up);
++		up[2] += ETA_STAIRS_KEEP_STEPUP;
++		CG_Trace(&trace, at, mins, maxs, up, ps->clientNum, MASK_PLAYERSOLID);
++		VectorCopy(trace.endpos, up);
++
++		VectorMA(up, ETA_STAIRS_KEEP_STEP, dir, ahead);
++		CG_Trace(&trace, up, mins, maxs, ahead, ps->clientNum, MASK_PLAYERSOLID);
++		if (trace.startsolid || trace.allsolid)
++		{
++			break;
++		}
++		walked += trace.fraction * ETA_STAIRS_KEEP_STEP;
++		VectorCopy(trace.endpos, ahead);
++		if (trace.fraction < 1.0f)
++		{
++			break;   /* a wall, or a riser too high to step */
++		}
++
++		VectorCopy(ahead, down);
++		down[2] -= ETA_STAIRS_KEEP_STEPUP + ETA_STAIRS_KEEP_DROP;
++		CG_Trace(&trace, ahead, mins, maxs, down, ps->clientNum, MASK_PLAYERSOLID);
++		if (trace.fraction >= 1.0f || trace.plane.normal[2] < 0.7f)
++		{
++			*edge = qtrue;   /* nothing to stand on: the open side */
++			break;
++		}
++		VectorCopy(trace.endpos, at);
++	}
++
++	*rise = at[2] - ps->origin[2];
++	return walked;
++}
++
++/* Whether a yaw keeps the player on the flight: no wall, no edge, and
++   not back the way they came. Once a moment has gone with no step - a
++   landing, the foot, the top - only toward more steps up (or down)
++   within the probe's three metres: across a landing to the next flight,
++   but not along the flat floor beyond the foot or the top, which is the
++   player's to steer. */
++static qboolean ETA_StairsKeepOpen(float yaw)
++{
++	float    rise, along;
++	qboolean edge;
++	float    walked = ETA_StairsKeepProbe(yaw, &rise, &edge);
++
++	along = rise * (float)eta_stairKeep.sense;
++	if (edge || walked < ETA_STAIRS_KEEP_CLEAR || along <= -4.0f)
++	{
++		return qfalse;
++	}
++	return (qboolean)(cg.time - eta_stairKeep.stepAt < ETA_STAIRS_KEEP_LANDING || cg.time < eta_stairKeep.stepAt
++	                  || along >= 8.0f);
++}
++
++static void ETA_StairsKeepRelease(void)
++{
++	if (eta_stairKeep.active)
++	{
++		ETA_AimKeys(0, 0);
++		ETA_TurnBoost(qfalse);
++		eta_stairKeep.active = qfalse;
++	}
++	eta_stairKeep.turning = qfalse;
++}
++
++/* 1 going up stairs, -1 going down, 0 not on them. */
++int CG_AccessibilityOnStairs(void)
++{
++	return cg.time < eta_stairKeep.until ? eta_stairKeep.sense : 0;
++}
++
++static void ETA_StairsKeepFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t           cmd;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
++	{
++		ETA_StairsKeepRelease();
++		eta_stairKeep.sense = 0;
++		return;
++	}
++
++	/* Where the player has been: rising or falling a step's worth while
++	   walking is being on stairs. */
++	if (cg.time - eta_stairKeep.atTime[eta_stairKeep.head] >= ETA_STAIRS_KEEP_EVERY
++	    || cg.time < eta_stairKeep.atTime[eta_stairKeep.head])
++	{
++		int i, then = -1;
++
++		{
++			const float *last = eta_stairKeep.at[eta_stairKeep.head];
++
++			if (eta_stairKeep.atTime[eta_stairKeep.head] && ps->groundEntityNum != ENTITYNUM_NONE
++			    && fabsf(ps->origin[2] - last[2]) >= 4.0f)
++			{
++				eta_stairKeep.stepAt = cg.time;
++			}
++		}
++		eta_stairKeep.head = (eta_stairKeep.head + 1) % ETA_STAIRS_KEEP_SAMPLES;
++		VectorCopy(ps->origin, eta_stairKeep.at[eta_stairKeep.head]);
++		eta_stairKeep.atTime[eta_stairKeep.head] = cg.time;
++
++		for (i = 1; i < ETA_STAIRS_KEEP_SAMPLES; i++)
++		{
++			int k = (eta_stairKeep.head - i + ETA_STAIRS_KEEP_SAMPLES) % ETA_STAIRS_KEEP_SAMPLES;
++
++			if (eta_stairKeep.atTime[k] && cg.time - eta_stairKeep.atTime[k] >= ETA_STAIRS_KEEP_OVER
++			    && cg.time >= eta_stairKeep.atTime[k])
++			{
++				then = k;
++				break;
++			}
++		}
++
++		if (then >= 0 && ps->groundEntityNum != ENTITYNUM_NONE)
++		{
++			const float *from = eta_stairKeep.at[then];
++			float       dz    = ps->origin[2] - from[2];
++			float       dx    = ps->origin[0] - from[0], dy = ps->origin[1] - from[1];
++			float       along = sqrtf(dx * dx + dy * dy);
++
++			/* A step's worth up or down, and walked rather than fallen:
++			   more along than down. */
++			if (fabsf(dz) >= ETA_STAIRS_KEEP_RISE && along >= 24.0f && along >= fabsf(dz) * 0.8f)
++			{
++				eta_stairKeep.sense = dz > 0.0f ? 1 : -1;
++				eta_stairKeep.until = cg.time + ETA_STAIRS_KEEP_HOLD;
++			}
++		}
++	}
++
++	if (!eta_stairKeeper.integer || CG_AccessibilityOnStairs() == 0
++	    || ps->groundEntityNum == ENTITYNUM_NONE || eta_turn.step || eta_turn.held
++	    || (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS))
++	{
++		ETA_StairsKeepRelease();
++		return;
++	}
++
++	/* Only walking forward, and not sidestepping: that is the player's
++	   own steering. */
++	if (!trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || cmd.forwardmove <= 0 || cmd.rightmove)
++	{
++		ETA_StairsKeepRelease();
++		return;
++	}
++
++	if (cg.time - eta_stairKeep.lookAt >= ETA_STAIRS_KEEP_EVERY || cg.time < eta_stairKeep.lookAt)
++	{
++		float yaw = ps->viewangles[YAW];
++		int   off, found = 0;
++
++		eta_stairKeep.lookAt = cg.time;
++
++		if (ETA_StairsKeepOpen(yaw))
++		{
++			ETA_StairsKeepRelease();
++			return;
++		}
++
++		/* The least turn that keeps on the steps; the way the flight
++		   bent last first, as a turning stair keeps on bending one way. */
++		for (off = 10; off <= ETA_STAIRS_KEEP_WIDEST && !found; off += 10)
++		{
++			int first = eta_stairKeep.side ? eta_stairKeep.side : -1, k;
++
++			for (k = 0; k < 2 && !found; k++)
++			{
++				int side = k ? -first : first;
++
++				/* Left is a higher yaw. */
++				if (ETA_StairsKeepOpen(yaw - (float)(side * off)))
++				{
++					found              = side;
++					eta_stairKeep.yaw  = AngleNormalize360(yaw - (float)(side * off));
++					eta_stairKeep.side = side;
++				}
++			}
++		}
++
++		if (!found)
++		{
++			/* The top, the foot, or a wall: the player's again. */
++			ETA_StairsKeepRelease();
++			return;
++		}
++
++		/* Said at each bend: the turns of a tower stair are a way to count
++		   how high the player has come. */
++		if (!eta_stairKeep.turning
++		    && (cg.time - eta_stairKeep.saidAt > ETA_STAIRS_KEEP_SAY_MS || cg.time < eta_stairKeep.saidAt))
++		{
++			eta_stairKeep.saidAt = cg.time;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(found < 0 ? "Stairs bend left" : "Stairs bend right");
++		}
++		eta_stairKeep.turning = qtrue;
++	}
++
++	if (eta_stairKeep.turning)
++	{
++		vec3_t wanted;
++
++		VectorSet(wanted, ps->viewangles[PITCH], eta_stairKeep.yaw, 0.0f);
++		eta_stairKeep.active = qtrue;
++		if (ETA_AimSteerAngles(wanted, ETA_GUIDE_TOLERANCE))
++		{
++			ETA_StairsKeepRelease();
++		}
++	}
++}
++
+ /**
+  * @brief The way, told while the player walks it.
+  *
+@@ -2173,8 +2461,10 @@ void CG_AccessibilityAimFrame(void)
+ 	/* A climb has the keys to itself. */
+ 	if (eta_climb.active)
+ 	{
+-		eta_guide.active  = qfalse;
+-		eta_guide.checkAt = 0;
++		eta_guide.active      = qfalse;
++		eta_guide.checkAt     = 0;
++		eta_stairKeep.active  = qfalse;
++		eta_stairKeep.turning = qfalse;
+ 		ETA_ClimbFrame();
+ 		return;
+ 	}
+@@ -2196,14 +2486,25 @@ void CG_AccessibilityAimFrame(void)
+ 		if (eta_aim.mode == ETA_AIM_NONE)
+ 		{
+ 			ETA_GuideFrame();
++			if (!eta_guide.active)
++			{
++				ETA_StairsKeepFrame();
++			}
++			else
++			{
++				eta_stairKeep.active  = qfalse;
++				eta_stairKeep.turning = qfalse;
++			}
+ 			ETA_WayCueFrame();
+ 			return;
+ 		}
+ 	}
+ 
+ 	/* Something else has the turn keys now. */
+-	eta_guide.active  = qfalse;
+-	eta_guide.checkAt = 0;
++	eta_guide.active      = qfalse;
++	eta_guide.checkAt     = 0;
++	eta_stairKeep.active  = qfalse;
++	eta_stairKeep.turning = qfalse;
+ 
+ 	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL || cg.time < eta_aim.started
+ 	    || cg.cameraMode)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index e5ff6639..1dd1d0ff 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -408,6 +408,76 @@ static qboolean ETA_DescribeLookAhead(char *out, size_t outSize, int *distanceMe
+ 	return qtrue;
+ }
+ 
++/**
++ * @brief Says which way the player faces, and what is straight ahead.
++ *
++ * A sighted player glances at the screen; the tester asked for a key to
++ * do the same. The compass point, whether the view is tipped up or down,
++ * whether the player is on stairs, and what the crosshair is on with how
++ * far, in one line: "Facing north-east, looking down. Ahead, stone
++ * floor, 4 meters."
++ */
++void CG_AccessibilityFacing_f(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	char                ahead[128], line[256];
++	const char          *tilt = "";
++	int                 meters;
++
++	ETA_Speech_BeginReport();
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		ETA_Speech_Say("Nothing to describe until you are in play");
++		ETA_Speech_EndReport();
++		return;
++	}
++
++	/* The game's pitch is down-positive. */
++	if (ps->viewangles[PITCH] < -45.0f)
++	{
++		tilt = ", looking right up";
++	}
++	else if (ps->viewangles[PITCH] < -12.0f)
++	{
++		tilt = ", looking up";
++	}
++	else if (ps->viewangles[PITCH] > 45.0f)
++	{
++		tilt = ", looking right down";
++	}
++	else if (ps->viewangles[PITCH] > 12.0f)
++	{
++		tilt = ", looking down";
++	}
++
++	Com_sprintf(line, sizeof(line), "Facing %s%s",
++	            ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(ps->viewangles[YAW])), tilt);
++
++	if (CG_AccessibilityOnStairs())
++	{
++		Q_strcat(line, sizeof(line), CG_AccessibilityOnStairs() > 0 ? ", on stairs going up" : ", on stairs going down");
++	}
++
++	if (ETA_DescribeLookAhead(ahead, sizeof(ahead), &meters, ETA_LOOK_AHEAD_RANGE, NULL))
++	{
++		ahead[0] = (char)tolower((unsigned char)ahead[0]);
++		if (meters >= 0)
++		{
++			Q_strcat(line, sizeof(line), va(". Ahead, %s, %d %s", ahead, meters < 1 ? 1 : meters,
++			                                meters <= 1 ? "meter" : "meters"));
++		}
++		else
++		{
++			Q_strcat(line, sizeof(line), va(". Ahead, %s", ahead));
++		}
++	}
++
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(line);
++	ETA_Speech_EndReport();
++}
++
+ 
+ /**
+  * @brief How far out the lean has to travel before it counts as leaning.
+@@ -3550,6 +3620,12 @@ static vec3_t eta_doorOrigins[MAX_MODELS];
+    like any door, and nothing on them says which they are. */
+ static qboolean eta_buttonModel[MAX_MODELS];
+ 
++/* The map's breakables (func_explosive), by brush model: the server
++   sends each as a breakable, but not whether it breaks for the player -
++   one with no health is only a part of a scripted scene - nor what it is
++   made of. 0: not one to break; else what it is called. */
++static const char *eta_breakModel[MAX_MODELS];
++
+ /* The switches and levers a map hides in an invisible trigger
+    (func_invisible_user), which the server never sends: where each is,
+    by brush model, and what it is called - by its "cursorhint" if the
+@@ -3634,7 +3710,7 @@ static void ETA_ReadMapEntities(void)
+ 	char token[MAX_TOKEN_CHARS];
+ 	char key[MAX_TOKEN_CHARS];
+ 	char classname[64], model[16], lock[16], origin[64], target[64], ainame[64];
+-	char targetname[64], hint[32];
++	char targetname[64], hint[32], health[16], spawnflags[16], material[16];
+ 	int  i;
+ 
+ 	/* An invisible trigger's target may come later in the list than the
+@@ -3662,6 +3738,7 @@ static void ETA_ReadMapEntities(void)
+ 	int      namedCount = 0, userCount = 0, linkCount = 0;
+ 
+ 	memset(eta_buttonModel, 0, sizeof(eta_buttonModel));
++	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+ 	eta_userCount = 0;
+ 
+@@ -3680,7 +3757,7 @@ static void ETA_ReadMapEntities(void)
+ 		}
+ 
+ 		classname[0] = model[0] = lock[0] = origin[0] = target[0] = ainame[0] = '\0';
+-		targetname[0] = hint[0] = '\0';
++		targetname[0] = hint[0] = health[0] = spawnflags[0] = material[0] = '\0';
+ 		for (;;)
+ 		{
+ 			if (!trap_GetEntityToken(key, sizeof(key)) || key[0] == '}')
+@@ -3723,6 +3800,18 @@ static void ETA_ReadMapEntities(void)
+ 			{
+ 				Q_strncpyz(hint, token, sizeof(hint));
+ 			}
++			else if (!Q_stricmp(key, "health"))
++			{
++				Q_strncpyz(health, token, sizeof(health));
++			}
++			else if (!Q_stricmp(key, "spawnflags"))
++			{
++				Q_strncpyz(spawnflags, token, sizeof(spawnflags));
++			}
++			else if (!Q_stricmp(key, "type"))
++			{
++				Q_strncpyz(material, token, sizeof(material));
++			}
+ 		}
+ 
+ 		if (targetname[0] && namedCount < (int)ARRAY_LEN(named))
+@@ -3754,6 +3843,27 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* A breakable: one with health (the game's own default is 100),
++		   named by what it is made of, or by what breaks it when only
++		   explosives (spawnflag 32) or dynamite (64) will. */
++		if (!Q_stricmp(classname, "func_explosive") && model[0] == '*' && (!health[0] || atoi(health) > 0))
++		{
++			int index = atoi(model + 1), flags = atoi(spawnflags);
++
++			if (index > 0 && index < MAX_MODELS)
++			{
++				eta_breakModel[index] = (flags & 64) ? "Breakable, needs dynamite"
++				                        : (flags & 32) ? "Breakable, needs explosives"
++				                        : !Q_stricmp(material, "glass") ? "Breakable glass"
++				                        : !Q_stricmp(material, "metal") ? "Breakable metal"
++				                        : !Q_stricmp(material, "brick") ? "Breakable brick"
++				                        : !Q_stricmp(material, "rock") ? "Breakable stone"
++				                        : !Q_stricmp(material, "fabric") ? "Breakable cloth"
++				                        : !Q_stricmp(material, "gibs") ? "Breakable"
++				                        : "Breakable wood";
++			}
++		}
++
+ 		if (!Q_stricmp(classname, "func_invisible_user") && model[0] == '*' && userCount < ETA_MAX_USERS)
+ 		{
+ 			int index = atoi(model + 1);
+@@ -4719,7 +4829,8 @@ static int ETA_StairsNear(const vec3_t origin, etaAimTarget_t *out, int max)
+  * Within fifteen metres and in sight: a door, a button, a switch the map
+  * hides in an invisible trigger (read from the map's entity list, by
+  * what it works - see ETA_ReadMapEntities), a mounted gun, something on
+- * the ground, and the map's ladders and flights of stairs.
++ * the ground, something to break, and the map's ladders and flights of
++ * stairs.
+  */
+ #define ETA_USE_RANGE 600.0f
+ 
+@@ -4751,6 +4862,15 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 		case ET_MG42:
+ 			Q_strncpyz(target.name, "Mounted machine gun", sizeof(target.name));
+ 			break;
++		case ET_EXPLOSIVE:
++			/* Turned to, to shoot or knife: there is nothing to press. */
++			if (es->modelindex <= 0 || es->modelindex >= MAX_MODELS || !eta_breakModel[es->modelindex])
++			{
++				continue;
++			}
++			Q_strncpyz(target.name, eta_breakModel[es->modelindex], sizeof(target.name));
++			target.locked = qtrue;
++			break;
+ 		case ET_MOVER:
+ 			if (es->solid == SOLID_BMODEL && es->modelindex > 0 && es->modelindex < MAX_MODELS
+ 			    && eta_buttonModel[es->modelindex])
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 94541a55..bc78e200 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2221,6 +2221,7 @@ void CG_AccessibilityWorldInit( void );
+ void CG_AccessibilityWorldFrame( qboolean held );
+ void CG_AccessibilitySurroundings( void );
+ void CG_AccessibilityWayOut( void );
++void CG_AccessibilityFacing_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
+@@ -2342,6 +2343,8 @@ extern vmCvar_t eta_bumpCues;
+ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
+ extern vmCvar_t eta_autoSteer;
++extern vmCvar_t eta_stairKeeper;
++int CG_AccessibilityOnStairs( void );
+ 
+ #ifndef MIN
+ #define MIN( a, b ) ( ( a ) < ( b ) ? ( a ) : ( b ) )
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 3dcbc422..421f6451 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8111,7 +8111,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, O, Insert, I, J, K, L, P and U are free in
++ * F1, F2, F3, F6, F7, F8, H, O, Insert, I, J, K, L, P and U are free in
+  * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+@@ -8155,6 +8155,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   free in the stock config. */
+ 		{ 'p',          "accessibilityWaypointPlace", 5, NULL },
+ 		{ 'l',          "accessibilityWaypointNext",  5, NULL },
++		/* Which way the player faces, and what is ahead: H, free in the
++		   stock config. */
++		{ 'h',          "accessibilityFacing",        6, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

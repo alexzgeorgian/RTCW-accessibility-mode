@@ -1,0 +1,5 @@
+build/
+*.o
+*.obj
+__pycache__/
+release/dist/

@@ -1,0 +1,153 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 0727532d..dec86cf9 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -674,6 +674,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilitySurroundings" );
+ 	trap_AddCommand( "accessibilityWayOut" );
+ 	trap_AddCommand( "accessibilityFacing" );
++	trap_AddCommand( "accessibilityEnemyLock" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+@@ -708,6 +709,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityWayOut();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityFacing" ) ) {
+ 		CG_AccessibilityFacing_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityEnemyLock" ) ) {
++		CG_AccessibilityEnemyLock_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
+ 		CG_AccessibilityWaypointPlace();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5b1ef5a2..8aa743ef 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -250,6 +250,7 @@ typedef struct
+ 	qboolean      saidReach;
+ 	int           refreshAt;
+ 	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
++	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
+ } eta_aim_t;
+ 
+ static eta_aim_t eta_aim;
+@@ -312,6 +313,7 @@ static void ETA_AimStop(void)
+ 	ETA_TurnBoost(qfalse);
+ 	eta_aim.mode      = ETA_AIM_NONE;
+ 	eta_aim.automatic = qfalse;
++	eta_aim.toggled   = qfalse;
+ 	eta_use.pending   = qfalse;
+ }
+ 
+@@ -975,7 +977,7 @@ static int ETA_ChooseTake(const etaAimTarget_t *list, int count, int *index)
+  * to a soldier. Being shot did the same. So while a thing chosen with K
+  * or J is held, while F keeps the player facing a thing they walk to,
+  * and for a few seconds after F turns to one, the lock does not take
+- * the aim by itself; being shot is said, and Insert locks on when the
++ * the aim by itself; being shot is said, and U or Insert locks on when the
+  * player wants it.
+  */
+ static qboolean ETA_ItemFocused(void)
+@@ -1429,12 +1431,40 @@ void CG_AccessibilityAimLockDown_f(void)
+ 
+ void CG_AccessibilityAimLockUp_f(void)
+ {
+-	if (eta_aim.mode == ETA_AIM_LOCK && !eta_aim.automatic)
++	if (eta_aim.mode == ETA_AIM_LOCK && !eta_aim.automatic && !eta_aim.toggled)
+ 	{
+ 		ETA_AimStop();
+ 	}
+ }
+ 
++/**
++ * @brief The lock as a key to press, not to hold: U.
++ *
++ * The tester plays on a laptop, which has no Insert, and asked for the
++ * enemies to have their own key the way F is for things: U turns to the
++ * enemy chosen with I or Y - or else the nearest in sight - and keeps the
++ * aim on them, on to the next when they fall; U again, or a turn with
++ * the arrows, lets go.
++ */
++void CG_AccessibilityEnemyLock_f(void)
++{
++	if (eta_aim.mode == ETA_AIM_LOCK && !eta_aim.automatic && eta_aim.toggled)
++	{
++		ETA_AimStop();
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("Lock off");
++		return;
++	}
++
++	CG_AccessibilityAimLockDown_f();
++
++	if (eta_aim.mode == ETA_AIM_LOCK)
++	{
++		eta_aim.automatic = qfalse;
++		eta_aim.toggled   = qtrue;
++	}
++}
++
+ /**
+  * @brief The lock by itself: an enemy in sight, where the lock may run.
+  */
+@@ -2551,7 +2581,7 @@ static void ETA_HitFrame(void)
+ 	{
+ 		eta_hit.saidAt = cg.time;
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_AimSay(va(focused && eta_autoLock.integer ? "Hit by %s. Insert turns to them" : "Hit by %s",
++		ETA_AimSay(va(focused && eta_autoLock.integer ? "Hit by %s. U turns to them" : "Hit by %s",
+ 		              CG_AccessibilityCharacterName(attacker)),
+ 		           cg_entities[attacker].lerpOrigin);
+ 	}
+@@ -2811,6 +2841,13 @@ void CG_AccessibilityAimFrame(void)
+ 		eta_aim.saidLost = qtrue;
+ 		ETA_Speech_Say("Lock lost");
+ 	}
++
++	/* Pressed on with U: over, rather than waiting to turn the player to
++	   whoever comes next. */
++	if (eta_aim.toggled)
++	{
++		ETA_AimStop();
++	}
+ }
+ 
+ static void CG_AccessibilityTurnDown(int direction)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index bc78e200..214a2222 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2222,6 +2222,7 @@ void CG_AccessibilityWorldFrame( qboolean held );
+ void CG_AccessibilitySurroundings( void );
+ void CG_AccessibilityWayOut( void );
+ void CG_AccessibilityFacing_f( void );
++void CG_AccessibilityEnemyLock_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 421f6451..b6f3c37c 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8111,7 +8111,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, H, O, Insert, I, J, K, L, P and U are free in
++ * F1, F2, F3, F6, F7, F8, H, O, Insert, I, J, K, L, P, U and Y are free in
+  * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+@@ -8158,6 +8158,12 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* Which way the player faces, and what is ahead: H, free in the
+ 		   stock config. */
+ 		{ 'h',          "accessibilityFacing",        6, NULL },
++		/* A laptop has no Insert: U locks on to an enemy and U again lets
++		   go, as F is for things; I and Y step through the enemies. Y is
++		   free in the stock config, and U is taken over only from the
++		   enemy step it had. */
++		{ 'u',          "accessibilityEnemyLock",     7, "accessibilityEnemyPrev" },
++		{ 'y',          "accessibilityEnemyPrev",     7, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

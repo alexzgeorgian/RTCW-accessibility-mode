@@ -1,0 +1,1568 @@
+diff --git a/SP/Makefile b/SP/Makefile
+index 7e58f1f8..88c26431 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -2578,6 +2578,7 @@ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_world.o \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_keys.o \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_route.o \
++  $(B)/$(BASEGAME)/cgame/cg_accessibility_ways.o \
+   $(B)/$(BASEGAME)/ui/ui_shared.o \
+   \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 59e34df4..4a0c5aea 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -47,6 +47,7 @@ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
+ vmCvar_t eta_autoSteer;
+ vmCvar_t eta_stairKeeper;
++vmCvar_t eta_waysCallouts;
+ vmCvar_t eta_enemyCues;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+@@ -78,6 +79,7 @@ static const struct {
+ 	{ &eta_autoLock,            "eta_autoLock",            "1" },
+ 	{ &eta_autoSteer,           "eta_autoSteer",           "0" },
+ 	{ &eta_stairKeeper,         "eta_stairKeeper",         "1" },
++	{ &eta_waysCallouts,        "eta_waysCallouts",        "1" },
+ 	{ &eta_enemyCues,           "eta_enemyCues",           "1" },
+ 	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+ 	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 8d1a91f0..2b4d829c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3335,9 +3335,12 @@ void CG_AccessibilityTurnRightUp_f(void)
+ 	CG_AccessibilityTurnUp(1);
+ }
+ 
++/* F3: the ways on from here (cg_accessibility_ways.c). The glance it
++   gave before - the walls and the things around - is the ways' now, and
++   the things are on F, K and J. */
+ void CG_AccessibilitySurroundings_f(void)
+ {
+-	CG_AccessibilitySurroundings();
++	CG_AccessibilityWaysOn();
+ }
+ 
+ #endif
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 21e24dd3..6660911a 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -834,6 +834,14 @@ static int ETA_RouteMoveOnFoot(void *context, const float from[3], float to[3])
+ 	return kind == ETA_PATH_JUMP ? ETA_PATH_NONE : kind;
+ }
+ 
++/* One square's step, for the ways on (cg_accessibility_ways.c), shifted
++   sideways to fit a narrow way as the walk guide's are: to[] says where
++   it landed. */
++int CG_AccessibilityRouteStep(const float from[3], float to[3])
++{
++	return ETA_RouteMove(NULL, from, to);
++}
++
+ static void ETA_RoutePlanWith(qboolean jumps)
+ {
+ 	float start[3], goal[3];
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+new file mode 100644
+index 00000000..16ef6e1a
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -0,0 +1,1385 @@
++/*
++ * name:	cg_accessibility_ways.c
++ *
++ * desc:	[Accessibility]: the ways on from where the player stands -
++ *			the doors, doorways, corridors, stairs and ladders out of the
++ *			place - which way each is, how far, and whether the player
++ *			has been through it.
++ *
++ *			Only built with FEATURE_ACCESSIBILITY.
++ */
++
++#ifdef FEATURE_ACCESSIBILITY
++
++#include "cg_local.h"
++
++#include "hud/hud_narrator.h"
++#include "navigation/navigation_system.h"
++#include "speech/speech_manager.h"
++
++/**
++ * @brief "3 ways on. Door ahead, 4 meters, new. Stairs up left, 6
++ * meters, toward the way out. Corridor behind, where you came from."
++ *
++ * The tester kept getting lost: the waypoints, the marker and the things
++ * on the list each said where something was, and none said where it led.
++ * A sighted player walking into a room sees at once the ways out of it,
++ * and which of them they came in by. This is that.
++ *
++ * From where the player stands, the floor is spread over square by
++ * square, the way the walk guide's search does - each step asked of the
++ * game's own collision - as far as a walk of ETA_WAYS_REACH. Where the
++ * spread is still going at that distance, there is a way on; the squares
++ * it reached there, side by side, are one way. A dead end does not reach
++ * that far, so it is no way on - unless a door stands in it, which a
++ * sighted player would see as somewhere to go.
++ *
++ * The collision the spread asks is the map's alone, so a closed door does
++ * not stop it: what is on the walk to each way - a door, a narrow
++ * passage, a rise - is what the way is called. Whether the player has
++ * been through a way is read off the trail of where they have walked.
++ *
++ * F3 says them all; F3 again within a few seconds goes through them one
++ * at a time, and the one said is chosen: O leads there, as it does to a
++ * waypoint chosen with L.
++ */
++
++#define ETA_WAYS_CELL       32.0f
++#define ETA_WAYS_REACH      (14.0f / ETA_QU_TO_METERS)
++#define ETA_WAYS_GRID_HALF  20      /* squares: the reach, 17 of them, and room */
++#define ETA_WAYS_GRID       (2 * ETA_WAYS_GRID_HALF + 1)
++#define ETA_WAYS_NODES      4096
++#define ETA_WAYS_SAME_FLOOR 40.0f   /* two squares this near in height are one */
++#define ETA_WAYS_MAX        12      /* ways kept */
++#define ETA_WAYS_SAY        6       /* said at once */
++#define ETA_WAYS_PATH       96
++#define ETA_WAYS_PICK_MS    10000   /* F3 again this soon goes through them */
++#define ETA_WAYS_FRESH_MS   30000   /* a look this old is looked again */
++#define ETA_WAYS_MOVED      64.0f   /* nor from further than this off */
++#define ETA_WAYS_DOORS      24
++#define ETA_WAYS_NARROW     112.0f  /* wall to wall, across the way */
++#define ETA_WAYS_CORRIDOR   128.0f  /* narrow this long: a corridor */
++#define ETA_WAYS_RISE       40.0f   /* up or down this much: stairs */
++#define ETA_WAYS_ONWARD     5.0f    /* metres nearer the way out */
++
++/* The new-place callout. */
++#define ETA_WAYS_SCAN_MOVED 160.0f  /* walked this far: looked again */
++#define ETA_WAYS_SAY_EVERY  20000
++#define ETA_WAYS_SAY_MOVED  320.0f
++#define ETA_WAYS_KNOWN      120.0f  /* the trail this near: not a new place */
++
++typedef enum
++{
++	ETA_WAY_OPEN,
++	ETA_WAY_DOOR,
++	ETA_WAY_LOCKED_DOOR,
++	ETA_WAY_SWITCH_DOOR,
++	ETA_WAY_DOORWAY,
++	ETA_WAY_CORRIDOR,
++	ETA_WAY_STAIRS_UP,
++	ETA_WAY_STAIRS_DOWN,
++	ETA_WAY_SLOPE_UP,
++	ETA_WAY_SLOPE_DOWN,
++	ETA_WAY_LADDER_UP,
++	ETA_WAY_LADDER_DOWN
++} eta_wayKind_t;
++
++static const char *const eta_wayWords[] =
++{
++	"Open way",
++	"Door",
++	"Locked door",
++	"Door that opens with a switch",
++	"Doorway",
++	"Corridor",
++	"Stairs up",
++	"Stairs down",
++	"Slope up",
++	"Slope down",
++	"Ladder up",
++	"Ladder down"
++};
++
++typedef struct
++{
++	float at[3];
++	float along;        /* walked from the start */
++	short parent;
++	short cell;         /* its square on the grid, wherever the step landed */
++	short nextInCell;
++	short way;          /* the way it is the far end of, or -1 */
++	short root;         /* for grouping the far ends */
++	unsigned char edge; /* at the reach: not spread from */
++	unsigned char door; /* 1 + the door it is through, or 0 */
++} eta_wayNode_t;
++
++typedef struct
++{
++	int   model;
++	float mins[3], maxs[3];
++	float middle[3];
++	int   node;         /* the first square in it, or -1 */
++	int   used;
++} eta_wayDoor_t;
++
++typedef struct
++{
++	eta_wayKind_t kind;
++	vec3_t        feature;  /* where it starts: the door, the foot of the stairs */
++	vec3_t        facing;   /* the point said to be its direction */
++	vec3_t        lead;     /* where O leads */
++	float         along;    /* walked to the feature */
++	int           rep;      /* a far-end square, or the door's own */
++	int           door;     /* 1 + door, for a door no far end lies past */
++	int           ladder;   /* 1 + ladder */
++	int           lastTime; /* the trail's latest time past it, or 0 */
++	int           status;   /* 0 new, 1 been there, 2 where you came from */
++	qboolean      onward;
++} eta_way_t;
++
++static struct
++{
++	eta_wayNode_t nodes[ETA_WAYS_NODES];
++	short         cellHead[ETA_WAYS_GRID * ETA_WAYS_GRID];
++	int           count, next;
++	vec3_t        start;
++	qboolean      scanning, done, full;
++	int           doneAt;
++
++	eta_wayDoor_t doors[ETA_WAYS_DOORS];
++	int           doorCount;
++
++	eta_way_t     ways[ETA_WAYS_MAX];
++	int           wayCount;
++
++	/* What asked for the look: the key, waiting to be answered. */
++	qboolean      keyWaiting;
++	int           listedAt;     /* when F3 last said them, for going through */
++	int           pick;         /* the one said last, -1 before any */
++
++	/* The new-place callout. */
++	int           saidAt;
++	vec3_t        saidFrom;
++	qboolean      background;
++} eta_ways;
++
++static int ETA_WaysCell(const float at[3])
++{
++	int ix = (int)floor((at[0] - eta_ways.start[0]) / ETA_WAYS_CELL + 0.5f) + ETA_WAYS_GRID_HALF;
++	int iy = (int)floor((at[1] - eta_ways.start[1]) / ETA_WAYS_CELL + 0.5f) + ETA_WAYS_GRID_HALF;
++
++	if (ix < 0 || iy < 0 || ix >= ETA_WAYS_GRID || iy >= ETA_WAYS_GRID)
++	{
++		return -1;
++	}
++	return iy * ETA_WAYS_GRID + ix;
++}
++
++/* The square at a place, on its floor, or -1. */
++static int ETA_WaysFind(int cell, float z)
++{
++	int n;
++
++	if (cell < 0)
++	{
++		return -1;
++	}
++	for (n = eta_ways.cellHead[cell]; n >= 0; n = eta_ways.nodes[n].nextInCell)
++	{
++		if (fabsf(eta_ways.nodes[n].at[2] - z) < ETA_WAYS_SAME_FLOOR)
++		{
++			return n;
++		}
++	}
++	return -1;
++}
++
++static int ETA_WaysAdd(const float at[3], int cell, int parent, float along)
++{
++	eta_wayNode_t *node;
++
++	if (cell < 0 || eta_ways.count >= ETA_WAYS_NODES)
++	{
++		return -1;
++	}
++
++	node = &eta_ways.nodes[eta_ways.count];
++	VectorCopy(at, node->at);
++	node->along      = along;
++	node->parent     = (short)parent;
++	node->cell       = (short)cell;
++	node->nextInCell = eta_ways.cellHead[cell];
++	node->way        = -1;
++	node->root       = (short)eta_ways.count;
++	node->edge       = (unsigned char)(along >= ETA_WAYS_REACH);
++	node->door       = 0;
++	eta_ways.cellHead[cell] = (short)eta_ways.count;
++	return eta_ways.count++;
++}
++
++/* Where the look starts: the player's place, or, when the walk guide's
++   body - a little narrower than the player's - would start in a wall
++   there, as on a bend of a narrow stair, the nearest place beside it it
++   would not. */
++static void ETA_WaysStartAt(const vec3_t origin, vec3_t out)
++{
++	static const vec3_t mins = { -16.0f, -16.0f, -6.0f };
++	static const vec3_t maxs = { 16.0f, 16.0f, 24.0f };
++	static const float  offsets[9][2] = { { 0, 0 }, { 8, 0 }, { -8, 0 }, { 0, 8 }, { 0, -8 },
++		                                  { 8, 8 }, { -8, 8 }, { -8, -8 }, { 8, -8 } };
++	int lift, i;
++
++	for (lift = 0; lift <= 16; lift += 8)
++	{
++		for (i = 0; i < 9; i++)
++		{
++			trace_t trace;
++
++			VectorSet(out, origin[0] + offsets[i][0], origin[1] + offsets[i][1], origin[2] + lift);
++			trap_CM_BoxTrace(&trace, out, out, mins, maxs, 0, MASK_PLAYERSOLID);
++			if (!trace.startsolid)
++			{
++				return;
++			}
++		}
++	}
++	VectorCopy(origin, out);
++}
++
++static void ETA_WaysBegin(const vec3_t origin)
++{
++	vec3_t from;
++
++	ETA_WaysStartAt(origin, from);
++	memset(eta_ways.cellHead, -1, sizeof(eta_ways.cellHead));
++	eta_ways.count    = eta_ways.next = 0;
++	eta_ways.scanning = qtrue;
++	eta_ways.done     = qfalse;
++	eta_ways.full     = qfalse;
++	eta_ways.wayCount = 0;
++	eta_ways.pick     = -1;
++	VectorCopy(from, eta_ways.start);
++	ETA_WaysAdd(from, ETA_WAYS_GRID_HALF * ETA_WAYS_GRID + ETA_WAYS_GRID_HALF, -1, 0.0f);
++}
++
++/* Up a stair the step up refuses - a low ceiling over the stair's foot,
++   a riser it does not lift over - but which walks down: the floor there,
++   and a step from it back down to here. A player climbs what they can
++   walk down, where it rises no more than a step: anything higher, a crate
++   or a ledge, is jumped, and is no way on foot. */
++static int ETA_WaysStepBack(const float from[3], const float wanted[3], float to[3])
++{
++	static const vec3_t mins = { -16.0f, -16.0f, -24.0f };
++	static const vec3_t maxs = { 16.0f, 16.0f, 24.0f };
++	trace_t trace;
++	vec3_t  top, bottom, back;
++	int     kind;
++
++	VectorSet(top, wanted[0], wanted[1], from[2] + 48.0f);
++	VectorSet(bottom, wanted[0], wanted[1], from[2] + 8.0f);
++	trap_CM_BoxTrace(&trace, top, bottom, mins, maxs, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid || trace.allsolid || trace.fraction >= 1.0f || trace.plane.normal[2] < 0.7f
++	    || trace.endpos[2] - from[2] > 20.0f)
++	{
++		return ETA_PATH_NONE;
++	}
++
++	VectorCopy(trace.endpos, to);
++	VectorCopy(from, back);
++	kind = CG_AccessibilityRouteStep(to, back);
++	if ((kind == ETA_PATH_WALK || kind == ETA_PATH_CROUCH) && fabsf(back[2] - from[2]) < 8.0f)
++	{
++		return kind;
++	}
++	return ETA_PATH_NONE;
++}
++
++/* A step from one square to the next on foot. A stair steep enough to
++   rise two steps in a square stands in the way like a ledge, and the
++   walk guide's step calls it a jump; walked in two halves, each rises
++   one step. A real ledge does not get easier by halves. */
++static int ETA_WaysStep(const float from[3], float to[3])
++{
++	float half[3], shift[2], wanted[3];
++	int   kind;
++
++	VectorCopy(to, wanted);
++	kind = CG_AccessibilityRouteStep(from, to);
++	if (kind == ETA_PATH_WALK || kind == ETA_PATH_CROUCH)
++	{
++		return kind;
++	}
++	VectorCopy(wanted, to);
++
++	half[0] = (from[0] + to[0]) * 0.5f;
++	half[1] = (from[1] + to[1]) * 0.5f;
++	half[2] = from[2];
++	shift[0] = half[0];
++	shift[1] = half[1];
++	kind    = CG_AccessibilityRouteStep(from, half);
++	if (kind != ETA_PATH_WALK && kind != ETA_PATH_CROUCH)
++	{
++		return ETA_WaysStepBack(from, wanted, to);
++	}
++	/* The second half goes on along the line the first was shifted to. */
++	to[0] += half[0] - shift[0];
++	to[1] += half[1] - shift[1];
++	to[2]  = half[2];
++	kind  = CG_AccessibilityRouteStep(half, to);
++	if (kind == ETA_PATH_WALK || kind == ETA_PATH_CROUCH)
++	{
++		return kind;
++	}
++	return ETA_WaysStepBack(from, wanted, to);
++}
++
++/* Spreads over the floor for up to 'budget' milliseconds; qtrue once
++   it has gone as far as it goes. */
++static qboolean ETA_WaysSpread(int budget)
++{
++	static const int steps[8][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 },
++		                             { 1, 1 }, { -1, 1 }, { -1, -1 }, { 1, -1 } };
++	int startedAt = trap_Milliseconds();
++
++	while (eta_ways.next < eta_ways.count)
++	{
++		int i;
++
++		if ((eta_ways.next & 3) == 0 && trap_Milliseconds() - startedAt >= budget)
++		{
++			return qfalse;
++		}
++
++		{
++			int   from = eta_ways.next++;
++			float here[3];
++
++			if (eta_ways.nodes[from].edge)
++			{
++				continue;
++			}
++			VectorCopy(eta_ways.nodes[from].at, here);
++
++			for (i = 0; i < 8; i++)
++			{
++				int   ix = eta_ways.nodes[from].cell % ETA_WAYS_GRID + steps[i][0];
++				int   iy = eta_ways.nodes[from].cell / ETA_WAYS_GRID + steps[i][1];
++				int   cell;
++				float to[3], dz;
++
++				if (ix < 0 || iy < 0 || ix >= ETA_WAYS_GRID || iy >= ETA_WAYS_GRID)
++				{
++					continue;
++				}
++				cell = iy * ETA_WAYS_GRID + ix;
++
++				/* Already reached, on this floor: before asking the
++				   collision, which is the slow part. */
++				if (ETA_WaysFind(cell, here[2]) >= 0)
++				{
++					continue;
++				}
++
++				/* Toward the square's own point: the step may land beside it,
++				   shifted to fit, and the square is still that one. */
++				to[0] = eta_ways.start[0] + (ix - ETA_WAYS_GRID_HALF) * ETA_WAYS_CELL;
++				to[1] = eta_ways.start[1] + (iy - ETA_WAYS_GRID_HALF) * ETA_WAYS_CELL;
++				to[2] = here[2];
++				if (ETA_WaysStep(here, to) == ETA_PATH_NONE || ETA_WaysFind(cell, to[2]) >= 0)
++				{
++					continue;
++				}
++				if (eta_ways.count >= ETA_WAYS_NODES)
++				{
++					eta_ways.full = qtrue;
++					continue;
++				}
++				dz = fabsf(to[2] - here[2]);
++				ETA_WaysAdd(to, cell, from, eta_ways.nodes[from].along
++				            + sqrtf((to[0] - here[0]) * (to[0] - here[0]) + (to[1] - here[1]) * (to[1] - here[1])) + dz);
++			}
++		}
++	}
++	return qtrue;
++}
++
++/* The doors close by: those the server sends, with their size. */
++static void ETA_WaysDoors(void)
++{
++	int i;
++
++	eta_ways.doorCount = 0;
++	for (i = 0; cg.snap && i < cg.snap->numEntities && eta_ways.doorCount < ETA_WAYS_DOORS; i++)
++	{
++		const entityState_t *es = &cg.snap->entities[i];
++		eta_wayDoor_t       *door;
++		qboolean            opens;
++		vec3_t              mins, maxs;
++		int                 k;
++
++		if (es->eType != ET_MOVER || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
++		    || !CG_AccessibilityDoorModel(es->modelindex, &opens))
++		{
++			continue;
++		}
++
++		door        = &eta_ways.doors[eta_ways.doorCount];
++		door->model = es->modelindex;
++		door->node  = -1;
++		door->used  = 0;
++		VectorAdd(cg_entities[es->number].lerpOrigin, cgs.inlineModelMidpoints[es->modelindex], door->middle);
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		for (k = 0; k < 3; k++)
++		{
++			float half = (maxs[k] - mins[k]) * 0.5f + 16.0f;
++
++			door->mins[k] = door->middle[k] - half;
++			door->maxs[k] = door->middle[k] + half;
++		}
++
++		/* The other half of a double door is the same way through. */
++		for (k = 0; k < eta_ways.doorCount; k++)
++		{
++			eta_wayDoor_t *other = &eta_ways.doors[k];
++			float         dx     = other->middle[0] - door->middle[0], dy = other->middle[1] - door->middle[1];
++
++			if (dx * dx + dy * dy < 136.0f * 136.0f && fabsf(other->middle[2] - door->middle[2]) < 64.0f)
++			{
++				int c;
++
++				for (c = 0; c < 3; c++)
++				{
++					other->mins[c]   = door->mins[c] < other->mins[c] ? door->mins[c] : other->mins[c];
++					other->maxs[c]   = door->maxs[c] > other->maxs[c] ? door->maxs[c] : other->maxs[c];
++					other->middle[c] = (other->mins[c] + other->maxs[c]) * 0.5f;
++				}
++				break;
++			}
++		}
++		if (k == eta_ways.doorCount)
++		{
++			eta_ways.doorCount++;
++		}
++	}
++}
++
++static qboolean ETA_WaysInDoor(const eta_wayDoor_t *door, const float at[3])
++{
++	/* The square's floor to its head: a door from the floor up. */
++	return (qboolean)(at[0] >= door->mins[0] && at[0] <= door->maxs[0]
++	                  && at[1] >= door->mins[1] && at[1] <= door->maxs[1]
++	                  && at[2] + 32.0f >= door->mins[2] && at[2] - 24.0f <= door->maxs[2]);
++}
++
++static int ETA_WaysRoot(int n)
++{
++	while (eta_ways.nodes[n].root != n)
++	{
++		eta_ways.nodes[n].root = eta_ways.nodes[eta_ways.nodes[n].root].root;
++		n                      = eta_ways.nodes[n].root;
++	}
++	return n;
++}
++
++static void ETA_WaysJoin(int a, int b)
++{
++	a = ETA_WaysRoot(a);
++	b = ETA_WaysRoot(b);
++	if (a != b)
++	{
++		eta_ways.nodes[b].root = (short)a;
++	}
++}
++
++/* The squares from the start to n, the start first. */
++static int ETA_WaysPath(int n, int *out)
++{
++	int count = 0, i;
++
++	while (n >= 0 && count < ETA_WAYS_PATH)
++	{
++		out[count++] = n;
++		n            = eta_ways.nodes[n].parent;
++	}
++	for (i = 0; i < count / 2; i++)
++	{
++		int t = out[i];
++
++		out[i]             = out[count - 1 - i];
++		out[count - 1 - i] = t;
++	}
++	return count;
++}
++
++static float ETA_WaysBearing(const float at[3])
++{
++	return (float)atan2(at[1] - eta_ways.start[1], at[0] - eta_ways.start[0]) * (180.0f / M_PI);
++}
++
++/* How wide the way is at a square of it, wall to wall, across the
++   direction it runs there. */
++static float ETA_WaysWidth(const float at[3], const float next[3])
++{
++	vec3_t  dir, side, from, end;
++	trace_t trace;
++	float   width = 0.0f;
++	int     s;
++
++	VectorSubtract(next, at, dir);
++	dir[2] = 0.0f;
++	if (VectorNormalize(dir) < 1.0f)
++	{
++		return 9999.0f;
++	}
++	VectorSet(side, -dir[1], dir[0], 0.0f);
++
++	VectorCopy(at, from);
++	from[2] += 8.0f;
++	for (s = -1; s <= 1; s += 2)
++	{
++		VectorMA(from, s * 160.0f, side, end);
++		trap_CM_BoxTrace(&trace, from, end, vec3_origin, vec3_origin, 0, MASK_PLAYERSOLID);
++		if (trace.startsolid)
++		{
++			return 9999.0f;
++		}
++		width += trace.fraction * 160.0f;
++	}
++	return width;
++}
++
++/* What the walk to a far end goes through, and where it starts. */
++static void ETA_WaysClassify(eta_way_t *way, const int *path, int count)
++{
++	const eta_wayNode_t *nodes = eta_ways.nodes;
++	int                 feature = -1, i;
++	int                 level   = 0;   /* the last square still on the start's floor */
++	int                 narrowAt = -1;
++	float               narrowFrom = 0.0f;
++	int                 rise = 0;
++
++	way->kind = ETA_WAY_OPEN;
++
++	for (i = 1; i < count; i++)
++	{
++		const eta_wayNode_t *n = &nodes[path[i]];
++		float               dz = n->at[2] - nodes[path[0]].at[2];
++
++		/* A door. */
++		if (n->door)
++		{
++			const eta_wayDoor_t *door = &eta_ways.doors[n->door - 1];
++			qboolean            opens = qtrue;
++			vec3_t              opener;
++
++			CG_AccessibilityDoorModel(door->model, &opens);
++			way->kind = !opens ? ETA_WAY_LOCKED_DOOR
++			            : CG_AccessibilityDoorOpener(door->model, door->middle, opener) ? ETA_WAY_SWITCH_DOOR
++			            : ETA_WAY_DOOR;
++			eta_ways.doors[n->door - 1].used = 1;
++			feature = i;
++			break;
++		}
++
++		/* Up or down a floor's worth. */
++		if (fabsf(dz) < 12.0f)
++		{
++			level = i;
++		}
++		else if (fabsf(dz) >= ETA_WAYS_RISE)
++		{
++			int k;
++
++			/* Steps: some square of the rise is a step's height up on the
++			   one before; a slope rises evenly. */
++			for (k = level + 1; k <= i; k++)
++			{
++				if (fabsf(nodes[path[k]].at[2] - nodes[path[k - 1]].at[2]) >= 14.0f)
++				{
++					rise = 1;
++				}
++			}
++			way->kind = dz > 0.0f ? (rise ? ETA_WAY_STAIRS_UP : ETA_WAY_SLOPE_UP)
++			            : (rise ? ETA_WAY_STAIRS_DOWN : ETA_WAY_SLOPE_DOWN);
++			feature = level + 1 < count ? level + 1 : level;
++			break;
++		}
++
++		/* Walls close each side. */
++		if (i + 1 < count && n->along >= 24.0f)
++		{
++			/* At the square and half way to the next: a doorway in a
++			   thin wall falls between two squares. */
++			float half[3], width, between;
++
++			half[0] = (n->at[0] + nodes[path[i + 1]].at[0]) * 0.5f;
++			half[1] = (n->at[1] + nodes[path[i + 1]].at[1]) * 0.5f;
++			half[2] = (n->at[2] > nodes[path[i + 1]].at[2] ? n->at[2] : nodes[path[i + 1]].at[2]);
++			width   = ETA_WaysWidth(n->at, nodes[path[i + 1]].at);
++			between = ETA_WaysWidth(half, nodes[path[i + 1]].at);
++			width   = between < width ? between : width;
++
++			if (width < ETA_WAYS_NARROW)
++			{
++				if (narrowAt < 0)
++				{
++					narrowAt   = i;
++					narrowFrom = n->along;
++				}
++				else if (n->along - narrowFrom >= ETA_WAYS_CORRIDOR)
++				{
++					way->kind = ETA_WAY_CORRIDOR;
++					feature   = narrowAt;
++					break;
++				}
++			}
++			else if (narrowAt >= 0)
++			{
++				/* Narrow, and open again soon after: a doorway - unless
++				   stairs start right there, which are what it is. */
++				way->kind = ETA_WAY_DOORWAY;
++				feature   = narrowAt;
++				narrowAt  = -1;
++				{
++					int k;
++
++					for (k = i; k < count && nodes[path[k]].along - narrowFrom < 96.0f; k++)
++					{
++						if (fabsf(nodes[path[k]].at[2] - nodes[path[0]].at[2]) >= ETA_WAYS_RISE)
++						{
++							way->kind = nodes[path[k]].at[2] > nodes[path[0]].at[2] ? ETA_WAY_STAIRS_UP
++							            : ETA_WAY_STAIRS_DOWN;
++							break;
++						}
++					}
++				}
++				break;
++			}
++		}
++	}
++
++	if (feature < 0 && narrowAt >= 0)
++	{
++		way->kind = ETA_WAY_CORRIDOR;
++		feature   = narrowAt;
++	}
++	if (feature < 0)
++	{
++		feature = 0;
++	}
++
++	VectorCopy(nodes[path[feature]].at, way->feature);
++	way->along = nodes[path[feature]].along;
++
++	/* Its direction: from a couple of metres on, so a way the player is
++	   standing at the mouth of is not said to be underfoot. */
++	for (i = feature; i < count - 1 && nodes[path[i]].along < 96.0f; i++)
++	{
++	}
++	VectorCopy(nodes[path[i]].at, way->facing);
++
++	/* O leads a few metres past where it starts. */
++	for (i = feature; i < count - 1 && nodes[path[i]].along < way->along + 4.0f / ETA_QU_TO_METERS; i++)
++	{
++	}
++	VectorCopy(nodes[path[i]].at, way->lead);
++}
++
++/* Whether the trail passes a square that is past this way. */
++static void ETA_WaysTrailMark(const float at[3], int time)
++{
++	int cell = ETA_WaysCell(at), dx, dy;
++
++	if (cell < 0)
++	{
++		return;
++	}
++
++	{
++		float fx = at[0] - eta_ways.start[0], fy = at[1] - eta_ways.start[1];
++
++		if (fx * fx + fy * fy < 64.0f * 64.0f)
++		{
++			return;
++		}
++	}
++
++	for (dy = -1; dy <= 1; dy++)
++	{
++		for (dx = -1; dx <= 1; dx++)
++		{
++			int c = cell + dy * ETA_WAYS_GRID + dx, n;
++
++			if (c < 0 || c >= ETA_WAYS_GRID * ETA_WAYS_GRID)
++			{
++				continue;
++			}
++			for (n = eta_ways.cellHead[c]; n >= 0; n = eta_ways.nodes[n].nextInCell)
++			{
++				int w = eta_ways.nodes[n].way;
++
++				if (w >= 0 && fabsf(eta_ways.nodes[n].at[2] - at[2]) < 48.0f
++				    && time > eta_ways.ways[w].lastTime)
++				{
++					eta_ways.ways[w].lastTime = time;
++				}
++			}
++		}
++	}
++}
++
++static void ETA_WaysTrail(void)
++{
++	vec3_t newer, older;
++	int    newerTime, olderTime, i, best = -1;
++
++	VectorCopy(cg.predictedPlayerState.origin, newer);
++	newerTime = cg.time;
++
++	for (i = 0; (olderTime = CG_AccessibilityTrailPoint(i, older)) >= 0; i++)
++	{
++		vec3_t step;
++		float  length;
++		int    k, samples;
++
++		VectorSubtract(newer, older, step);
++		length  = VectorLength(step);
++		samples = (int)(length / 24.0f) + 1;
++		if (length < 800.0f)
++		{
++			for (k = 0; k <= samples; k++)
++			{
++				vec3_t at;
++
++				VectorMA(older, (float)k / samples, step, at);
++				ETA_WaysTrailMark(at, olderTime + (newerTime - olderTime) * k / samples);
++			}
++		}
++		VectorCopy(older, newer);
++		newerTime = olderTime;
++	}
++
++	for (i = 0; i < eta_ways.wayCount; i++)
++	{
++		eta_way_t *way = &eta_ways.ways[i];
++
++		way->status = way->lastTime > 0;
++		if (way->lastTime > 0 && (best < 0 || way->lastTime > eta_ways.ways[best].lastTime))
++		{
++			best = i;
++		}
++	}
++	if (best >= 0)
++	{
++		eta_ways.ways[best].status = 2;
++	}
++}
++
++/* Ladders: their foot or top in reach. */
++static void ETA_WaysLadders(void)
++{
++	int l, count = CG_AccessibilityLadderCount();
++
++	for (l = 0; l < count && eta_ways.wayCount < ETA_WAYS_MAX; l++)
++	{
++		vec3_t mins, maxs;
++		int    n, best = -1, up = 0;
++
++		if (!CG_AccessibilityMapLadder(l, mins, maxs))
++		{
++			continue;
++		}
++
++		for (n = 0; n < eta_ways.count; n++)
++		{
++			const float *at = eta_ways.nodes[n].at;
++			float       dx  = at[0] < mins[0] ? mins[0] - at[0] : at[0] > maxs[0] ? at[0] - maxs[0] : 0.0f;
++			float       dy  = at[1] < mins[1] ? mins[1] - at[1] : at[1] > maxs[1] ? at[1] - maxs[1] : 0.0f;
++			float       feet = at[2] - 24.0f;
++			int         end;
++
++			if (dx > 40.0f || dy > 40.0f)
++			{
++				continue;
++			}
++			end = fabsf(feet - mins[2]) < 48.0f && maxs[2] - feet > 96.0f ? 1
++			      : fabsf(feet - maxs[2]) < 64.0f && feet - mins[2] > 96.0f ? -1 : 0;
++			if (end && (best < 0 || eta_ways.nodes[n].along < eta_ways.nodes[best].along))
++			{
++				best = n;
++				up   = end;
++			}
++		}
++
++		if (best >= 0)
++		{
++			eta_way_t *way = &eta_ways.ways[eta_ways.wayCount++];
++
++			memset(way, 0, sizeof(*way));
++			way->kind   = up > 0 ? ETA_WAY_LADDER_UP : ETA_WAY_LADDER_DOWN;
++			way->rep    = best;
++			way->ladder = l + 1;
++			way->along  = eta_ways.nodes[best].along;
++			VectorCopy(eta_ways.nodes[best].at, way->feature);
++			VectorCopy(way->feature, way->facing);
++			VectorCopy(way->feature, way->lead);
++			/* Been up it: the trail at its other end. */
++			{
++				vec3_t at;
++				int    i, t;
++
++				for (i = 0; (t = CG_AccessibilityTrailPoint(i, at)) >= 0; i++)
++				{
++					float feet = at[2] - 24.0f;
++
++					if (at[0] > mins[0] - 96.0f && at[0] < maxs[0] + 96.0f && at[1] > mins[1] - 96.0f
++					    && at[1] < maxs[1] + 96.0f
++					    && (up > 0 ? feet > maxs[2] - 64.0f : feet < mins[2] + 48.0f))
++					{
++						way->lastTime = t;
++						break;
++					}
++				}
++			}
++		}
++	}
++}
++
++static int ETA_WaysFloatCompare(const void *a, const void *b)
++{
++	float d = *(const float *)a - *(const float *)b;
++
++	return d < 0.0f ? -1 : d > 0.0f ? 1 : 0;
++}
++
++static int ETA_WaysCompare(const void *a, const void *b)
++{
++	float d = ((const eta_way_t *)a)->along - ((const eta_way_t *)b)->along;
++
++	return d < 0.0f ? -1 : d > 0.0f ? 1 : 0;
++}
++
++/* From the spread, the ways. */
++static void ETA_WaysMake(void)
++{
++	static int path[ETA_WAYS_PATH];
++	static int edges[ETA_WAYS_NODES];
++	static int group[ETA_WAYS_NODES];
++	static float bearing[ETA_WAYS_NODES];
++	int        edgeCount = 0, i, j, n;
++	vec3_t     gates[ETA_WAYS_MAX * 2];
++	int        reps[ETA_WAYS_MAX * 2];
++	int        sizes[ETA_WAYS_MAX * 2];
++	int        pieces = 0;
++	vec3_t     exitPoint;
++
++	eta_ways.wayCount = 0;
++	ETA_WaysDoors();
++
++	/* What each square is through: a door, if its walk went through one. */
++	for (n = 0; n < eta_ways.count; n++)
++	{
++		eta_wayNode_t *node = &eta_ways.nodes[n];
++
++		node->door = node->parent >= 0 ? eta_ways.nodes[node->parent].door : 0;
++		if (!node->door)
++		{
++			for (i = 0; i < eta_ways.doorCount; i++)
++			{
++				if (ETA_WaysInDoor(&eta_ways.doors[i], node->at))
++				{
++					/* Not the door the player stands in. */
++					if (n == 0)
++					{
++						break;
++					}
++					node->door = (unsigned char)(i + 1);
++					if (eta_ways.doors[i].node < 0)
++					{
++						eta_ways.doors[i].node = n;
++					}
++					break;
++				}
++			}
++		}
++		/* The squares left unspread when there was no room for more are
++		   as far as the look went, as the reach is. */
++		if (eta_ways.full && n >= eta_ways.next)
++		{
++			node->edge = 1;
++		}
++	}
++
++	/* The far ends, side by side, grouped. */
++	for (n = 0; n < eta_ways.count; n++)
++	{
++		eta_ways.nodes[n].root = (short)n;
++		if (eta_ways.nodes[n].edge)
++		{
++			edges[edgeCount++] = n;
++		}
++	}
++	for (i = 0; i < edgeCount; i++)
++	{
++		const eta_wayNode_t *a    = &eta_ways.nodes[edges[i]];
++		int                 cell  = a->cell, dx, dy;
++
++		for (dy = -1; dy <= 1; dy++)
++		{
++			for (dx = -1; dx <= 1; dx++)
++			{
++				int c = cell + dy * ETA_WAYS_GRID + dx;
++
++				if (cell < 0 || c < 0 || c >= ETA_WAYS_GRID * ETA_WAYS_GRID)
++				{
++					continue;
++				}
++				for (n = eta_ways.cellHead[c]; n >= 0; n = eta_ways.nodes[n].nextInCell)
++				{
++					if (n != edges[i] && eta_ways.nodes[n].edge
++					    && fabsf(eta_ways.nodes[n].at[2] - a->at[2]) < ETA_WAYS_SAME_FLOOR)
++					{
++						ETA_WaysJoin(edges[i], n);
++					}
++				}
++			}
++		}
++		bearing[i] = ETA_WaysBearing(a->at);
++	}
++
++	/* Each group, cut into quarters when it spreads wide - open ground
++	   all round is four ways, not one. */
++	for (i = 0; i < edgeCount; i++)
++	{
++		group[i] = -1;
++	}
++	for (i = 0; i < edgeCount && pieces < ETA_WAYS_MAX * 2; i++)
++	{
++		int   root = ETA_WaysRoot(edges[i]);
++		float list[ETA_WAYS_NODES / 4];
++		int   members = 0, k, cuts;
++		float from, span, widestGap = -1.0f;
++
++		if (group[i] >= 0)
++		{
++			continue;
++		}
++
++		for (j = i; j < edgeCount; j++)
++		{
++			if (group[j] < 0 && ETA_WaysRoot(edges[j]) == root && members < (int)ARRAY_LEN(list))
++			{
++				list[members++] = bearing[j];
++			}
++		}
++
++		/* The widest gap between the bearings is where the group is not:
++		   it spans the rest. */
++		qsort(list, members, sizeof(list[0]), ETA_WaysFloatCompare);
++		from = list[0];
++		for (k = 0; k < members; k++)
++		{
++			float gap = (k + 1 < members ? list[k + 1] : list[0] + 360.0f) - list[k];
++
++			if (gap > widestGap)
++			{
++				widestGap = gap;
++				from      = k + 1 < members ? list[k + 1] : list[0];
++			}
++		}
++		span = 360.0f - widestGap;
++		cuts = span > 100.0f ? (int)ceil(span / 90.0f) : 1;
++		if (cuts > ETA_WAYS_MAX * 2 - pieces)
++		{
++			cuts = ETA_WAYS_MAX * 2 - pieces;
++		}
++
++		for (k = 0; k < cuts && pieces < ETA_WAYS_MAX * 2; k++)
++		{
++			sizes[pieces] = 0;
++			reps[pieces]  = -1;
++			pieces++;
++		}
++
++		for (j = i; j < edgeCount; j++)
++		{
++			float off;
++			int   piece;
++
++			if (group[j] >= 0 || ETA_WaysRoot(edges[j]) != root)
++			{
++				continue;
++			}
++			off = bearing[j] - from;
++			while (off < 0.0f)
++			{
++				off += 360.0f;
++			}
++			piece    = cuts > 1 ? (int)(off / (span / cuts + 0.001f)) : 0;
++			piece    = piece >= cuts ? cuts - 1 : piece;
++			group[j] = pieces - cuts + piece;
++			sizes[group[j]]++;
++		}
++	}
++
++	/* Each piece's middle square, and where its walk is half way. */
++	for (i = 0; i < pieces; i++)
++	{
++		int seen = 0, k;
++
++		for (j = 0; j < edgeCount; j++)
++		{
++			if (group[j] == i && seen++ == sizes[i] / 2)
++			{
++				reps[i] = edges[j];
++			}
++		}
++		n = reps[i];
++		while (n >= 0 && eta_ways.nodes[n].along > ETA_WAYS_REACH * 0.5f)
++		{
++			n = eta_ways.nodes[n].parent;
++		}
++		k = n >= 0 ? n : 0;
++		VectorCopy(eta_ways.nodes[k].at, gates[i]);
++	}
++
++	/* Two pieces whose walks run through the same place half way are one
++	   way that spreads out further on: a corridor into a room. */
++	for (i = 0; i < pieces; i++)
++	{
++		for (j = i + 1; j < pieces; j++)
++		{
++			if (sizes[i] && sizes[j] && Distance(gates[i], gates[j]) < 80.0f)
++			{
++				int k;
++
++				for (k = 0; k < edgeCount; k++)
++				{
++					if (group[k] == j)
++					{
++						group[k] = i;
++					}
++				}
++				if (sizes[j] > sizes[i])
++				{
++					reps[i] = reps[j];
++				}
++				sizes[i] += sizes[j];
++				sizes[j]  = 0;
++			}
++		}
++	}
++
++	/* The ways, what each goes through. */
++	for (i = 0; i < pieces && eta_ways.wayCount < ETA_WAYS_MAX; i++)
++	{
++		eta_way_t *way;
++		int       count;
++
++		/* A narrow stair reaches as far as the look goes only a square
++		   or two wide: still a way on. */
++		if (sizes[i] < 1 || reps[i] < 0)
++		{
++			continue;
++		}
++		way = &eta_ways.ways[eta_ways.wayCount];
++		memset(way, 0, sizeof(*way));
++		way->rep = reps[i];
++		count    = ETA_WaysPath(reps[i], path);
++		ETA_WaysClassify(way, path, count);
++		/* Its squares: the walk to each far end, from a little past where
++		   it starts - so a player who walked in from it, even from close
++		   by, is heard to have come from it. */
++		for (j = 0; j < edgeCount; j++)
++		{
++			if (group[j] != i)
++			{
++				continue;
++			}
++			for (n = edges[j]; n >= 0 && eta_ways.nodes[n].along > way->along + 32.0f
++			     && eta_ways.nodes[n].way < 0; n = eta_ways.nodes[n].parent)
++			{
++				eta_ways.nodes[n].way = (short)eta_ways.wayCount;
++			}
++		}
++		eta_ways.wayCount++;
++	}
++
++	/* A door the walk reaches that no far end lies past: into a room,
++	   which is somewhere to go too. */
++	for (i = 0; i < eta_ways.doorCount && eta_ways.wayCount < ETA_WAYS_MAX; i++)
++	{
++		eta_wayDoor_t *door = &eta_ways.doors[i];
++		eta_way_t     *way;
++		qboolean      opens = qtrue;
++		vec3_t        opener;
++		int           lead = -1;
++
++		if (door->used || door->node < 0)
++		{
++			continue;
++		}
++		way = &eta_ways.ways[eta_ways.wayCount];
++		memset(way, 0, sizeof(*way));
++		CG_AccessibilityDoorModel(door->model, &opens);
++		way->kind = !opens ? ETA_WAY_LOCKED_DOOR
++		            : CG_AccessibilityDoorOpener(door->model, door->middle, opener) ? ETA_WAY_SWITCH_DOOR
++		            : ETA_WAY_DOOR;
++		way->rep  = door->node;
++		way->door = i + 1;
++		way->along = eta_ways.nodes[door->node].along;
++		VectorCopy(eta_ways.nodes[door->node].at, way->feature);
++		VectorCopy(door->middle, way->facing);
++		way->facing[2] = way->feature[2];
++
++		/* Past it: the squares through it are this way's. */
++		for (n = 0; n < eta_ways.count; n++)
++		{
++			if (eta_ways.nodes[n].door == i + 1 && eta_ways.nodes[n].way < 0)
++			{
++				eta_ways.nodes[n].way = (short)eta_ways.wayCount;
++				if (eta_ways.nodes[n].along >= way->along + 64.0f
++				    && (lead < 0 || eta_ways.nodes[n].along < eta_ways.nodes[lead].along))
++				{
++					lead = n;
++				}
++			}
++		}
++		VectorCopy(eta_ways.nodes[lead >= 0 ? lead : door->node].at, way->lead);
++		eta_ways.wayCount++;
++	}
++
++	ETA_WaysLadders();
++	ETA_WaysTrail();
++
++	/* The one that brings the player nearest the way out. */
++	if (CG_AccessibilityExitPoint(eta_ways.start, exitPoint))
++	{
++		float mine = CG_AccessibilityWayOutFar(eta_ways.start, exitPoint);
++		int   best = -1;
++		float bestFar = 0.0f;
++
++		for (i = 0; i < eta_ways.wayCount; i++)
++		{
++			float there = CG_AccessibilityWayOutFar(eta_ways.ways[i].lead, exitPoint);
++
++			if (eta_ways.ways[i].rep >= 0 && eta_ways.ways[i].door == 0 && eta_ways.ways[i].ladder == 0)
++			{
++				/* A far end: as far as the look went that way. */
++				there = CG_AccessibilityWayOutFar(eta_ways.nodes[eta_ways.ways[i].rep].at, exitPoint);
++			}
++			if (there < mine - ETA_WAYS_ONWARD && (best < 0 || there < bestFar))
++			{
++				best    = i;
++				bestFar = there;
++			}
++		}
++		if (best >= 0)
++		{
++			eta_ways.ways[best].onward = qtrue;
++		}
++	}
++
++	qsort(eta_ways.ways, eta_ways.wayCount, sizeof(eta_ways.ways[0]), ETA_WaysCompare);
++}
++
++/* "Door ahead left, 4 meters, new" */
++static void ETA_WayText(const eta_way_t *way, char *out, size_t outSize)
++{
++	const char *status[3] = { "new", "been there", "where you came from" };
++	int        meters     = (int)(way->along * ETA_QU_TO_METERS + 0.5f);
++
++	Com_sprintf(out, outSize, "%s %s", eta_wayWords[way->kind],
++	            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(way->facing)));
++	if (meters >= 1)
++	{
++		Q_strcat(out, outSize, va(", %d %s", meters, meters == 1 ? "meter" : "meters"));
++	}
++	Q_strcat(out, outSize, va(", %s", status[way->status]));
++	if (way->onward)
++	{
++		Q_strcat(out, outSize, ", toward the way out");
++	}
++}
++
++static void ETA_WaysSayAll(void)
++{
++	char line[96];
++	int  i, said = eta_ways.wayCount < ETA_WAYS_SAY ? eta_ways.wayCount : ETA_WAYS_SAY;
++
++	ETA_Speech_BeginReport();
++	if (!eta_ways.wayCount)
++	{
++		ETA_Speech_Say("No way on found from here");
++		ETA_Speech_EndReport();
++		return;
++	}
++	ETA_Speech_Say(eta_ways.wayCount == 1 ? "1 way on" : va("%d ways on", eta_ways.wayCount));
++	for (i = 0; i < said; i++)
++	{
++		ETA_WayText(&eta_ways.ways[i], line, sizeof(line));
++		ETA_Speech_Say(line);
++	}
++	ETA_Speech_Say("F3 again picks one");
++	ETA_Speech_EndReport();
++	eta_ways.listedAt = cg.time;
++	eta_ways.pick     = -1;
++}
++
++static void ETA_WaysPick(void)
++{
++	eta_way_t *way;
++	char      line[96], name[64];
++
++	eta_ways.pick = (eta_ways.pick + 1) % eta_ways.wayCount;
++	way           = &eta_ways.ways[eta_ways.pick];
++	ETA_WayText(way, line, sizeof(line));
++
++	ETA_Speech_BeginReport();
++	ETA_Speech_Say(va("%d of %d. %s. O leads there", eta_ways.pick + 1, eta_ways.wayCount, line));
++	ETA_Speech_EndReport();
++
++	Com_sprintf(name, sizeof(name), "the %s", eta_wayWords[way->kind]);
++	name[4] = (char)tolower((unsigned char)name[4]);
++	CG_AccessibilityChoose(way->lead, name);
++	eta_ways.listedAt = cg.time;
++}
++
++static qboolean ETA_WaysFresh(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float               dx  = ps->origin[0] - eta_ways.start[0], dy = ps->origin[1] - eta_ways.start[1];
++
++	return (qboolean)(eta_ways.done && cg.time >= eta_ways.doneAt && cg.time - eta_ways.doneAt < ETA_WAYS_FRESH_MS
++	                  && dx * dx + dy * dy < ETA_WAYS_MOVED * ETA_WAYS_MOVED
++	                  && fabsf(ps->origin[2] - eta_ways.start[2]) < ETA_WAYS_SAME_FLOOR);
++}
++
++static void ETA_WaysFinish(void)
++{
++	eta_ways.scanning = qfalse;
++	eta_ways.done     = qtrue;
++	eta_ways.doneAt   = cg.time;
++	ETA_WaysMake();
++}
++
++void CG_AccessibilityWaysOn(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		ETA_Speech_Say("Nothing to describe until you are in play");
++		return;
++	}
++
++	/* Again, soon after, from where they were said: the next one. */
++	if (ETA_WaysFresh() && eta_ways.wayCount && cg.time >= eta_ways.listedAt
++	    && cg.time - eta_ways.listedAt < ETA_WAYS_PICK_MS)
++	{
++		ETA_WaysPick();
++		return;
++	}
++
++	if (!ETA_WaysFresh())
++	{
++		ETA_WaysBegin(ps->origin);
++		eta_ways.background = qfalse;
++		if (!ETA_WaysSpread(250))
++		{
++			/* Not done yet: said when it is. */
++			eta_ways.keyWaiting = qtrue;
++			return;
++		}
++		ETA_WaysFinish();
++	}
++	eta_ways.keyWaiting = qfalse;
++	ETA_WaysSayAll();
++}
++
++/* Whether the trail has been here before, a while ago. */
++static qboolean ETA_WaysKnownPlace(const vec3_t at)
++{
++	vec3_t point;
++	int    i, t;
++
++	for (i = 0; (t = CG_AccessibilityTrailPoint(i, point)) >= 0; i++)
++	{
++		float dx = point[0] - at[0], dy = point[1] - at[1];
++
++		if (cg.time - t >= ETA_WAYS_FRESH_MS && dx * dx + dy * dy < ETA_WAYS_KNOWN * ETA_WAYS_KNOWN
++		    && fabsf(point[2] - at[2]) < ETA_WAYS_SAME_FLOOR)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/**
++ * @brief Each frame: the look F3 is waiting on, and a look on its own
++ * after the player has walked a way, for "New place, 3 ways on".
++ *
++ * A new place is one the trail has not been near for a while; only one
++ * with somewhere to choose - three ways on or more - is said, so a
++ * corridor walked down is not a running commentary. eta_waysCallouts 0
++ * keeps it quiet; F3 still says them.
++ */
++void CG_AccessibilityWaysFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		eta_ways.scanning   = qfalse;
++		eta_ways.keyWaiting = qfalse;
++		return;
++	}
++
++	if (eta_ways.scanning)
++	{
++		if (!ETA_WaysSpread(eta_ways.keyWaiting ? 12 : 3))
++		{
++			return;
++		}
++		ETA_WaysFinish();
++
++		if (eta_ways.keyWaiting)
++		{
++			eta_ways.keyWaiting = qfalse;
++			ETA_WaysSayAll();
++			return;
++		}
++
++		if (eta_ways.background && eta_waysCallouts.integer && eta_ways.wayCount >= 3
++		    && (cg.time - eta_ways.saidAt >= ETA_WAYS_SAY_EVERY || cg.time < eta_ways.saidAt)
++		    && Distance(eta_ways.start, eta_ways.saidFrom) >= ETA_WAYS_SAY_MOVED
++		    && !ETA_WaysKnownPlace(eta_ways.start))
++		{
++			eta_ways.saidAt = cg.time;
++			VectorCopy(eta_ways.start, eta_ways.saidFrom);
++			ETA_Speech_BeginReport();
++			ETA_Speech_Say(va("New place, %d ways on", eta_ways.wayCount));
++			ETA_Speech_EndReport();
++		}
++		return;
++	}
++
++	/* A look on its own, standing on the ground, once walked on from the
++	   last. */
++	if (ps->groundEntityNum != ENTITYNUM_NONE
++	    && (!eta_ways.done || Distance(ps->origin, eta_ways.start) >= ETA_WAYS_SCAN_MOVED))
++	{
++		ETA_WaysBegin(ps->origin);
++		eta_ways.background = qtrue;
++	}
++}
++
++void CG_AccessibilityWaysReset(void)
++{
++	memset(&eta_ways, 0, sizeof(eta_ways));
++	eta_ways.pick = -1;
++	VectorSet(eta_ways.saidFrom, 99999.0f, 99999.0f, 99999.0f);
++}
++
++#endif
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2f709925..7d305a49 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4573,6 +4573,38 @@ void CG_AccessibilityWaypointNext(void)
+ 	eta_chosenSet = qtrue;
+ }
+ 
++/* For the ways on (cg_accessibility_ways.c). */
++void CG_AccessibilityChoose(const vec3_t point, const char *name)
++{
++	VectorCopy(point, eta_chosenPoint);
++	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
++	eta_chosenSet = qtrue;
++}
++
++qboolean CG_AccessibilityExitPoint(const vec3_t from, vec3_t out)
++{
++	vec3_t point;
++	float  bestDistance = 0.0f;
++	int    i, found = 0;
++
++	ETA_WorldRead();
++	for (i = 0; i < eta_exitCount; i++)
++	{
++		if (ETA_ExitPoint(eta_exitModels[i], point) && (!found || Distance(from, point) < bestDistance))
++		{
++			found        = 1;
++			bestDistance = Distance(from, point);
++			VectorCopy(point, out);
++		}
++	}
++	return (qboolean)found;
++}
++
++float CG_AccessibilityWayOutFar(const vec3_t from, const vec3_t exitPoint)
++{
++	return ETA_WayOutFar(from, exitPoint);
++}
++
+ /**
+  * @brief Where the player has been: "You were here 3 minutes ago", and
+  * "Back at waypoint 2, by the button".
+@@ -4694,6 +4726,21 @@ static void ETA_TrailFrame(void)
+ 	}
+ }
+ 
++/* The trail's points, newest first: the time of point 'index', or -1
++   past the oldest. */
++int CG_AccessibilityTrailPoint(int index, vec3_t out)
++{
++	int k;
++
++	if (index < 0 || index >= eta_trail.count)
++	{
++		return -1;
++	}
++	k = (eta_trail.head + ETA_TRAIL_MAX - 1 - index) % ETA_TRAIL_MAX;
++	VectorCopy(eta_trail.at[k], out);
++	return eta_trail.time[k];
++}
++
+ /**
+  * @brief Reads what the map file holds about the map: its doors, its
+  *        ladders and the things in its rooms. Once a map, on its first
+@@ -4708,6 +4755,7 @@ void CG_AccessibilityWorldInit(void)
+ 	memset(&eta_trail, 0, sizeof(eta_trail));
+ 	eta_chosenSet     = qfalse;
+ 	CG_AccessibilityMarkerReset();
++	CG_AccessibilityWaysReset();
+ }
+ 
+ static void ETA_WorldRead(void)
+@@ -4753,6 +4801,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 		ETA_NarrateLadder();
+ 		CG_AccessibilityMarkerApproach();
+ 		ETA_TrailFrame();
++		CG_AccessibilityWaysFrame();
+ 		ETA_NarrateFacing();
+ 		ETA_NarrateLookAround();
+ 		/* Most urgent last: a backend that cuts off the line in progress
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c76f9002..29bca15d 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2245,6 +2245,14 @@ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+ void CG_AccessibilityMarkerWhere( void );
+ void CG_AccessibilityMarkerClear( void );
++int CG_AccessibilityRouteStep( const float from[3], float to[3] );
++void CG_AccessibilityChoose( const vec3_t point, const char *name );
++qboolean CG_AccessibilityExitPoint( const vec3_t from, vec3_t out );
++float CG_AccessibilityWayOutFar( const vec3_t from, const vec3_t exitPoint );
++int CG_AccessibilityTrailPoint( int index, vec3_t out );
++void CG_AccessibilityWaysOn( void );
++void CG_AccessibilityWaysFrame( void );
++void CG_AccessibilityWaysReset( void );
+ void CG_AccessibilitySpeakLocation( void );
+ void CG_AccessibilityFooting( int footstep );
+ void CG_AccessibilityStuckFrame( playerState_t *ps, playerState_t *ops );
+@@ -2348,6 +2356,7 @@ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
+ extern vmCvar_t eta_autoSteer;
+ extern vmCvar_t eta_stairKeeper;
++extern vmCvar_t eta_waysCallouts;
+ extern vmCvar_t eta_enemyCues;
+ int CG_AccessibilityOnStairs( void );
+ 

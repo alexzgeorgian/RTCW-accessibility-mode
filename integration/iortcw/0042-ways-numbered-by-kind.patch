@@ -1,0 +1,143 @@
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 3bd56104..7ba02b51 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -99,6 +99,23 @@ static const char *const eta_wayWords[] =
+ 	"Ladder down"
+ };
+ 
++/* The same, more than one: for "3 ways on: 2 doors, 1 doorway". */
++static const char *const eta_wayWordsMany[] =
++{
++	"open ways",
++	"doors",
++	"locked doors",
++	"doors that open with a switch",
++	"doorways",
++	"corridors",
++	"stairs up",
++	"stairs down",
++	"slopes up",
++	"slopes down",
++	"ladders up",
++	"ladders down"
++};
++
+ typedef struct
+ {
+ 	float at[3];
+@@ -1179,14 +1196,46 @@ static void ETA_WaysMake(void)
+ 	qsort(eta_ways.ways, eta_ways.wayCount, sizeof(eta_ways.ways[0]), ETA_WaysCompare);
+ }
+ 
+-/* "Door ahead left, 4 meters, new" */
++/* How many ways of a kind there are, and which of them this one is,
++   nearest first. */
++static int ETA_WaysOfKind(const eta_way_t *way, int *number)
++{
++	int count = 0, i;
++
++	*number = 0;
++	for (i = 0; i < eta_ways.wayCount; i++)
++	{
++		if (eta_ways.ways[i].kind == way->kind)
++		{
++			count++;
++			if (&eta_ways.ways[i] == way)
++			{
++				*number = count;
++			}
++		}
++	}
++	return count;
++}
++
++/* "Door 1 of 2, ahead left, 4 meters, new": numbered among its kind, as
++   the tester had what there was to find numbered in 1428, so they know
++   how many doors there are and which one they are on. */
+ static void ETA_WayText(const eta_way_t *way, char *out, size_t outSize)
+ {
+ 	const char *status[3] = { "new", "been there", "where you came from" };
+ 	int        meters     = (int)(way->along * ETA_QU_TO_METERS + 0.5f);
++	int        number, count = ETA_WaysOfKind(way, &number);
+ 
+-	Com_sprintf(out, outSize, "%s %s", eta_wayWords[way->kind],
+-	            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(way->facing)));
++	if (count > 1)
++	{
++		Com_sprintf(out, outSize, "%s %d of %d, %s", eta_wayWords[way->kind], number, count,
++		            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(way->facing)));
++	}
++	else
++	{
++		Com_sprintf(out, outSize, "%s %s", eta_wayWords[way->kind],
++		            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(way->facing)));
++	}
+ 	if (meters >= 1)
+ 	{
+ 		Q_strcat(out, outSize, va(", %d %s", meters, meters == 1 ? "meter" : "meters"));
+@@ -1198,6 +1247,35 @@ static void ETA_WayText(const eta_way_t *way, char *out, size_t outSize)
+ 	}
+ }
+ 
++/* "3 ways on: 2 doors, 1 doorway": how many, and of each kind. */
++static void ETA_WaysSummary(char *summary, size_t size)
++{
++	int kind, i, listed = 0;
++
++	Com_sprintf(summary, size, eta_ways.wayCount == 1 ? "1 way on" : "%d ways on", eta_ways.wayCount);
++	if (eta_ways.wayCount < 2)
++	{
++		return;
++	}
++	for (kind = 0; kind < (int)ARRAY_LEN(eta_wayWords); kind++)
++	{
++		int n = 0;
++
++		for (i = 0; i < eta_ways.wayCount; i++)
++		{
++			n += eta_ways.ways[i].kind == (eta_wayKind_t)kind;
++		}
++		if (n)
++		{
++			char one[64];
++
++			Q_strncpyz(one, eta_wayWords[kind], sizeof(one));
++			one[0] = (char)tolower((unsigned char)one[0]);
++			Q_strcat(summary, size, va("%s %d %s", listed++ ? "," : ":", n, n == 1 ? one : eta_wayWordsMany[kind]));
++		}
++	}
++}
++
+ static void ETA_WaysSayAll(void)
+ {
+ 	char line[96];
+@@ -1210,7 +1288,12 @@ static void ETA_WaysSayAll(void)
+ 		ETA_Speech_EndReport();
+ 		return;
+ 	}
+-	ETA_Speech_Say(eta_ways.wayCount == 1 ? "1 way on" : va("%d ways on", eta_ways.wayCount));
++	{
++		char summary[256];
++
++		ETA_WaysSummary(summary, sizeof(summary));
++		ETA_Speech_Say(summary);
++	}
+ 	for (i = 0; i < said; i++)
+ 	{
+ 		ETA_WayText(&eta_ways.ways[i], line, sizeof(line));
+@@ -1377,10 +1460,13 @@ void CG_AccessibilityWaysFrame(void)
+ 		    && Distance(eta_ways.start, eta_ways.saidFrom) >= ETA_WAYS_SAY_MOVED
+ 		    && !ETA_WaysKnownPlace(eta_ways.start))
+ 		{
++			char summary[256];
++
+ 			eta_ways.saidAt = cg.time;
+ 			VectorCopy(eta_ways.start, eta_ways.saidFrom);
++			ETA_WaysSummary(summary, sizeof(summary));
+ 			ETA_Speech_BeginReport();
+-			ETA_Speech_Say(va("New place, %d ways on", eta_ways.wayCount));
++			ETA_Speech_Say(va("New place, %s", summary));
+ 			ETA_Speech_EndReport();
+ 		}
+ 		return;

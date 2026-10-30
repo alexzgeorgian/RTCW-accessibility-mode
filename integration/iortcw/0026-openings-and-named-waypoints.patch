@@ -1,0 +1,334 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index cb1011ee..f96e1e4a 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -751,6 +751,13 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+ 		ETA_AimSay(label, target->point);
+ 	}
++
++	/* A locked door turned to is remembered, so that once its switch
++	   is found, L leads back to it. */
++	if (target->locked && !Q_stricmpn(target->name, "Locked door", 11))
++	{
++		CG_AccessibilityWaypointRemember(target->point, "locked door");
++	}
+ }
+ 
+ /**
+@@ -1617,8 +1624,8 @@ static void ETA_UseLineEnd(const vec3_t eye, const vec3_t point, vec3_t end)
+  *
+  * Off unless eta_autoSteer is 1. The tester, led by it, asked not to have
+  * their autonomy taken away entirely: W is theirs again, and the way is
+- * told as they walk instead (ETA_WayCueFrame), and O says which way to
+- * turn when they ask (CG_AccessibilityFaceTheWay).
++ * told as they walk instead (ETA_WayCueFrame), and O turns them toward
++ * it, to an opening, when they ask (CG_AccessibilityFaceTheWay).
+  */
+ #define ETA_GUIDE_TOLERANCE  4.0f    /* degrees off the way that need no turn */
+ #define ETA_GUIDE_STUCK_MS   1200    /* this long walking without getting anywhere: stuck */
+@@ -2284,7 +2291,8 @@ static void ETA_WayCueSwitch(void)
+ 		{
+ 			CG_AccessibilityMarkerBlocked(doorAt, 56.0f);
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("This door opens from the other side. Finding another way. O says which way");
++			ETA_Speech_Say("This door opens from the other side. Finding another way. O turns you toward it");
++			CG_AccessibilityWaypointRemember(doorAt, "locked door");
+ 			return;
+ 		}
+ 	}
+@@ -2413,11 +2421,11 @@ static void ETA_WayCueFrame(void)
+ 				/* Facing the way and held still: what is in front is
+ 				   no way through, whatever the search made of it. */
+ 				CG_AccessibilityMarkerBlocked(ahead, 32.0f);
+-				what = "Blocked. Finding a way round. O says which way";
++				what = "Blocked. Finding a way round. O turns you toward it";
+ 			}
+ 			else
+ 			{
+-				what  = va("Blocked. The way goes %s. O says more", ETA_HudNarrator_RelativeDirection(rel));
++				what  = va("Blocked. The way goes %s. O turns you toward it", ETA_HudNarrator_RelativeDirection(rel));
+ 				plain = qtrue;
+ 			}
+ 		}
+@@ -2433,14 +2441,15 @@ static void ETA_WayCueFrame(void)
+ }
+ 
+ /**
+- * @brief O again: which way to turn for the way, and how far is left.
++ * @brief O again: turned toward the way, always to an opening, and how
++ * far is left.
+  *
+- * It once turned the player onto the way. Pressed straight after the way
+- * out was set, that turned the tester through the walls at the exit; and
+- * even once the way was known, it turned them into a wall. Now it only
+- * says - which way to turn, which way the way goes - and the player
+- * turns. Not before the way round the walls is known: then it waits -
+- * "Finding the way" - and says it as soon as the way is found.
++ * Pressed straight after the way out was set, it once turned the tester
++ * through the walls at the exit; and even once the way was known, the
++ * way's bare direction turned them into a wall. Now it is faced only
++ * where the player can walk (ETA_OpeningToward). Not before the way round
++ * the walls is known: then it waits - "Finding the way" - and turns as
++ * soon as the way is found.
+  */
+ #define ETA_FACE_WAIT_MS 8000
+ 
+@@ -2493,18 +2502,91 @@ static void ETA_FacePendingFrame(void)
+ 	}
+ }
+ 
++/* The yaw nearest the one wanted that the player can walk on from here
++   - stepping up and down as the game does, no wall, no edge - tried a
++   little either side at a time, as far as a quarter turn. qfalse when
++   no way is open at all. */
++#define ETA_OPENING_CLEAR 112.0f   /* this far walked on: an opening */
++#define ETA_OPENING_SOME  32.0f    /* at the least this far, for want of better */
++
++static qboolean ETA_OpeningToward(float wanted, float *yaw)
++{
++	float best = 0.0f, bestYaw = wanted;
++	int   off, k;
++
++	for (off = 0; off <= 90; off += 10)
++	{
++		for (k = 0; k < (off ? 2 : 1); k++)
++		{
++			float    tryYaw = wanted + (float)(k ? -off : off), rise, walked;
++			qboolean edge;
++
++			walked = ETA_StairsKeepProbe(tryYaw, &rise, &edge);
++			if (edge)
++			{
++				continue;
++			}
++			if (walked >= ETA_OPENING_CLEAR)
++			{
++				*yaw = AngleNormalize360(tryYaw);
++				return qtrue;
++			}
++			if (walked > best)
++			{
++				best    = walked;
++				bestYaw = tryYaw;
++			}
++		}
++	}
++
++	if (best >= ETA_OPENING_SOME)
++	{
++		*yaw = AngleNormalize360(bestYaw);
++		return qtrue;
++	}
++	return qfalse;
++}
++
+ static void ETA_FaceTheWayNow(void)
+ {
+-	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              target, delta;
++	float               yaw;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
+ 	{
+ 		return;
+ 	}
+ 
+-	/* Said, never turned: "Turn left toward the marker. The way goes
+-	   east. Marker lies north, you are facing north" - the Enemy
+-	   Territory mode's own words. Turned onto the way, the tester was
+-	   turned into a wall; the turning is the player's, as it is there
+-	   and in 1428, where the ping leads and the player turns. */
++	/* Turned toward the way, as 1428's N turns its player toward a
++	   waypoint - and, as there, always to an opening. The way's own
++	   direction once turned the tester into a wall; so it is tried as
++	   the game would walk it, and where a wall or an edge is in the way,
++	   the nearest opening either side is faced instead. Then said, in
++	   the Enemy Territory mode's words. */
++	if (CG_AccessibilityMarkerSteerPoint(target))
++	{
++		VectorSubtract(target, ps->origin, delta);
++		delta[2] = 0.0f;
++		if (VectorLength(delta) >= 16.0f && ETA_OpeningToward(vectoyaw(delta), &yaw))
++		{
++			etaAimTarget_t way;
++			vec3_t         dir;
++
++			memset(&way, 0, sizeof(way));
++			way.entityNum = -1;
++			VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++			VectorMA(ps->origin, 256.0f, dir, way.point);
++			way.point[2] = ps->origin[2] + ps->viewheight;
++			ETA_AimStartSnap(&way, NULL);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(fabsf(AngleSubtract(yaw, vectoyaw(delta))) > 15.0f
++			               ? "Facing the opening nearest the way" : "Facing the way");
++			CG_AccessibilityMarkerWhere();
++			return;
++		}
++	}
++
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	CG_AccessibilityMarkerWhere();
+ }
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index af17b105..257b0151 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4227,7 +4227,7 @@ void CG_AccessibilityWayOut(void)
+ 	VectorSubtract(best, ps->origin, delta);
+ 	meters = (int)(bestDistance * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. Follow the ping; O again says which way", meters,
++	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. O again turns you toward it", meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+ 	                  height[0] ? ", " : "", height));
+@@ -4251,34 +4251,101 @@ void CG_AccessibilityWayOut(void)
+ #define ETA_MAX_WAYPOINTS 9
+ 
+ static vec3_t eta_waypoints[ETA_MAX_WAYPOINTS];
++static char   eta_waypointNames[ETA_MAX_WAYPOINTS][48];   /* "locked door", or "" */
+ static int    eta_waypointCount, eta_waypointNext, eta_destination;
+ 
++/* Kept as the next waypoint, named; the number it was given. */
++static int ETA_WaypointAdd(const vec3_t at, const char *name)
++{
++	int number = eta_waypointNext + 1;
++
++	VectorCopy(at, eta_waypoints[eta_waypointNext]);
++	Q_strncpyz(eta_waypointNames[eta_waypointNext], name ? name : "", sizeof(eta_waypointNames[0]));
++	eta_waypointNext = (eta_waypointNext + 1) % ETA_MAX_WAYPOINTS;
++	if (eta_waypointCount < ETA_MAX_WAYPOINTS)
++	{
++		eta_waypointCount++;
++	}
++	return number;
++}
++
++/**
++ * @brief A waypoint kept by itself: a locked door F turned to.
++ *
++ * In 1428 the tester knew each waypoint by what it was. Here the hard one
++ * to find again is the door: a switch found far off opens a door they no
++ * longer know the way back to. So a locked door F turns the player to is
++ * kept, once, named, where the player stands before it - L then leads
++ * back to it.
++ */
++void CG_AccessibilityWaypointRemember(const vec3_t at, const char *name)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              spot, toward;
++	int                 i;
++
++	for (i = 0; i < eta_waypointCount; i++)
++	{
++		if (!Q_stricmp(eta_waypointNames[i], name) && Distance(eta_waypoints[i], at) < 160.0f)
++		{
++			return;   /* already kept */
++		}
++	}
++
++	/* On the floor, a step in front of the door on the player's side:
++	   the door itself is not somewhere to stand. */
++	VectorSubtract(ps->origin, at, toward);
++	toward[2] = 0.0f;
++	if (VectorNormalize(toward) < 1.0f)
++	{
++		VectorSet(toward, 1.0f, 0.0f, 0.0f);
++	}
++	VectorMA(at, 40.0f, toward, spot);
++	spot[2] = ps->origin[2];
++	if (Distance(ps->origin, at) < 64.0f)
++	{
++		VectorCopy(ps->origin, spot);
++	}
++
++	ETA_Speech_Say(va("Waypoint %d: %s. L finds it again", ETA_WaypointAdd(spot, name), name));
++}
++
+ void CG_AccessibilityWaypointPlace(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 number;
++	etaAimTarget_t      near[16];
++	char                name[48];
++	int                 count, i;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+ 	{
+ 		return;
+ 	}
+ 
+-	number = eta_waypointNext + 1;
+-	VectorCopy(ps->origin, eta_waypoints[eta_waypointNext]);
+-	eta_waypointNext = (eta_waypointNext + 1) % ETA_MAX_WAYPOINTS;
+-	if (eta_waypointCount < ETA_MAX_WAYPOINTS)
++	/* Named by the thing to use beside it, if there is one: "by the
++	   locked door", "by the button". */
++	name[0] = '\0';
++	count   = CG_AccessibilityUseTargets(near, 16);
++	for (i = 0; i < count; i++)
+ 	{
+-		eta_waypointCount++;
++		if (!near[i].stairs && near[i].meters <= 3.0f)
++		{
++			Com_sprintf(name, sizeof(name), "by the %s", near[i].name);
++			name[7] = (char)tolower((unsigned char)name[7]);
++			break;
++		}
+ 	}
+ 
+-	ETA_Speech_Say(va("Waypoint %d set here. L chooses where to go", number));
++	i = ETA_WaypointAdd(ps->origin, name);
++	ETA_Speech_Say(name[0] ? va("Waypoint %d set, %s. L chooses where to go", i, name)
++	                       : va("Waypoint %d set here. L chooses where to go", i));
+ }
+ 
+ void CG_AccessibilityWaypointNext(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              point, delta, exitPoint = { 0.0f, 0.0f, 0.0f };
+-	char                height[64], name[32];
++	char                height[64], name[64];
+ 	int                 choices, i, model = 0, meters;
+ 	float               bestDistance = 0.0f;
+ 
+@@ -4324,14 +4391,22 @@ void CG_AccessibilityWaypointNext(void)
+ 	else
+ 	{
+ 		VectorCopy(eta_waypoints[eta_destination - 1], point);
+-		Com_sprintf(name, sizeof(name), "waypoint %d", eta_destination);
++		if (eta_waypointNames[eta_destination - 1][0])
++		{
++			Com_sprintf(name, sizeof(name), "waypoint %d, %s", eta_destination,
++			            eta_waypointNames[eta_destination - 1]);
++		}
++		else
++		{
++			Com_sprintf(name, sizeof(name), "waypoint %d", eta_destination);
++		}
+ 	}
+ 
+ 	VectorSubtract(point, ps->origin, delta);
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 	name[0] = (char)toupper((unsigned char)name[0]);
+-	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O says which way", name, meters < 1 ? 1 : meters,
++	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O turns you toward it", name, meters < 1 ? 1 : meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  height[0] ? ", " : "", height));
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 214a2222..73142333 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2222,6 +2222,7 @@ void CG_AccessibilityWorldFrame( qboolean held );
+ void CG_AccessibilitySurroundings( void );
+ void CG_AccessibilityWayOut( void );
+ void CG_AccessibilityFacing_f( void );
++void CG_AccessibilityWaypointRemember( const vec3_t at, const char *name );
+ void CG_AccessibilityEnemyLock_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );

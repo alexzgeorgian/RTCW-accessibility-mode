@@ -1,0 +1,203 @@
+name: RTCW test build
+
+# The campaign of Return to Castle Wolfenstein with the accessibility mode
+# built in (integration/iortcw): iortcw, the game's open-source engine,
+# for the Mac, Apple Silicon and Intel in one app, and for 64-bit
+# Windows. Every change to it is built and checked. A push also publishes
+# it as a prerelease on the public downloads page, replacing the one
+# before it, so it can be tried the same day.
+#
+# A prerelease is never what GitHub calls the latest, so the ET: Legacy
+# mode's in-game updater, which asks only for the latest, never offers
+# it. None of RTCW's own files are in it: the player brings their own.
+on:
+  push:
+    paths:
+      - 'integration/iortcw/**'
+      - 'release/build-iortcw.sh'
+      - 'release/build-iortcw-mac.sh'
+      - 'release/INSTALL-iortcw.md.in'
+      - 'release/rtcw/**'
+      - 'release/make-cue-sounds.py'
+      - 'release/fetch-nvda-client.sh'
+      - 'release/nvda-client.pin'
+      - 'src/accessibility/**'
+      - '.github/workflows/rtcw-test.yml'
+  pull_request:
+    paths:
+      - 'integration/iortcw/**'
+      - 'release/build-iortcw.sh'
+      - 'release/build-iortcw-mac.sh'
+      - 'release/INSTALL-iortcw.md.in'
+      - 'release/rtcw/**'
+      - 'src/accessibility/**'
+      - '.github/workflows/rtcw-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rtcw-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PUBLIC_RELEASES: alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-releases
+  TAG: rtcw-test-${{ github.run_number }}
+
+jobs:
+  mac:
+    name: Build the campaign for the Mac
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Build iowolfsp.app, Apple Silicon and Intel
+        working-directory: accessibility-mode
+        run: ./release/build-iortcw-mac.sh "$RUNNER_TEMP/rtcw-mac" "$TAG"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtcw-mac-app
+          path: ${{ runner.temp }}/rtcw-mac/iowolfsp.app.tar.gz
+          if-no-files-found: error
+
+  build:
+    name: Build the campaign for Windows, and publish a test build
+    needs: mac
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      # The package mirror has stalled before; each attempt is capped and
+      # retried rather than left hanging, as in the release workflow.
+      - name: Install the cross-compilers
+        timeout-minutes: 15
+        run: |
+          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2 3; do
+            if sudo timeout 240 apt-get $apt_opts update \
+               && sudo timeout 240 apt-get $apt_opts install -y --no-install-recommends \
+                    gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64; then
+              exit 0
+            fi
+            echo "::warning::installing the cross-compilers failed or stalled (attempt $attempt of 3)"
+            sleep 10
+          done
+          exit 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rtcw-mac-app
+          path: ${{ runner.temp }}/rtcw-mac
+
+      - name: Build the downloads, Windows and Mac
+        working-directory: accessibility-mode
+        run: ./release/build-iortcw.sh --out "$RUNNER_TEMP/rtcw" --version "$TAG" --mac-app "$RUNNER_TEMP/rtcw-mac/iowolfsp.app.tar.gz"
+
+      - name: Check the downloads are what they claim
+        working-directory: ${{ runner.temp }}/rtcw
+        run: |
+          set -e
+          sha256sum -c SHA256SUMS
+          win="rtcw-accessibility-$TAG-windows"
+          mac="rtcw-accessibility-$TAG-mac"
+          unzip -q "$win.zip" -d extracted
+          for f in ioWolfSP.x64.exe SDL264.dll OpenAL64.dll renderer_sp_opengl1_x64.dll nvdaControllerClient.dll \
+                   main/cgame_sp_x64.dll main/ui_sp_x64.dll main/qagame_sp_x64.dll INSTALL.md COPYING.txt; do
+            test -s "extracted/$win/$f" || { echo "::error::$f is not in the Windows download"; exit 1; }
+          done
+          unzip -q "$mac.zip" -d extracted-mac
+          for f in iowolfsp.app/Contents/MacOS/iowolfsp iowolfsp.app/Contents/MacOS/main/cgame.sp.dylib \
+                   iowolfsp.app/Contents/MacOS/main/ui.sp.dylib iowolfsp.app/Contents/MacOS/main/qagame.sp.dylib \
+                   INSTALL.md COPYING.txt; do
+            test -e "extracted-mac/$mac/$f" || { echo "::error::$f is not in the Mac download"; exit 1; }
+          done
+          for d in "extracted/$win" "extracted-mac/$mac"; do
+            if grep -q "@[A-Z_]*@" "$d/INSTALL.md"; then
+              echo "::error::$d/INSTALL.md has a placeholder left in it"; exit 1
+            fi
+            # The mode's own sounds are the one pk3 allowed.
+            if find "$d" -iname '*.pk3' ! -name sp_zaccessibility.pk3 | grep -q .; then
+              echo "::error::$d carries a pk3; RTCW's own files must never be in a download"; exit 1
+            fi
+            test -s "$d/main/sp_zaccessibility.pk3" || { echo "::error::$d has no sp_zaccessibility.pk3"; exit 1; }
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtcw-test
+          path: ${{ runner.temp }}/rtcw
+
+      - name: Publish as a prerelease on the downloads page
+        if: ${{ github.event_name != 'pull_request' }}
+        working-directory: ${{ runner.temp }}/rtcw
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.RELEASES__TOKEN }}
+        run: |
+          set -e
+          win="rtcw-accessibility-$TAG-windows.zip"
+          mac="rtcw-accessibility-$TAG-mac.zip"
+          test -n "$GH_TOKEN" || { echo "::error::RELEASES_TOKEN is not set"; exit 1; }
+          cat > notes.md <<NOTES
+          **A test build of the Return to Castle Wolfenstein campaign with the accessibility mode.** Not a release: the ET: Legacy and No Quarter modes are unchanged by it.
+
+          It is iortcw, the open-source engine of Return to Castle Wolfenstein, with the mode built in. The menus are spoken; each mission's briefing is read and Enter starts the mission; cutscenes and the intro are described; and in a mission you hear your weapon and ammo, your health, what you pick up, each objective as it is done, and what is around you. F3 says the ways on from where you stand - doors, corridors, stairs - which you have been through and which you came in by, and picks one for O to lead you to; O leads on to the way out, saying where the way turns next, F turns you to things to use and things to break, U locks on to an enemy, H says which way you face, and on stairs that turn you are turned along them as you walk. The mode's settings are in the ACCESSIBILITY menu, after OPTIONS in the main menu and in the menu Escape opens during a mission. INSTALL.md in the download has all the keys.
+
+          You need your own Return to Castle Wolfenstein: its pak0.pk3 and sp_pak1.pk3 to sp_pak4.pk3. None of the game's files are in this download.
+
+          Built from ${GITHUB_REF_NAME} at ${GITHUB_SHA}.
+
+          ## Installing on a Mac
+
+          1. Download **$mac** below and open it. Move the folder it gives you into Applications.
+          2. In Finder, Go to Folder, \`~/Library/Application Support\`, and make a folder **RTCW** there, with a folder **main** in it.
+          3. Copy the five game files into that **main** folder.
+          4. Open **iowolfsp.app**. The first time, the Mac blocks it: choose Done, then in System Settings, Privacy and Security, choose Open Anyway beside "iowolfsp was blocked".
+             From then on the game updates itself: a few seconds into the menus it says when a newer test build is ready, and F12 installs it - no download, and no Open Anyway again.
+          5. INSTALL.md in the download has the rest: the keys, and what is said.
+
+          ## Installing on Windows
+
+          1. Download **$win** below and unzip it.
+          2. Copy the five game files into its **main** folder.
+          3. Start **ioWolfSP.x64.exe**. INSTALL.md has the rest.
+
+          $(cat SHA256SUMS)
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release create "$TAG" "$mac" "$win" SHA256SUMS \
+            --repo "$PUBLIC_RELEASES" \
+            --title "$TAG - RTCW campaign test build, not a release" \
+            --notes-file notes.md \
+            --prerelease
+
+          # The Mac game's own updater (ui_main.c) reads which build is the
+          # newest from rtcw-update.txt on a release of its own, which the
+          # clean-up below leaves alone: a build the game downloads itself
+          # is not quarantined, so the player lets the app in once, not
+          # with every build.
+          sha=$(sha256sum "$mac" | cut -d' ' -f1)
+          size=$(stat -c %s "$mac")
+          printf 'version=%s\nurl=https://github.com/%s/releases/download/%s/%s\nsha256=%s\nsize=%s\n' \
+            "$TAG" "$PUBLIC_RELEASES" "$TAG" "$mac" "$sha" "$size" > rtcw-update.txt
+          cat rtcw-update.txt
+          gh release view rtcw-updates --repo "$PUBLIC_RELEASES" >/dev/null 2>&1 \
+            || gh release create rtcw-updates --repo "$PUBLIC_RELEASES" \
+                 --title "RTCW test build updates - for the game's own updater, not a download" \
+                 --notes "Holds rtcw-update.txt, which names the newest RTCW campaign test build for the Mac game's own updater (F12 in the menus)." \
+                 --prerelease
+          gh release upload rtcw-updates rtcw-update.txt --repo "$PUBLIC_RELEASES" --clobber
+
+          # Only the newest RTCW test build is listed.
+          for old in $(gh release list --repo "$PUBLIC_RELEASES" --limit 200 \
+                         --json tagName,isPrerelease \
+                         --jq '.[] | select(.isPrerelease) | .tagName | select(startswith("rtcw-test-"))'); do
+            [ "$old" = "$TAG" ] && continue
+            gh release delete "$old" --repo "$PUBLIC_RELEASES" --cleanup-tag --yes
+            echo "removed the older test build $old"
+          done

@@ -1,0 +1,51 @@
+diff --git a/SP/code/game/bg_animation.c b/SP/code/game/bg_animation.c
+index 9a9b117..90b4361 100644
+--- a/SP/code/game/bg_animation.c
++++ b/SP/code/game/bg_animation.c
+@@ -881,9 +881,28 @@ void BG_ParseConditionBits( char **text_pp, animStringItem_t *stringTable, int c
+ 					tempBits[1] = defineBits[condIndex][indexFound][1];
+ 				} else {
+ 					// convert the string into an index
++#ifdef FEATURE_ACCESSIBILITY
++					/* [Accessibility]: a name not in the list - a weapon an
++					   animation script mentions that this build does not
++					   know - is passed over with a warning, not a fatal
++					   error. On a tester's Mac the player's own script
++					   stopped the campaign before it began, at its line of
++					   pistols, while Linux read it. A pose missing for one
++					   weapon is better than no game. */
++					indexFound = BG_IndexForString( currentString, stringTable, qtrue );
++					if ( indexFound < 0 ) {
++						Com_Printf( S_COLOR_YELLOW "WARNING: BG_ParseConditionBits: unknown '%s' passed over: (%s, line %i)\n",
++									currentString, globalFilename ? globalFilename : "?", COM_GetCurrentParseLine() + 1 );
++						tempBits[0] = tempBits[1] = 0;
++					} else {
++						// convert the index into a bitflag
++						COM_BitSet( tempBits, indexFound );
++					}
++#else
+ 					indexFound = BG_IndexForString( currentString, stringTable, qfalse );
+ 					// convert the index into a bitflag
+ 					COM_BitSet( tempBits, indexFound );
++#endif
+ 				}
+ 			}
+ 			// perform operation
+diff --git a/SP/code/game/bg_misc.c b/SP/code/game/bg_misc.c
+index 98f6464..0225976 100644
+--- a/SP/code/game/bg_misc.c
++++ b/SP/code/game/bg_misc.c
+@@ -84,7 +84,12 @@ extern vmCvar_t g_gametype;
+ //
+ //
+ 
+-ammotable_t ammoTable[] = {
++// [Accessibility]: sized to every weapon. The list stops short of the last
++// few (the monster attacks and multiplayer weapons), and code that walks all
++// the weapons - Fill_Clip from AICast_CreateCharacter, as each character in
++// a cutscene is spawned - read past its end into whatever the compiler put
++// next. On Linux that was harmless; the Mac lays memory out differently.
++ammotable_t ammoTable[WP_NUM_WEAPONS] = {
+ 	//	MAX				USES	MAX		RELOAD	FIRE			NEXT	HEAT,	COOL,	MOD,	...
+ 	//	AMMO			AMT.	CLIP	TIME	DELAY			SHOT
+ 	{   0,              0,      0,      0,      50,             0,      0,      0,      0                       },  //	WP_NONE					// 0

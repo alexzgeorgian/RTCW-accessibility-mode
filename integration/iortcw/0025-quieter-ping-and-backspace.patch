@@ -1,0 +1,88 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 371c2a24..636f6f69 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -689,6 +689,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityFacing" );
+ 	trap_AddCommand( "accessibilityEnemyLock" );
+ 	trap_AddCommand( "accessibilityEnemyCallouts" );
++	trap_AddCommand( "accessibilityMarkerClear" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+@@ -727,6 +728,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityEnemyLock_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityEnemyCallouts" ) ) {
+ 		CG_AccessibilityEnemyCallouts_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityMarkerClear" ) ) {
++		CG_AccessibilityMarkerClear();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
+ 		CG_AccessibilityWaypointPlace();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 98de8b84..cb1011ee 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2475,8 +2475,12 @@ static void ETA_FacePendingFrame(void)
+ 	{
+ 		return;
+ 	}
+-	if (cg.time < eta_facePendingAt || cg.time - eta_facePendingAt > ETA_FACE_WAIT_MS
+-	    || !CG_AccessibilityMarkerActive())
++	if (!CG_AccessibilityMarkerActive())
++	{
++		eta_facePendingAt = 0;   /* taken away with Backspace: nothing to say */
++		return;
++	}
++	if (cg.time < eta_facePendingAt || cg.time - eta_facePendingAt > ETA_FACE_WAIT_MS)
+ 	{
+ 		eta_facePendingAt = 0;
+ 		ETA_Speech_Say("No way found from here yet. O tries again");
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 2e340217..f8ea6fb3 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1710,6 +1710,20 @@ void CG_AccessibilityMarkerFrame(void)
+ 		VectorSubtract(target, eye, direction);
+ 		sfx = CG_AccessibilityLoopSound(ETA_MarkerSoundFor(direction));
+ 
++		/* Quiet while the player walks the way: the ping is for turning.
++		   Once a second, all the way there, gave the tester a headache;
++		   walking toward it, they already know. It sounds as soon as the
++		   way is off to a side or behind, and when they stand still. */
++		if (sfx && CG_AccessibilityLoopSound(ETA_LOOP_MARKER) == sfx)
++		{
++			const float *velocity = cg.predictedPlayerState.velocity;
++
++			if (velocity[0] * velocity[0] + velocity[1] * velocity[1] > 60.0f * 60.0f)
++			{
++				sfx = 0;
++			}
++		}
++
+ 		if (sfx)
+ 		{
+ 			float length;
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 16cb3869..4a970560 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8111,7 +8111,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, H, M, O, Insert, I, J, K, L, P, U and Y are free in
++ * F1, F2, F3, F6, F7, F8, H, M, O, Insert, I, J, K, L, P, U, Y and Backspace are free in
+  * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+@@ -8167,6 +8167,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* The enemy callouts off and on, without the console: M, free in
+ 		   the stock config. */
+ 		{ 'm',          "accessibilityEnemyCallouts", 8, NULL },
++		/* The marker taken away, and its ping with it, as Keypad star does
++		   in the Enemy Territory mode: a laptop has no keypad. */
++		{ K_BACKSPACE,  "accessibilityMarkerClear",   9, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

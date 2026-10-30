@@ -1,0 +1,5 @@
+# The iortcw commit these patches apply to, read by
+# release/build-iortcw.sh. The commit is checked after cloning, so a
+# branch moved upstream fails the build instead of shipping something else.
+repo=https://github.com/iortcw/iortcw.git
+commit=438e7d413b5f7277187c35b032eb0ef9093ae778

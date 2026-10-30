@@ -1,0 +1,80 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5fde3ff4..94b97705 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -598,7 +598,9 @@ static void ETA_ClimbFrame(void)
+ 	}
+ }
+ 
+-static void ETA_AimSay(const char *what, const vec3_t point)
++/* What, which way, how far, how far up or down - and then the tail,
++   if any: "Soldier, 1 of 2, behind left, 12 meters. U turns to them". */
++static void ETA_AimSayThen(const char *what, const vec3_t point, const char *tail)
+ {
+ 	int  meters = (int)(Distance(cg.predictedPlayerState.origin, point) * ETA_QU_TO_METERS + 0.5f);
+ 	char height[48];
+@@ -609,13 +611,18 @@ static void ETA_AimSay(const char *what, const vec3_t point)
+ 	                           height, sizeof(height));
+ 
+ 	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s, %s, %d meter%s%s%s", what,
++	ETA_Speech_Say(va("%s, %s, %d meter%s%s%s%s%s", what,
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(point)),
+ 	                  meters < 1 ? 1 : meters, meters == 1 ? "" : "s",
+-	                  height[0] ? ", " : "", height));
++	                  height[0] ? ", " : "", height, tail ? ". " : "", tail ? tail : ""));
+ 	ETA_Speech_EndReport();
+ }
+ 
++static void ETA_AimSay(const char *what, const vec3_t point)
++{
++	ETA_AimSayThen(what, point, NULL);
++}
++
+ /**
+  * @brief Choosing an enemy, with a key, for the lock to take.
+  *
+@@ -708,8 +715,11 @@ static void ETA_EnemyChooseStep(int step)
+ 	eta_enemyChoose.entityNum = list[index].entityNum;
+ 	eta_enemyChoose.at        = cg.time;
+ 
++	/* Said with what turns to them, so that choosing is never taken for
++	   being turned: the tester heard where the enemy was, and waited to
++	   be turned. */
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_AimSay(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point);
++	ETA_AimSayThen(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point, "U turns to them");
+ }
+ 
+ void CG_AccessibilityEnemyNext_f(void)
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 4a970560..b0ce79a1 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8202,6 +8202,26 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		trap_Cvar_Set( "eta_bindsInstalled", va( "%i", newest ) );
+ 	}
+ 
++	/* U was the step back through the enemies before it was the lock,
++	   and the tester, pressing it to be turned to an enemy, heard only
++	   where the enemy was: the key had kept its old command. Wherever U
++	   is still on that, it is moved on to the lock, every time - and
++	   the step goes to Y where Y is free. */
++	{
++		char current[MAX_STRING_CHARS];
++
++		current[0] = '\0';
++		trap_Key_GetBindingBuf( 'u', current, sizeof( current ) );
++		if ( !Q_stricmp( current, "accessibilityEnemyPrev" ) ) {
++			trap_Key_SetBinding( 'u', "accessibilityEnemyLock" );
++			current[0] = '\0';
++			trap_Key_GetBindingBuf( 'y', current, sizeof( current ) );
++			if ( !current[0] ) {
++				trap_Key_SetBinding( 'y', "accessibilityEnemyPrev" );
++			}
++		}
++	}
++
+ 	/* The controls page keeps its own copy of which key each command is
+ 	   on, read at start-up. Left stale, the first key changed there would
+ 	   write that copy back over what was just installed. */

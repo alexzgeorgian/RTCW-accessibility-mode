@@ -1,0 +1,348 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 8b403683..99a8bf84 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -697,6 +697,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityMarkerClear" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
++	trap_AddCommand( "accessibilityWaypointPrev" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+ 	trap_AddCommand( "-accessibilityTurnLeft" );
+ 	trap_AddCommand( "+accessibilityTurnRight" );
+@@ -739,6 +740,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityWaypointPlace();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
+ 		CG_AccessibilityWaypointNext();
++	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPrev" ) ) {
++		CG_AccessibilityWaypointPrev();
+ 	} else if ( !Q_stricmp( cmd, "+accessibilityTurnLeft" ) ) {
+ 		CG_AccessibilityTurnLeftDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityTurnLeft" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 16ef6e1a..3bd56104 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -39,9 +39,9 @@
+  * passage, a rise - is what the way is called. Whether the player has
+  * been through a way is read off the trail of where they have walked.
+  *
+- * F3 says them all; F3 again within a few seconds goes through them one
+- * at a time, and the one said is chosen: O leads there, as it does to a
+- * waypoint chosen with L.
++ * F3 says them all. L and semicolon go through them one at a time, with
++ * the way out and the waypoints after them, and the one said is chosen:
++ * O leads there.
+  */
+ 
+ #define ETA_WAYS_CELL       32.0f
+@@ -53,7 +53,6 @@
+ #define ETA_WAYS_MAX        12      /* ways kept */
+ #define ETA_WAYS_SAY        6       /* said at once */
+ #define ETA_WAYS_PATH       96
+-#define ETA_WAYS_PICK_MS    10000   /* F3 again this soon goes through them */
+ #define ETA_WAYS_FRESH_MS   30000   /* a look this old is looked again */
+ #define ETA_WAYS_MOVED      64.0f   /* nor from further than this off */
+ #define ETA_WAYS_DOORS      24
+@@ -154,8 +153,6 @@ static struct
+ 
+ 	/* What asked for the look: the key, waiting to be answered. */
+ 	qboolean      keyWaiting;
+-	int           listedAt;     /* when F3 last said them, for going through */
+-	int           pick;         /* the one said last, -1 before any */
+ 
+ 	/* The new-place callout. */
+ 	int           saidAt;
+@@ -257,7 +254,6 @@ static void ETA_WaysBegin(const vec3_t origin)
+ 	eta_ways.done     = qfalse;
+ 	eta_ways.full     = qfalse;
+ 	eta_ways.wayCount = 0;
+-	eta_ways.pick     = -1;
+ 	VectorCopy(from, eta_ways.start);
+ 	ETA_WaysAdd(from, ETA_WAYS_GRID_HALF * ETA_WAYS_GRID + ETA_WAYS_GRID_HALF, -1, 0.0f);
+ }
+@@ -1220,29 +1216,8 @@ static void ETA_WaysSayAll(void)
+ 		ETA_WayText(&eta_ways.ways[i], line, sizeof(line));
+ 		ETA_Speech_Say(line);
+ 	}
+-	ETA_Speech_Say("F3 again picks one");
++	ETA_Speech_Say("L and semicolon go through them");
+ 	ETA_Speech_EndReport();
+-	eta_ways.listedAt = cg.time;
+-	eta_ways.pick     = -1;
+-}
+-
+-static void ETA_WaysPick(void)
+-{
+-	eta_way_t *way;
+-	char      line[96], name[64];
+-
+-	eta_ways.pick = (eta_ways.pick + 1) % eta_ways.wayCount;
+-	way           = &eta_ways.ways[eta_ways.pick];
+-	ETA_WayText(way, line, sizeof(line));
+-
+-	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%d of %d. %s. O leads there", eta_ways.pick + 1, eta_ways.wayCount, line));
+-	ETA_Speech_EndReport();
+-
+-	Com_sprintf(name, sizeof(name), "the %s", eta_wayWords[way->kind]);
+-	name[4] = (char)tolower((unsigned char)name[4]);
+-	CG_AccessibilityChoose(way->lead, name);
+-	eta_ways.listedAt = cg.time;
+ }
+ 
+ static qboolean ETA_WaysFresh(void)
+@@ -1263,21 +1238,67 @@ static void ETA_WaysFinish(void)
+ 	ETA_WaysMake();
+ }
+ 
+-void CG_AccessibilityWaysOn(void)
++/*
++ * For L and semicolon (cg_accessibility_world.c), which go through the
++ * ways on with the way out and the waypoints, so a way is chosen as a
++ * waypoint is. The ways from where the player stands - looked for now
++ * when the last look was from somewhere else - and how many; *stamp
++ * changes when the list does, -1 while a long look is still going.
++ */
++int CG_AccessibilityWaysList(int *stamp)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
++	float               dx  = ps->origin[0] - eta_ways.start[0], dy = ps->origin[1] - eta_ways.start[1];
+ 
++	*stamp = -1;
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+ 	{
+-		ETA_Speech_Say("Nothing to describe until you are in play");
+-		return;
++		return 0;
++	}
++	/* Standing still, the list stays as it was however long the choosing
++	   takes: a new look would start the stepping over. */
++	if (!eta_ways.done || dx * dx + dy * dy >= ETA_WAYS_MOVED * ETA_WAYS_MOVED
++	    || fabsf(ps->origin[2] - eta_ways.start[2]) >= ETA_WAYS_SAME_FLOOR)
++	{
++		ETA_WaysBegin(ps->origin);
++		eta_ways.background = qfalse;
++		if (!ETA_WaysSpread(250))
++		{
++			return 0;
++		}
++		ETA_WaysFinish();
+ 	}
++	*stamp = eta_ways.doneAt;
++	return eta_ways.wayCount;
++}
++
++/* A way of that list: where O leads, what O calls it, and what is said. */
++qboolean CG_AccessibilityWayAt(int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize)
++{
++	const eta_way_t *way;
+ 
+-	/* Again, soon after, from where they were said: the next one. */
+-	if (ETA_WaysFresh() && eta_ways.wayCount && cg.time >= eta_ways.listedAt
+-	    && cg.time - eta_ways.listedAt < ETA_WAYS_PICK_MS)
++	if (index < 0 || index >= eta_ways.wayCount)
++	{
++		return qfalse;
++	}
++	way = &eta_ways.ways[index];
++	VectorCopy(way->lead, lead);
++	Com_sprintf(name, nameSize, "the %s", eta_wayWords[way->kind]);
++	if (nameSize > 4)
+ 	{
+-		ETA_WaysPick();
++		name[4] = (char)tolower((unsigned char)name[4]);
++	}
++	ETA_WayText(way, text, textSize);
++	return qtrue;
++}
++
++void CG_AccessibilityWaysOn(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		ETA_Speech_Say("Nothing to describe until you are in play");
+ 		return;
+ 	}
+ 
+@@ -1378,7 +1399,6 @@ void CG_AccessibilityWaysFrame(void)
+ void CG_AccessibilityWaysReset(void)
+ {
+ 	memset(&eta_ways, 0, sizeof(eta_ways));
+-	eta_ways.pick = -1;
+ 	VectorSet(eta_ways.saidFrom, 99999.0f, 99999.0f, 99999.0f);
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7d305a49..6d210a79 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4476,12 +4476,23 @@ static float ETA_WayOutFar(const vec3_t from, const vec3_t exitPoint)
+ 	return (sqrtf(dx * dx + dy * dy) + 2.0f * fabsf(dz)) * ETA_QU_TO_METERS;
+ }
+ 
+-void CG_AccessibilityWaypointNext(void)
++/*
++ * L and semicolon: one list of the places to go, next and back. The ways
++ * on from where the player stands first - the doors, corridors and stairs
++ * out of the place, nearest first - then the way out, then the waypoints.
++ * The tester asked why F3 should be needed to pick a way, with keys to
++ * hand that already went through the waypoints. The list starts again
++ * from its first way when the player has walked somewhere else, where
++ * the ways on are new.
++ */
++static int eta_destinationStamp = -2;
++
++static void ETA_DestinationStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              point, delta, exitPoint = { 0.0f, 0.0f, 0.0f };
+-	char                height[64], name[64];
+-	int                 choices, i, model = 0, meters;
++	char                height[64], name[64], text[128];
++	int                 i, model = 0, meters, ways, stamp, choices, waypoint;
+ 	float               bestDistance = 0.0f;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -4501,39 +4512,47 @@ void CG_AccessibilityWaypointNext(void)
+ 		}
+ 	}
+ 
+-	/* Choice 0 is the way out, where there is one; 1 to 9 the waypoints. */
+-	choices = eta_waypointCount + 1;
+-	if (!model && !eta_waypointCount)
++	ways    = CG_AccessibilityWaysList(&stamp);
++	choices = ways + (model ? 1 : 0) + eta_waypointCount;
++	if (!choices)
+ 	{
+-		ETA_Speech_Say("No waypoints yet. P marks where you stand");
++		ETA_Speech_Say("Nowhere to go found yet. P marks where you stand");
+ 		return;
+ 	}
++	if (stamp != eta_destinationStamp || eta_destination >= choices)
++	{
++		eta_destinationStamp = stamp;
++		eta_destination      = -1;
++	}
++	eta_destination = eta_destination < 0 ? ( step > 0 ? 0 : choices - 1 )
++	                  : ( eta_destination + step + choices ) % choices;
+ 
+-	for (i = 0; i < choices; i++)
++	/* A way on. */
++	if (eta_destination < ways && CG_AccessibilityWayAt(eta_destination, point, name, sizeof(name), text, sizeof(text)))
+ 	{
+-		eta_destination = (eta_destination + 1) % choices;
+-		if (eta_destination || model)
+-		{
+-			break;
+-		}
++		ETA_Speech_Say(va("%s. O leads there", text));
++		VectorCopy(point, eta_chosenPoint);
++		Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
++		eta_chosenSet = qtrue;
++		return;
+ 	}
+ 
+-	if (eta_destination == 0)
++	waypoint = eta_destination - ways - (model ? 1 : 0);   /* 0-based, or -1 for the way out */
++	if (waypoint < 0)
+ 	{
+ 		VectorCopy(exitPoint, point);
+ 		Q_strncpyz(name, "the way out", sizeof(name));
+ 	}
+ 	else
+ 	{
+-		VectorCopy(eta_waypoints[eta_destination - 1], point);
+-		if (eta_waypointNames[eta_destination - 1][0])
++		VectorCopy(eta_waypoints[waypoint], point);
++		if (eta_waypointNames[waypoint][0])
+ 		{
+-			Com_sprintf(name, sizeof(name), "waypoint %d, %s", eta_destination,
+-			            eta_waypointNames[eta_destination - 1]);
++			Com_sprintf(name, sizeof(name), "waypoint %d, %s", waypoint + 1, eta_waypointNames[waypoint]);
+ 		}
+ 		else
+ 		{
+-			Com_sprintf(name, sizeof(name), "waypoint %d", eta_destination);
++			Com_sprintf(name, sizeof(name), "waypoint %d", waypoint + 1);
+ 		}
+ 	}
+ 
+@@ -4550,7 +4569,7 @@ void CG_AccessibilityWaypointNext(void)
+ 	{
+ 		const char *way = "";
+ 
+-		if (eta_destination && model)
++		if (waypoint >= 0 && model)
+ 		{
+ 			float mine  = ETA_WayOutFar(ps->origin, exitPoint);
+ 			float there = ETA_WayOutFar(point, exitPoint);
+@@ -4559,7 +4578,8 @@ void CG_AccessibilityWaypointNext(void)
+ 			      : there > mine + ETA_ONWARD_METERS ? ", back the way you came" : "";
+ 		}
+ 
+-		ETA_Speech_Say(va("%s, %d meters, %s%s%s%s. O leads there", name, meters < 1 ? 1 : meters,
++		meters = meters < 1 ? 1 : meters;
++		ETA_Speech_Say(va("%s, %d %s, %s%s%s%s. O leads there", name, meters, meters == 1 ? "meter" : "meters",
+ 		                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 		                  height[0] ? ", " : "", height, way));
+ 	}
+@@ -4573,6 +4593,16 @@ void CG_AccessibilityWaypointNext(void)
+ 	eta_chosenSet = qtrue;
+ }
+ 
++void CG_AccessibilityWaypointNext(void)
++{
++	ETA_DestinationStep(1);
++}
++
++void CG_AccessibilityWaypointPrev(void)
++{
++	ETA_DestinationStep(-1);
++}
++
+ /* For the ways on (cg_accessibility_ways.c). */
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
+@@ -4751,7 +4781,9 @@ static qboolean eta_worldRead;
+ void CG_AccessibilityWorldInit(void)
+ {
+ 	eta_worldRead     = qfalse;
+-	eta_waypointCount = eta_waypointNext = eta_destination = 0;
++	eta_waypointCount = eta_waypointNext = 0;
++	eta_destination      = -1;
++	eta_destinationStamp = -2;
+ 	memset(&eta_trail, 0, sizeof(eta_trail));
+ 	eta_chosenSet     = qfalse;
+ 	CG_AccessibilityMarkerReset();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 29bca15d..b38f6644 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2226,6 +2226,9 @@ void CG_AccessibilityWaypointRemember( const vec3_t at, const char *name );
+ void CG_AccessibilityEnemyLock_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );
++void CG_AccessibilityWaypointPrev( void );
++int CG_AccessibilityWaysList( int *stamp );
++qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
+ 
+ // cg_accessibility_route.c: the marker, and the way there
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index a8f91eda..d671fd45 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8398,6 +8398,10 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* G back on the kick, where the tenth generation let go of it on
+ 		   a misheard report: only where it is still empty. */
+ 		{ 'g',          "+kick",                      11, NULL },
++		/* Back through the places L goes through - the ways on, the way
++		   out, the waypoints - on the key beside it, free in the stock
++		   config. */
++		{ ';',          "accessibilityWaypointPrev",  12, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

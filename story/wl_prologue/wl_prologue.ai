@@ -1,0 +1,216 @@
+//
+// AI script: mission 0, The Silent Shock (docs/story/prologue.md)
+//
+// The story is told through the accessibility mode's cvars: eta_line is
+// said when it changes, eta_objective is the objective, eta_goal places
+// the beacon ("x y z name"). Each value stays under 256 characters, the
+// engine's limit for a cvar.
+//
+// accum 0 holds what has happened, one bit each:
+//   bit 0 - the charge is set
+//   bit 1 - the hall has been entered
+//   bit 2 - the supercolony is taken
+//
+
+player
+{
+	spawn
+	{
+		cvar eta_storyMap wl_prologue
+		cvar eta_enemyNames "1=Sentinel;7=Elite sentinel"
+		cvar eta_briefing "Mission zero. The Silent Shock. Revus, in the Andromeda galaxy. Break into the Great Temple of the Ah'Zur, take the Tettoran supercolony it guards, and get out alive."
+		accum 0 set 0
+		objectivesneeded 0
+
+		abort_if_loadgame
+		giveweapon weapon_knife
+		giveweapon weapon_luger
+		giveweapon weapon_mp40
+		setammo ammo_9mm 160
+		selectweapon weapon_mp40
+		givearmor item_armor_body
+	}
+
+	playerstart
+	{
+		cvar eta_line "Revus, in the Andromeda galaxy. A world fifty times the size of Earth, under a blue sun and nine moons. Night here lasts twenty-two hours."
+		wait 9000
+		cvar eta_line "Ahead stands the Great Temple of the Ah'Zur, the Chosen of the Lantern, behind its energy shield. Somewhere inside lies a Tettoran supercolony."
+		wait 9000
+		cvar eta_objective "Bring down the temple shield. The generator is in the room east of the north corridor. Press F at the generator."
+		cvar eta_goal "496 1216 48 the generator"
+	}
+
+	trigger sabotage
+	{
+		accum 0 abort_if_bitset 0
+		accum 0 bitset 0
+		cvar eta_line "Charge set. Five seconds."
+		wait 5000
+		alertentity generator
+		alertentity generator_hum
+		trigger sentinel1 wake
+		trigger sentinel2 wake
+		trigger sentinel3 wake
+		trigger sentinel4 wake
+		trigger sentinel5 wake
+		trigger sentinel6 wake
+		cvar eta_line "A silent shock wave. The shield flickers once, an iridescent bubble, and vanishes into nothing."
+		wait 7000
+		cvar eta_line "The sentinels of the Twelfth Legion are awake, and they are firing blind."
+		wait 4000
+		cvar eta_objective "Take the Tettoran supercolony from the sanctum, past the great hall to the north."
+		cvar eta_goal "0 3168 48 the supercolony"
+	}
+
+	trigger hall
+	{
+		accum 0 abort_if_bitset 1
+		accum 0 bitset 1
+		cvar eta_line "The Twelfth Legion forms a wall of shields. Blue plasma lights the dark."
+	}
+
+	trigger colony
+	{
+		accum 0 abort_if_not_bitset 0
+		accum 0 abort_if_bitset 2
+		accum 0 bitset 2
+		alertentity alarm
+		trigger guard1 wake
+		trigger guard2 wake
+		cvar eta_line "The supercolony is yours. Every alarm in the capital wakes at once."
+		wait 5000
+		cvar eta_objective "Reach your cloaked warship on the landing pad, through the east door of the great hall."
+		cvar eta_goal "2560 2176 48 your ship"
+	}
+
+	trigger ship
+	{
+		accum 0 abort_if_not_bitset 2
+		cvar eta_goal none
+		cvar eta_objective none
+		cvar eta_line "Patrol corvettes burst one after another, hunted by a ship that refuses to be seen. In the throne room, a single cry for help reaches Emperor Quar'rak. He rises, and says one word. War."
+		wait 14000
+		changelevel gamefinished
+	}
+}
+
+sentinel1
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+sentinel2
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+sentinel3
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+sentinel4
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+sentinel5
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+sentinel6
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+guard1
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}
+
+guard2
+{
+	// Blind until the story wakes them (the shield falling, or the
+	// supercolony taken): the player can find them first.
+	spawn
+	{
+		nosight 99999999
+	}
+
+	trigger wake
+	{
+		sight
+	}
+}

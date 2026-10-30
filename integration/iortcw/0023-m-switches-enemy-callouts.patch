@@ -1,0 +1,64 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index dec86cf9..371c2a24 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -570,6 +570,19 @@ static void CG_AccessibilityObjectives_f( void ) {
+ 	ETA_Speech_SayLong( text );
+ }
+ 
++/*
++ * M: the enemy callouts off, and on again. The tester asked to be spared
++ * the console, and the mode has no page in the game's menus: a key, said
++ * either way, and kept for the next time (eta_playerCallouts is archived).
++ */
++static void CG_AccessibilityEnemyCallouts_f( void ) {
++	qboolean on = (qboolean)!eta_playerCallouts.integer;
++
++	trap_Cvar_Set( "eta_playerCallouts", on ? "1" : "0" );
++	trap_Cvar_Update( &eta_playerCallouts );
++	CG_AccessibilitySay( on ? "Enemy callouts on" : "Enemy callouts off. M turns them on" );
++}
++
+ static void CG_AccessibilityStatus_f( void ) {
+ 	playerState_t *ps = &cg.snap->ps;
+ 	char text[1024];
+@@ -675,6 +688,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityWayOut" );
+ 	trap_AddCommand( "accessibilityFacing" );
+ 	trap_AddCommand( "accessibilityEnemyLock" );
++	trap_AddCommand( "accessibilityEnemyCallouts" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+@@ -711,6 +725,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityFacing_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityEnemyLock" ) ) {
+ 		CG_AccessibilityEnemyLock_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityEnemyCallouts" ) ) {
++		CG_AccessibilityEnemyCallouts_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
+ 		CG_AccessibilityWaypointPlace();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index b6f3c37c..16cb3869 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8111,7 +8111,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, H, O, Insert, I, J, K, L, P, U and Y are free in
++ * F1, F2, F3, F6, F7, F8, H, M, O, Insert, I, J, K, L, P, U and Y are free in
+  * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+@@ -8164,6 +8164,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   enemy step it had. */
+ 		{ 'u',          "accessibilityEnemyLock",     7, "accessibilityEnemyPrev" },
+ 		{ 'y',          "accessibilityEnemyPrev",     7, NULL },
++		/* The enemy callouts off and on, without the console: M, free in
++		   the stock config. */
++		{ 'm',          "accessibilityEnemyCallouts", 8, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

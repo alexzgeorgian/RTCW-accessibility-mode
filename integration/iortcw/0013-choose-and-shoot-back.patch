@@ -1,0 +1,419 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index e0a74a0..06dd7ff 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -681,6 +681,8 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "-accessibilityAimLock" );
+ 	trap_AddCommand( "accessibilityUseNext" );
+ 	trap_AddCommand( "accessibilityUsePrev" );
++	trap_AddCommand( "accessibilityEnemyNext" );
++	trap_AddCommand( "accessibilityEnemyPrev" );
+ }
+ 
+ void CG_AccessibilityShutdown( void ) {
+@@ -719,6 +721,10 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityUseNext_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityUsePrev" ) ) {
+ 		CG_AccessibilityUsePrev_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityEnemyNext" ) ) {
++		CG_AccessibilityEnemyNext_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityEnemyPrev" ) ) {
++		CG_AccessibilityEnemyPrev_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityObjectives" ) ) {
+ 		CG_AccessibilityObjectives_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityRepeat" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 44e8133..df50755 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -64,8 +64,8 @@
+ /* The step's speed: cl_yawspeed times this while the walk key is held
+    down by the step. 140 x 5 is 700 degrees a second, so a compass point
+    takes about 65 ms - the length of a flick of the mouse. */
+-#define ETA_TURN_FAST_SCALE "5"
+-#define ETA_TURN_FAST_FACTOR 5.0f
++#define ETA_TURN_FAST_SCALE "8"
++#define ETA_TURN_FAST_FACTOR 8.0f
+ 
+ /* The last few degrees go at the ordinary speed, so the view stops on the
+    point rather than a few degrees past it. */
+@@ -614,25 +614,112 @@ static void ETA_AimSay(const char *what, const vec3_t point)
+ 	ETA_Speech_EndReport();
+ }
+ 
+-/* An enemy for the lock: the nearest in sight, within maxMeters when it
+-   is above zero. qfalse when there is none. */
++/**
++ * @brief Choosing an enemy, with a key, for the lock to take.
++ *
++ * The tester, who plays 1428: Shadows over Silesia, asked for the enemies
++ * to work the way things to use do: a key that steps through them - each
++ * said, with where they are and how far, "Soldier, 2 of 3, behind left,
++ * 12 meters" - without turning, and the lock then taking the one chosen.
++ * Every enemy in clear sight all round is on the list, nearest first; a
++ * choice is let go after ETA_ENEMY_CHOOSE_MS, or once they fall.
++ */
++#define ETA_ENEMY_CHOOSE_MS 10000
++
++static struct
++{
++	qboolean held;
++	int      entityNum;
++	int      at;
++} eta_enemyChoose;
++
++/* An enemy for the lock: the nearest in sight - within maxMeters and in
++   view, for the lock by itself; anywhere round, and the one chosen if
++   there is one, for the key. qfalse when there is none. */
+ static qboolean ETA_AimAcquire(float maxMeters)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++	qboolean       byKey = (qboolean)(maxMeters <= 0.0f);
++	int            count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, byKey);
++	int            index = 0, i;
+ 
+-	if (CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS) <= 0
+-	    || (maxMeters > 0.0f && list[0].meters > maxMeters))
++	if (count <= 0 || (!byKey && list[0].meters > maxMeters))
+ 	{
+ 		return qfalse;
+ 	}
+ 
+-	eta_aim.entityNum = list[0].entityNum;
+-	VectorCopy(list[0].point, eta_aim.point);
++	if (byKey && eta_enemyChoose.held && cg.time >= eta_enemyChoose.at
++	    && cg.time - eta_enemyChoose.at < ETA_ENEMY_CHOOSE_MS)
++	{
++		for (i = 0; i < count; i++)
++		{
++			if (list[i].entityNum == eta_enemyChoose.entityNum)
++			{
++				index = i;
++				break;
++			}
++		}
++	}
++
++	eta_aim.entityNum = list[index].entityNum;
++	VectorCopy(list[index].point, eta_aim.point);
+ 	eta_aim.lostSince = 0;
+ 	eta_aim.saidLost  = qfalse;
+ 	return qtrue;
+ }
+ 
++static void ETA_EnemyChooseStep(int step)
++{
++	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++	int            count, index = -1, i;
++
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
++	{
++		return;
++	}
++
++	count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qtrue);
++
++	if (count <= 0)
++	{
++		eta_enemyChoose.held = qfalse;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("No enemy in sight");
++		return;
++	}
++
++	if (eta_enemyChoose.held && cg.time >= eta_enemyChoose.at && cg.time - eta_enemyChoose.at < ETA_ENEMY_CHOOSE_MS)
++	{
++		for (i = 0; i < count; i++)
++		{
++			if (list[i].entityNum == eta_enemyChoose.entityNum)
++			{
++				index = i;
++				break;
++			}
++		}
++	}
++
++	index = index < 0 ? (step > 0 ? 0 : count - 1) : (index + step + count) % count;
++
++	eta_enemyChoose.held      = qtrue;
++	eta_enemyChoose.entityNum = list[index].entityNum;
++	eta_enemyChoose.at        = cg.time;
++
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_AimSay(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point);
++}
++
++void CG_AccessibilityEnemyNext_f(void)
++{
++	ETA_EnemyChooseStep(1);
++}
++
++void CG_AccessibilityEnemyPrev_f(void)
++{
++	ETA_EnemyChooseStep(-1);
++}
++
+ /* Turns to a thing to use and says what it is - or, with no label,
+    quietly, leaving the game's own use icon to name it. */
+ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+@@ -1209,7 +1296,7 @@ void CG_AccessibilityAimLockDown_f(void)
+ 		if (eta_aim.automatic)
+ 		{
+ 			eta_aim.automatic = qfalse;
+-			ETA_AimSay("Locked, enemy", eta_aim.point);
++			ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
+ 		}
+ 		return;
+ 	}
+@@ -1225,7 +1312,7 @@ void CG_AccessibilityAimLockDown_f(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
+-		ETA_AimSay("Locked, enemy", eta_aim.point);
++		ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
+ 	}
+ 	else
+ 	{
+@@ -1596,8 +1683,82 @@ static void ETA_GuideFrame(void)
+ 	}
+ }
+ 
++/**
++ * @brief Shot: who by and where from, and the lock turned on them.
++ *
++ * The tester died in gunfights while still turning to find who was
++ * shooting: the lock by itself takes only an enemy in view, and one
++ * behind them was not. So a hit says who it was and where from - "Hit by
++ * Soldier, behind left, 8 meters" - and, with the lock by itself on, the
++ * aim is turned straight onto them, wherever they are, if they can be
++ * seen: the quickest way to shoot back. A lock the player holds on
++ * someone else is left alone.
++ */
++#define ETA_HIT_SAY_MS 1500
++
++static struct
++{
++	int      damageEvent;
++	int      saidAt;
++	qboolean primed;
++} eta_hit;
++
++static void ETA_HitFrame(void)
++{
++	const playerState_t *ps = &cg.snap->ps;
++	int                 attacker;
++	vec3_t              point;
++
++	if (!eta_hit.primed || ps->damageEvent == eta_hit.damageEvent)
++	{
++		eta_hit.primed      = qtrue;
++		eta_hit.damageEvent = ps->damageEvent;
++		return;
++	}
++	eta_hit.damageEvent = ps->damageEvent;
++
++	attacker = ps->persistant[PERS_ATTACKER];
++	if (!ps->damageCount || attacker < 0 || attacker >= MAX_CLIENTS || attacker == ps->clientNum
++	    || !cg_entities[attacker].currentValid || cg_entities[attacker].currentState.eType != ET_PLAYER)
++	{
++		return;
++	}
++
++	if (cg.time - eta_hit.saidAt > ETA_HIT_SAY_MS || cg.time < eta_hit.saidAt)
++	{
++		eta_hit.saidAt = cg.time;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_AimSay(va("Hit by %s", CG_AccessibilityCharacterName(attacker)), cg_entities[attacker].lerpOrigin);
++	}
++
++	if (!eta_autoLock.integer || eta_climb.active || cg.cameraMode
++	    || (eta_aim.mode == ETA_AIM_LOCK && (!eta_aim.automatic || eta_aim.entityNum == attacker))
++	    || !CG_AccessibilityEnemyAimPoint(attacker, point))
++	{
++		return;
++	}
++
++	if (eta_turn.step)
++	{
++		ETA_TurnStopStep(qfalse);
++	}
++	ETA_AimStop();
++	eta_aim.mode      = ETA_AIM_LOCK;
++	eta_aim.automatic = qtrue;
++	eta_aim.started   = cg.time;
++	eta_aim.entityNum = attacker;
++	eta_aim.lostSince = 0;
++	eta_aim.saidLost  = qfalse;
++	VectorCopy(point, eta_aim.point);
++}
++
+ void CG_AccessibilityAimFrame(void)
+ {
++	if (cg.snap && cg.snap->ps.pm_type == PM_NORMAL)
++	{
++		ETA_HitFrame();
++	}
++
+ 	/* A climb has the keys to itself. */
+ 	if (eta_climb.active)
+ 	{
+@@ -1798,7 +1959,7 @@ void CG_AccessibilityAimFrame(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
+-		ETA_AimSay("Locked, enemy", eta_aim.point);
++		ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
+ 		return;
+ 	}
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 9599d51..09d9285 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4376,8 +4376,9 @@ static void ETA_AimInsert(etaAimTarget_t *list, int *count, int max, const etaAi
+ {
+ 	int at, i;
+ 
+-	/* Two halves of a door, a button and its trigger: one. */
+-	for (i = 0; i < *count; i++)
++	/* Two halves of a door, a button and its trigger: one. Two enemies
++	   are two, however close. */
++	for (i = 0; i < *count && !add->enemy; i++)
+ 	{
+ 		if (!Q_stricmp(list[i].name, add->name) && Distance(list[i].point, add->point) < 128.0f)
+ 		{
+@@ -4786,9 +4787,12 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 	return count;
+ }
+ 
+-/* Whether an enemy may be aimed at: the rules the callouts keep - in
+-   clear sight, and in view unless close enough to hear. */
+-static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t aim)
++/* Whether an enemy may be aimed at: in clear sight - nothing solid in
++   the way of their body or head - and, for the lock by itself, in view
++   unless close enough to hear. Asked for by a key (allRound), anywhere
++   round: a blind player has no glance over the shoulder, and a sighted
++   one would have turned already. */
++static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t aim, qboolean allRound)
+ {
+ 	const entityState_t *es = &cent->currentState;
+ 	vec3_t              head;
+@@ -4812,7 +4816,7 @@ static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t
+ 	meters   = Distance(cg.predictedPlayerState.origin, cent->lerpOrigin) * ETA_QU_TO_METERS;
+ 	halfView = cg.refdef.fov_x * 0.5f + 10.0f;
+ 
+-	if (meters > 10.0f && fabs(CG_AccessibilityLeftOfView(cent->lerpOrigin)) > halfView)
++	if (!allRound && meters > 10.0f && fabs(CG_AccessibilityLeftOfView(cent->lerpOrigin)) > halfView)
+ 	{
+ 		return qfalse;
+ 	}
+@@ -4820,7 +4824,7 @@ static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t
+ 	return qtrue;
+ }
+ 
+-int CG_AccessibilityEnemyTargets(etaAimTarget_t *list, int max)
++int CG_AccessibilityEnemyTargets(etaAimTarget_t *list, int max, qboolean allRound)
+ {
+ 	vec3_t eye;
+ 	int    count = 0, i;
+@@ -4839,16 +4843,16 @@ int CG_AccessibilityEnemyTargets(etaAimTarget_t *list, int max)
+ 
+ 		memset(&target, 0, sizeof(target));
+ 
+-		if (!ETA_EnemyAimable(&cg_entities[es->number], eye, target.point))
++		if (!ETA_EnemyAimable(&cg_entities[es->number], eye, target.point, allRound))
+ 		{
+ 			continue;
+ 		}
+ 
+ 		target.entityNum = es->number;
++		target.enemy     = qtrue;
+ 		target.meters    = Distance(cg.predictedPlayerState.origin, cg_entities[es->number].lerpOrigin)
+ 		                   * ETA_QU_TO_METERS;
+-		/* Each its own entry, even with one name: two enemies are two. */
+-		Q_strncpyz(target.name, va("Enemy %d", es->number), sizeof(target.name));
++		Q_strncpyz(target.name, ETA_CharacterKind(es), sizeof(target.name));
+ 		ETA_AimInsert(list, &count, max, &target);
+ 	}
+ 
+@@ -4882,7 +4886,22 @@ qboolean CG_AccessibilityEnemyAimPoint(int entityNum, vec3_t out)
+ 
+ 	ETA_AimEye(eye);
+ 
+-	return ETA_EnemyAimable(&cg_entities[entityNum], eye, out);
++	/* Already being followed: anywhere round, since the turn to them may
++	   not have got there yet. */
++	return ETA_EnemyAimable(&cg_entities[entityNum], eye, out, qtrue);
++}
++
++/**
++ * @brief What a character is called - "Soldier", "Elite guard" - for the
++ * words said about one, by entity number. "Someone" for anything else.
++ */
++const char *CG_AccessibilityCharacterName(int entityNum)
++{
++	if (entityNum < 0 || entityNum >= MAX_GENTITIES || !cg_entities[entityNum].currentValid)
++	{
++		return "Someone";
++	}
++	return ETA_CharacterKind(&cg_entities[entityNum].currentState);
+ }
+ 
+ /**
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3734b13..9fd6bb6 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2257,6 +2257,8 @@ void CG_AccessibilityAimLockDown_f( void );
+ void CG_AccessibilityAimLockUp_f( void );
+ void CG_AccessibilityUseNext_f( void );
+ void CG_AccessibilityUsePrev_f( void );
++void CG_AccessibilityEnemyNext_f( void );
++void CG_AccessibilityEnemyPrev_f( void );
+ void CG_AccessibilityTurnLeftDown_f( void );
+ void CG_AccessibilityTurnLeftUp_f( void );
+ void CG_AccessibilityTurnRightDown_f( void );
+@@ -2284,10 +2286,12 @@ typedef struct {
+ 	qboolean	locked;		// nothing to press: said, never pressed at
+ 	qboolean	stairs;		// a flight of stairs: F turns to its foot, and there up or down it
+ 	vec3_t		along;		// stairs: a point up or down the flight from its foot, at eye height
++	qboolean	enemy;		// an enemy: never one with another of the same name
+ } etaAimTarget_t;
+ 
+ int CG_AccessibilityUseTargets( etaAimTarget_t *list, int max );
+-int CG_AccessibilityEnemyTargets( etaAimTarget_t *list, int max );
++int CG_AccessibilityEnemyTargets( etaAimTarget_t *list, int max, qboolean allRound );
++const char *CG_AccessibilityCharacterName( int entityNum );
+ qboolean CG_AccessibilityEnemyAimPoint( int entityNum, vec3_t out );
+ qboolean CG_AccessibilityDoorAhead( void );
+ int CG_AccessibilityDoorAheadModel( vec3_t doorAt );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 4d21505..2b67455 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8108,8 +8108,8 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, O and Insert are free in the stock
+- * default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
++ * F1, F2, F3, F6, F7, F8, O, Insert, I, J, K and U are free in the
++ * stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+  */
+@@ -8139,6 +8139,14 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'f',          "+accessibilityActivate",    3, "+activate" },
+ 		{ K_ENTER,      "+accessibilityActivate",    3, "+activate" },
+ 		{ K_INS,        "+accessibilityAimLock",     3, NULL },
++		/* Choosing from a list, the way 1428: Shadows over Silesia does:
++		   K and J step through the things to use, for F to turn to; I
++		   and U through the enemies in sight, for Insert to lock on to.
++		   All four are free in the stock config. */
++		{ 'k',          "accessibilityUseNext",      4, NULL },
++		{ 'j',          "accessibilityUsePrev",      4, NULL },
++		{ 'i',          "accessibilityEnemyNext",    4, NULL },
++		{ 'u',          "accessibilityEnemyPrev",    4, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

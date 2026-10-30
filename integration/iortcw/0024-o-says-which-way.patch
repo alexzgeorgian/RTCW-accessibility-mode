@@ -1,0 +1,142 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f3415c1c..98de8b84 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1617,8 +1617,8 @@ static void ETA_UseLineEnd(const vec3_t eye, const vec3_t point, vec3_t end)
+  *
+  * Off unless eta_autoSteer is 1. The tester, led by it, asked not to have
+  * their autonomy taken away entirely: W is theirs again, and the way is
+- * told as they walk instead (ETA_WayCueFrame), with O turning them to
+- * face it once when they ask (CG_AccessibilityFaceTheWay).
++ * told as they walk instead (ETA_WayCueFrame), and O says which way to
++ * turn when they ask (CG_AccessibilityFaceTheWay).
+  */
+ #define ETA_GUIDE_TOLERANCE  4.0f    /* degrees off the way that need no turn */
+ #define ETA_GUIDE_STUCK_MS   1200    /* this long walking without getting anywhere: stuck */
+@@ -2284,7 +2284,7 @@ static void ETA_WayCueSwitch(void)
+ 		{
+ 			CG_AccessibilityMarkerBlocked(doorAt, 56.0f);
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("This door opens from the other side. Finding another way. O faces it");
++			ETA_Speech_Say("This door opens from the other side. Finding another way. O says which way");
+ 			return;
+ 		}
+ 	}
+@@ -2413,11 +2413,11 @@ static void ETA_WayCueFrame(void)
+ 				/* Facing the way and held still: what is in front is
+ 				   no way through, whatever the search made of it. */
+ 				CG_AccessibilityMarkerBlocked(ahead, 32.0f);
+-				what = "Blocked. Finding a way round. O faces it";
++				what = "Blocked. Finding a way round. O says which way";
+ 			}
+ 			else
+ 			{
+-				what  = va("Blocked. The way goes %s. O faces it", ETA_HudNarrator_RelativeDirection(rel));
++				what  = va("Blocked. The way goes %s. O says more", ETA_HudNarrator_RelativeDirection(rel));
+ 				plain = qtrue;
+ 			}
+ 		}
+@@ -2433,12 +2433,14 @@ static void ETA_WayCueFrame(void)
+ }
+ 
+ /**
+- * @brief O again: turned to face the way, once, and how far is left.
++ * @brief O again: which way to turn for the way, and how far is left.
+  *
+- * Not before the way round the walls is known: pressed straight after the
+- * way out was set, it turned the tester straight at the exit, through the
+- * walls, and W took them the wrong way. Then it waits - "Finding the way"
+- * - and turns them as soon as the way is found.
++ * It once turned the player onto the way. Pressed straight after the way
++ * out was set, that turned the tester through the walls at the exit; and
++ * even once the way was known, it turned them into a wall. Now it only
++ * says - which way to turn, which way the way goes - and the player
++ * turns. Not before the way round the walls is known: then it waits -
++ * "Finding the way" - and says it as soon as the way is found.
+  */
+ #define ETA_FACE_WAIT_MS 8000
+ 
+@@ -2489,43 +2491,18 @@ static void ETA_FacePendingFrame(void)
+ 
+ static void ETA_FaceTheWayNow(void)
+ {
+-	const playerState_t *ps = &cg.predictedPlayerState;
+-	vec3_t              target, origin, delta;
+-	const char          *name;
+-	char                height[48];
+-	int                 meters;
+-
+-	if (!cg.snap || ps->pm_type != PM_NORMAL || !CG_AccessibilityMarkerSteerPoint(target)
+-	    || !CG_AccessibilityMarkerInfo(origin, &name))
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
+ 	{
+ 		return;
+ 	}
+ 
+-	VectorSubtract(target, ps->origin, delta);
+-	delta[2] = 0.0f;
+-	if (VectorLength(delta) >= 16.0f)
+-	{
+-		etaAimTarget_t way;
+-
+-		memset(&way, 0, sizeof(way));
+-		way.entityNum = -1;
+-		VectorCopy(target, way.point);
+-		way.point[2] = ps->origin[2] + ps->viewheight;
+-		ETA_AimStartSnap(&way, NULL);
+-	}
+-
+-	VectorSubtract(origin, ps->origin, delta);
+-	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+-	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++	/* Said, never turned: "Turn left toward the marker. The way goes
++	   east. Marker lies north, you are facing north" - the Enemy
++	   Territory mode's own words. Turned onto the way, the tester was
++	   turned into a wall; the turning is the player's, as it is there
++	   and in 1428, where the ping leads and the player turns. */
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	{
+-		char what[48];
+-
+-		Q_strncpyz(what, name, sizeof(what));
+-		what[0] = (char)toupper((unsigned char)what[0]);
+-		ETA_Speech_Say(va("Facing the way. %s, %d meters%s%s", what, meters < 1 ? 1 : meters,
+-		                  height[0] ? ", " : "", height));
+-	}
++	CG_AccessibilityMarkerWhere();
+ }
+ 
+ /**
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b9d2564d..af17b105 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4199,8 +4199,8 @@ void CG_AccessibilityWayOut(void)
+ 	}
+ 	ETA_WorldRead();
+ 
+-	/* Pressed again on the way: turned to face the way, once, and how
+-	   far it is - the walking is the player's. */
++	/* Pressed again on the way: which way to turn, and how far it is -
++	   the turning and the walking are the player's. */
+ 	if (CG_AccessibilityMarkerActive())
+ 	{
+ 		CG_AccessibilityFaceTheWay();
+@@ -4227,7 +4227,7 @@ void CG_AccessibilityWayOut(void)
+ 	VectorSubtract(best, ps->origin, delta);
+ 	meters = (int)(bestDistance * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. O again faces the way", meters,
++	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. Follow the ping; O again says which way", meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+ 	                  height[0] ? ", " : "", height));
+@@ -4331,7 +4331,7 @@ void CG_AccessibilityWaypointNext(void)
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 	name[0] = (char)toupper((unsigned char)name[0]);
+-	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O faces the way", name, meters < 1 ? 1 : meters,
++	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O says which way", name, meters < 1 ? 1 : meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  height[0] ? ", " : "", height));
+ 	name[0] = (char)tolower((unsigned char)name[0]);

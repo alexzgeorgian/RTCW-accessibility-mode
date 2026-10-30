@@ -1,0 +1,287 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 7997096..978b9a0 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -671,6 +671,8 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityReadScreen" );
+ 	trap_AddCommand( "accessibilitySurroundings" );
+ 	trap_AddCommand( "accessibilityWayOut" );
++	trap_AddCommand( "accessibilityWaypointPlace" );
++	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+ 	trap_AddCommand( "-accessibilityTurnLeft" );
+ 	trap_AddCommand( "+accessibilityTurnRight" );
+@@ -701,6 +703,10 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilitySurroundings_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWayOut" ) ) {
+ 		CG_AccessibilityWayOut();
++	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPlace" ) ) {
++		CG_AccessibilityWaypointPlace();
++	} else if ( !Q_stricmp( cmd, "accessibilityWaypointNext" ) ) {
++		CG_AccessibilityWaypointNext();
+ 	} else if ( !Q_stricmp( cmd, "+accessibilityTurnLeft" ) ) {
+ 		CG_AccessibilityTurnLeftDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityTurnLeft" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c7f7cee..2f85a16 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1999,8 +1999,60 @@ static void ETA_WayCueFrame(void)
+ 
+ /**
+  * @brief O again: turned to face the way, once, and how far is left.
++ *
++ * Not before the way round the walls is known: pressed straight after the
++ * way out was set, it turned the tester straight at the exit, through the
++ * walls, and W took them the wrong way. Then it waits - "Finding the way"
++ * - and turns them as soon as the way is found.
+  */
++#define ETA_FACE_WAIT_MS 8000
++
++static int eta_facePendingAt;
++
++static void ETA_FaceTheWayNow(void);
++
+ void CG_AccessibilityFaceTheWay(void)
++{
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL || !CG_AccessibilityMarkerActive())
++	{
++		return;
++	}
++
++	if (!CG_AccessibilityMarkerWayKnown())
++	{
++		eta_facePendingAt = cg.time;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("Finding the way. A moment");
++		return;
++	}
++
++	eta_facePendingAt = 0;
++	ETA_FaceTheWayNow();
++}
++
++/* Every frame: a face asked for before the way was known, done once it
++   is - or given up on. */
++static void ETA_FacePendingFrame(void)
++{
++	if (!eta_facePendingAt)
++	{
++		return;
++	}
++	if (cg.time < eta_facePendingAt || cg.time - eta_facePendingAt > ETA_FACE_WAIT_MS
++	    || !CG_AccessibilityMarkerActive())
++	{
++		eta_facePendingAt = 0;
++		ETA_Speech_Say("No way found from here yet. O tries again");
++		return;
++	}
++	if (CG_AccessibilityMarkerWayKnown())
++	{
++		eta_facePendingAt = 0;
++		ETA_FaceTheWayNow();
++	}
++}
++
++static void ETA_FaceTheWayNow(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              target, origin, delta;
+@@ -2115,6 +2167,7 @@ void CG_AccessibilityAimFrame(void)
+ 	if (cg.snap && cg.snap->ps.pm_type == PM_NORMAL)
+ 	{
+ 		ETA_HitFrame();
++		ETA_FacePendingFrame();
+ 	}
+ 
+ 	/* A climb has the keys to itself. */
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index f90246d..2e34021 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1810,6 +1810,15 @@ qboolean CG_AccessibilityMarkerInfo(vec3_t origin, const char **name)
+ 	return qtrue;
+ }
+ 
++/**
++ * @brief Whether the way round the walls is known yet: until it is, the
++ * ping points straight at the marker, through whatever is between.
++ */
++qboolean CG_AccessibilityMarkerWayKnown(void)
++{
++	return (qboolean)(eta_marker.active && eta_route.done);
++}
++
+ /**
+  * @brief Whether the way needs a jump just ahead, for the walk guide to
+  * take: the player is at its edge, and the landing is ahead of them.
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 54d1104..e5ff663 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4130,6 +4130,107 @@ void CG_AccessibilityWayOut(void)
+ }
+ 
+ 
++/**
++ * @brief Waypoints: places the player marks, to come back to.
++ *
++ * 1428: Shadows over Silesia, which the tester plays, lets a player mark
++ * points of their own and be led back to them. So P marks where the
++ * player stands - "Waypoint 2 set" - and L steps through the places to
++ * go: the way out, then each waypoint, nearest said first with where it
++ * is. The one chosen takes the marker, so its ping, the way told while
++ * walking, and O facing the way all lead there. Nine are kept, the
++ * oldest given up for a tenth; a new map starts with none.
++ */
++#define ETA_MAX_WAYPOINTS 9
++
++static vec3_t eta_waypoints[ETA_MAX_WAYPOINTS];
++static int    eta_waypointCount, eta_waypointNext, eta_destination;
++
++void CG_AccessibilityWaypointPlace(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 number;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++
++	number = eta_waypointNext + 1;
++	VectorCopy(ps->origin, eta_waypoints[eta_waypointNext]);
++	eta_waypointNext = (eta_waypointNext + 1) % ETA_MAX_WAYPOINTS;
++	if (eta_waypointCount < ETA_MAX_WAYPOINTS)
++	{
++		eta_waypointCount++;
++	}
++
++	ETA_Speech_Say(va("Waypoint %d set here. L chooses where to go", number));
++}
++
++void CG_AccessibilityWaypointNext(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              point, delta, exitPoint = { 0.0f, 0.0f, 0.0f };
++	char                height[64], name[32];
++	int                 choices, i, model = 0, meters;
++	float               bestDistance = 0.0f;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	ETA_WorldRead();
++
++	for (i = 0; i < eta_exitCount; i++)
++	{
++		if (ETA_ExitPoint(eta_exitModels[i], point)
++		    && (!model || Distance(ps->origin, point) < bestDistance))
++		{
++			model        = eta_exitModels[i];
++			bestDistance = Distance(ps->origin, point);
++			VectorCopy(point, exitPoint);
++		}
++	}
++
++	/* Choice 0 is the way out, where there is one; 1 to 9 the waypoints. */
++	choices = eta_waypointCount + 1;
++	if (!model && !eta_waypointCount)
++	{
++		ETA_Speech_Say("No waypoints yet. P marks where you stand");
++		return;
++	}
++
++	for (i = 0; i < choices; i++)
++	{
++		eta_destination = (eta_destination + 1) % choices;
++		if (eta_destination || model)
++		{
++			break;
++		}
++	}
++
++	if (eta_destination == 0)
++	{
++		VectorCopy(exitPoint, point);
++		Q_strncpyz(name, "the way out", sizeof(name));
++	}
++	else
++	{
++		VectorCopy(eta_waypoints[eta_destination - 1], point);
++		Com_sprintf(name, sizeof(name), "waypoint %d", eta_destination);
++	}
++
++	VectorSubtract(point, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++	name[0] = (char)toupper((unsigned char)name[0]);
++	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O faces the way", name, meters < 1 ? 1 : meters,
++	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++	                  height[0] ? ", " : "", height));
++	name[0] = (char)tolower((unsigned char)name[0]);
++	CG_AccessibilityMarkerSet(point, name);
++}
++
+ /**
+  * @brief Reads what the map file holds about the map: its doors, its
+  *        ladders and the things in its rooms. Once a map, on its first
+@@ -4139,7 +4240,8 @@ static qboolean eta_worldRead;
+ 
+ void CG_AccessibilityWorldInit(void)
+ {
+-	eta_worldRead = qfalse;
++	eta_worldRead     = qfalse;
++	eta_waypointCount = eta_waypointNext = eta_destination = 0;
+ 	CG_AccessibilityMarkerReset();
+ }
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 308e5ba..94541a5 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2221,6 +2221,8 @@ void CG_AccessibilityWorldInit( void );
+ void CG_AccessibilityWorldFrame( qboolean held );
+ void CG_AccessibilitySurroundings( void );
+ void CG_AccessibilityWayOut( void );
++void CG_AccessibilityWaypointPlace( void );
++void CG_AccessibilityWaypointNext( void );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
+ 
+ // cg_accessibility_route.c: the marker, and the way there
+@@ -2234,6 +2236,7 @@ qboolean CG_AccessibilityMarkerCrouchNow( void );
+ qboolean CG_AccessibilityMarkerLadderNext( void );
+ qboolean CG_AccessibilityMarkerInfo( vec3_t origin, const char **name );
+ void CG_AccessibilityFaceTheWay( void );
++qboolean CG_AccessibilityMarkerWayKnown( void );
+ void CG_AccessibilityMarkerBlocked( const vec3_t at, float radius );
+ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 2b67455..0c524f5 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8108,8 +8108,8 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, O, Insert, I, J, K and U are free in the
+- * stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
++ * F1, F2, F3, F6, F7, F8, O, Insert, I, J, K, L, P and U are free in
++ * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+  */
+@@ -8147,6 +8147,11 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'j',          "accessibilityUsePrev",      4, NULL },
+ 		{ 'i',          "accessibilityEnemyNext",    4, NULL },
+ 		{ 'u',          "accessibilityEnemyPrev",    4, NULL },
++		/* Waypoints, as 1428 has them: P marks where the player stands,
++		   L steps through the way out and the waypoints to go to. Both
++		   free in the stock config. */
++		{ 'p',          "accessibilityWaypointPlace", 5, NULL },
++		{ 'l',          "accessibilityWaypointNext",  5, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

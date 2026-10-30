@@ -1,0 +1,112 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 8aa743ef..f3415c1c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -206,7 +206,6 @@ static void ETA_TurnStopStep(qboolean arrived)
+ #define ETA_AIM_KEY_UP      "996"
+ #define ETA_AIM_KEY_DOWN    "995"
+ #define ETA_AIM_SNAP_MS     1500
+-#define ETA_AIM_CYCLE_MS    4000
+ #define ETA_AIM_LOST_MS     400
+ #define ETA_AIM_MAX_TARGETS 16
+ #define ETA_AIM_MANUAL_MS   2000
+@@ -1131,8 +1130,8 @@ static void ETA_FollowFrame(void)
+  *     direction and distance. Within reach, it is used on arrival - unless
+  *     it is a door that will not open for this player. Further off, the
+  *     walk is the player's;
+- *   - pressed again within a few seconds, with still nothing under the
+- *     crosshair, the next one along;
++ *   - pressed again, the same nearest one: the ones further off are
++ *     chosen with K and J;
+  *   - with nothing close by at all, the key does what it always did.
+  */
+ /* Whether the game's icon under the crosshair is something use does
+@@ -1311,12 +1310,11 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
+-	/* Pressed again soon after: the next one along. */
+-	if (eta_aim.cycleAt && cg.time >= eta_aim.cycleAt && cg.time - eta_aim.cycleAt < ETA_AIM_CYCLE_MS)
+-	{
+-		index = (eta_aim.cycleIndex + 1) % count;
+-	}
+-	else if (list[0].stairs)
++	/* The nearest, every time: pressed again, F stays on it. It once went
++	   on to the next one along, and the tester, pressing F again at the
++	   thing they were on, was taken off it. The ones further off are K's
++	   and J's. */
++	if (list[0].stairs)
+ 	{
+ 		/* Stairs underfoot do not stand in the way of something to use
+ 		   within reach: that is what F was pressed for. */
+@@ -1338,7 +1336,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 	/* Stairs: turned to their foot, and from there up or down them. */
+ 	if (list[index].stairs)
+ 	{
+-		ETA_StairsTurn(&list[index], count > 1 ? va("%d of %d", index + 1, count) : NULL);
++		ETA_StairsTurn(&list[index], NULL);
+ 		return;
+ 	}
+ 
+@@ -1346,8 +1344,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 	   nothing, and F climbs it once the player is there. */
+ 	if (list[index].ladder)
+ 	{
+-		ETA_AimStartSnap(&list[index],
+-		                 count > 1 ? va("%s, %d of %d", list[index].name, index + 1, count) : list[index].name);
++		ETA_AimStartSnap(&list[index], list[index].name);
+ 		return;
+ 	}
+ 
+@@ -1368,13 +1365,11 @@ void CG_AccessibilityActivateDown_f(void)
+ 	   open is only turned to. */
+ 	if (!list[index].locked)
+ 	{
+-		ETA_AimStartFollow(&list[index],
+-		                   count > 1 ? va("%s, %d of %d", list[index].name, index + 1, count) : NULL);
++		ETA_AimStartFollow(&list[index], NULL);
+ 		return;
+ 	}
+ 
+-	ETA_AimStartSnap(&list[index],
+-	                 count > 1 ? va("%s, %d of %d", list[index].name, index + 1, count) : list[index].name);
++	ETA_AimStartSnap(&list[index], list[index].name);
+ }
+ 
+ void CG_AccessibilityActivateUp_f(void)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 1dd1d0ff..b9d2564d 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1901,14 +1901,11 @@ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players,
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              eye;
+-	float               halfView;
+ 	int                 i, count = 0;
+ 
+ 	VectorCopy(ps->origin, eye);
+ 	eye[2] += ps->viewheight;
+ 
+-	halfView = cg.refdef.fov_x * 0.5f + 10.0f;
+-
+ 	for (i = 0; i < cg.snap->numEntities && count < max; i++)
+ 	{
+ 		const entityState_t *es   = &cg.snap->entities[i];
+@@ -1953,11 +1950,11 @@ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players,
+ 					continue;
+ 				}
+ 
+-				if (thing.kind == ETA_AWARE_ENEMY && meters > 10.0f
+-				    && fabs(thing.leftOfView) > halfView)
+-				{
+-					continue;
+-				}
++				/* In sight is enough, whichever way the player faces.
++				   One further off was said only once in view, and so
++				   was said when F or the lock turned the player - the
++				   tester heard F naming enemies. The enemies are I, Y
++				   and U's; turning brings no new names. */
+ 				Q_strncpyz(thing.name, ETA_CharacterKind(es), sizeof(thing.name));
+ 			}
+ 			else

@@ -1,0 +1,249 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 20192588..4d86fe4f 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -62,6 +62,7 @@ static struct
+ 	int         count;
+ 	int         lookedAt;
+ 	int         target;     /* the one T leads to, or -1 */
++	qboolean    seeded;     /* the map's own things put in */
+ 	int         pickedAt;
+ 	int         picks;
+ 
+@@ -108,11 +109,62 @@ static int ETA_ThingKind(const etaAimTarget_t *target)
+ 	return Q_stricmp(target->name, "Door") ? ETA_THING_SWITCH : -1;
+ }
+ 
++/*
++ * The things the map lays out, put in as the level starts - its items,
++ * switches and buttons - so T knows them before they are in sight: the
++ * tester, drawn away by a fight, never came near the lever at the end of
++ * the first level, and T had never heard of it. A sighted player sees a
++ * lever on a wall in passing; this is that glance, for the whole level.
++ */
++static void ETA_ThingsSeed(void)
++{
++	char     name[64];
++	vec3_t   at;
++	qboolean item;
++	int      i, j;
++
++	eta_things.seeded = qtrue;
++	for (i = 0; eta_things.count < ETA_THINGS_MAX && CG_AccessibilityMapThing(i, at, name, sizeof(name), &item); i++)
++	{
++		if (!name[0])
++		{
++			continue;
++		}
++		for (j = 0; j < eta_things.count; j++)
++		{
++			if (ETA_ThingNear(eta_things.things[j].point, at, ETA_THINGS_SAME))
++			{
++				break;
++			}
++		}
++		if (j < eta_things.count)
++		{
++			continue;
++		}
++		VectorCopy(at, eta_things.things[j].point);
++		if (item)
++		{
++			eta_things.things[j].point[2] += 8.0f;
++		}
++		eta_things.things[j].entityNum = -1;
++		Q_strncpyz(eta_things.things[j].name, name, sizeof(eta_things.things[j].name));
++		eta_things.things[j].kind = item ? ETA_THING_ITEM : ETA_THING_SWITCH;
++		eta_things.things[j].done = qfalse;
++		eta_things.count++;
++	}
++}
++
+ /* What is on K and J's list now, into the level's list. */
+ static void ETA_ThingsRecord(void)
+ {
+ 	etaAimTarget_t list[32];
+-	int            count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list)), i, j;
++	int            count, i, j;
++
++	if (!eta_things.seeded)
++	{
++		ETA_ThingsSeed();
++	}
++	count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list));
+ 
+ 	for (i = 0; i < count; i++)
+ 	{
+@@ -133,7 +185,17 @@ static void ETA_ThingsRecord(void)
+ 				break;
+ 			}
+ 		}
+-		if (j < eta_things.count || eta_things.count >= ETA_THINGS_MAX)
++		if (j < eta_things.count)
++		{
++			/* One the map put in, now seen: by its entity from now on,
++			   and by the name K and J give it. */
++			if (eta_things.things[j].entityNum < 0 && list[i].entityNum >= 0)
++			{
++				eta_things.things[j].entityNum = list[i].entityNum;
++			}
++			continue;
++		}
++		if (eta_things.count >= ETA_THINGS_MAX)
+ 		{
+ 			continue;
+ 		}
+@@ -166,6 +228,16 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+ 	{
+ 		const entityState_t *es = &cg.snap->entities[i];
+ 
++		/* An item the map placed and not yet seen: any item there. */
++		if (thing->entityNum < 0)
++		{
++			if (es->eType == ET_ITEM && !( es->eFlags & EF_NODRAW )
++			    && ETA_ThingNear(cg_entities[es->number].lerpOrigin, thing->point, 48.0f))
++			{
++				return qtrue;
++			}
++			continue;
++		}
+ 		if (es->number == thing->entityNum)
+ 		{
+ 			if (es->eType == ET_ITEM)
+@@ -356,7 +428,8 @@ void CG_AccessibilityThingsFrame(void)
+ 		{
+ 			eta_thing_t *thing = &eta_things.things[i];
+ 
+-			if (thing->done || thing->kind == ETA_THING_SWITCH || thing->entityNum < 0
++			if (thing->done || thing->kind == ETA_THING_SWITCH
++			    || ( thing->entityNum < 0 && thing->kind != ETA_THING_ITEM )
+ 			    || !ETA_ThingNear(ps->origin, thing->point, ETA_THINGS_GONE) || ETA_ThingStillThere(thing))
+ 			{
+ 				continue;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 3507ebcf..18716d46 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3662,6 +3662,17 @@ typedef struct
+ 	char name[32];
+ } eta_user_t;
+ static eta_user_t eta_users[ETA_MAX_USERS];
++
++/* The items the map places, where it places them: for T's list of the
++   things left (cg_accessibility_things.c), from the start of the level,
++   before any is in sight. */
++#define ETA_MAP_ITEMS 256
++static struct
++{
++	vec3_t at;
++	int    item;
++}          eta_mapItems[ETA_MAP_ITEMS];
++static int eta_mapItemCount;
+ static int        eta_userCount;
+ 
+ /* What opens a door from somewhere else - a button on the wall beside a
+@@ -3770,7 +3781,8 @@ static void ETA_ReadMapEntities(void)
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+ 	memset(eta_opensDoor, 0, sizeof(eta_opensDoor));
+-	eta_userCount = 0;
++	eta_userCount    = 0;
++	eta_mapItemCount = 0;
+ 
+ 	for (i = 0; i < MAX_MODELS; i++)
+ 	{
+@@ -3844,6 +3856,28 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* An item the map places. */
++		if (origin[0] && classname[0] && eta_mapItemCount < ETA_MAP_ITEMS)
++		{
++			int item;
++
++			for (item = 1; item < bg_numItems; item++)
++			{
++				if (bg_itemlist[item].classname && !Q_stricmp(bg_itemlist[item].classname, classname))
++				{
++					vec3_t at;
++
++					if (sscanf(origin, "%f %f %f", &at[0], &at[1], &at[2]) == 3)
++					{
++						VectorCopy(at, eta_mapItems[eta_mapItemCount].at);
++						eta_mapItems[eta_mapItemCount].item = item;
++						eta_mapItemCount++;
++					}
++					break;
++				}
++			}
++		}
++
+ 		if (targetname[0] && namedCount < (int)ARRAY_LEN(named))
+ 		{
+ 			Q_strncpyz(named[namedCount].targetname, targetname, sizeof(named[0].targetname));
+@@ -4603,6 +4637,53 @@ void CG_AccessibilityWaypointPrev(void)
+ 	ETA_DestinationStep(-1);
+ }
+ 
++/*
++ * The level's things to take or press, as the map lays them out, for T
++ * (cg_accessibility_things.c): its items, then its switches and buttons -
++ * not the triggers that are a door's own handle. qfalse past the last.
++ */
++qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameSize, qboolean *item)
++{
++	int i;
++
++	ETA_WorldRead();
++	if (index < eta_mapItemCount)
++	{
++		gitem_t *it = &bg_itemlist[eta_mapItems[index].item];
++		int      n  = eta_mapItems[index].item;
++
++		VectorCopy(eta_mapItems[index].at, at);
++		Q_strncpyz(name, cgs.itemPrintNames[n][0] ? cgs.itemPrintNames[n] : it->pickup_name ? it->pickup_name : "Item",
++		           nameSize);
++		*item = qtrue;
++		return qtrue;
++	}
++	index -= eta_mapItemCount;
++	if (index < eta_userCount)
++	{
++		VectorCopy(cgs.inlineModelMidpoints[eta_users[index].model], at);
++		Q_strncpyz(name, Q_stricmp(eta_users[index].name, "Door") ? eta_users[index].name : "", nameSize);
++		if (name[0] && eta_opensDoor[eta_users[index].model])
++		{
++			Q_strcat(name, nameSize, " for a door");
++		}
++		*item = qfalse;
++		return qtrue;
++	}
++	index -= eta_userCount;
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		if (eta_buttonModel[i] && index-- == 0)
++		{
++			VectorCopy(cgs.inlineModelMidpoints[i], at);
++			Q_strncpyz(name, eta_opensDoor[i] ? "Button for a door" : "Button", nameSize);
++			*item = qfalse;
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* For the ways on (cg_accessibility_ways.c). */
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 919456de..875bc8f3 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2263,6 +2263,7 @@ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );
+ void CG_AccessibilityThingsProgress( char *out, size_t size );
+ void CG_AccessibilityThingUsed( int entityNum, const vec3_t point );
++qboolean CG_AccessibilityMapThing( int index, vec3_t at, char *name, size_t nameSize, qboolean *item );
+ void CG_AccessibilitySpeakLocation( void );
+ void CG_AccessibilityFooting( int footstep );
+ void CG_AccessibilityStuckFrame( playerState_t *ps, playerState_t *ops );

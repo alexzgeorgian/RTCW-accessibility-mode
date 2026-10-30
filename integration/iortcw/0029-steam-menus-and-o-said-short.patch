@@ -1,0 +1,95 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 94b97705..fa5c3222 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2604,9 +2604,33 @@ static void ETA_FaceTheWayNow(void)
+ 			way.point[2] = ps->origin[2] + ps->viewheight;
+ 			ETA_AimStartSnap(&way, NULL);
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(fabsf(AngleSubtract(yaw, vectoyaw(delta))) > 15.0f
+-			               ? "Facing the opening nearest the way" : "Facing the way");
+-			CG_AccessibilityMarkerWhere();
++
++			/* Short: where it leads and how far, nothing more. The
++			   marker's whole report - the way, where it lies, the facing -
++			   after the turn was more than the tester wanted to hear. */
++			{
++				vec3_t      origin, toward;
++				const char *name;
++				char        what[48], height[48];
++				int         meters;
++
++				if (CG_AccessibilityMarkerInfo(origin, &name))
++				{
++					VectorSubtract(origin, ps->origin, toward);
++					meters = (int)(VectorLength(toward) * ETA_QU_TO_METERS + 0.5f);
++					ETA_HudNarrator_HeightText(toward[2] * ETA_QU_TO_METERS, height, sizeof(height));
++					Q_strncpyz(what, name, sizeof(what));
++					what[0] = (char)toupper((unsigned char)what[0]);
++					ETA_Speech_Say(va("%s. %s, %d meters%s%s",
++					                  fabsf(AngleSubtract(yaw, vectoyaw(delta))) > 15.0f
++					                  ? "Facing the opening nearest the way" : "Facing the way",
++					                  what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++				}
++				else
++				{
++					ETA_Speech_Say("Facing the way");
++				}
++			}
+ 			return;
+ 		}
+ 	}
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 5f6ee068..5dc1596a 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -5959,6 +5959,20 @@ qboolean ItemParse_bordersize( itemDef_t *item, int handle ) {
+ 	return qtrue;
+ }
+ 
++/*
++ * "scralign stretchAll", in the menus of the Steam and GOG releases'
++ * sp_pak4.pk3: how their own engine stretches a piece of the menu across
++ * a wide screen. This engine draws the menus at their own 640 by 480 and
++ * scales the whole, so the keyword and its word are read and set aside -
++ * left unread, every one was an error, and the tester heard menus that
++ * were not the game's.
++ */
++qboolean ItemParse_scralign( itemDef_t *item, int handle ) {
++	pc_token_t token;
++
++	return (qboolean)trap_PC_ReadToken( handle, &token );
++}
++
+ qboolean ItemParse_visible( itemDef_t *item, int handle ) {
+ 	int i;
+ 
+@@ -6425,6 +6439,7 @@ qboolean ItemParse_hideCvar( itemDef_t *item, int handle ) {
+ 
+ 
+ keywordHash_t itemParseKeywords[] = {
++	{"scralign", ItemParse_scralign, NULL},
+ 	{"name", ItemParse_name, NULL},
+ 	{"text", ItemParse_text, NULL},
+ 	{"textfile", ItemParse_textfile, NULL},  //----(SA)	added
+@@ -6993,6 +7008,7 @@ qboolean MenuParse_execKeyInt( itemDef_t *item, int handle ) {
+ // -NERVE - SMF
+ 
+ keywordHash_t menuParseKeywords[] = {
++	{"scralign", ItemParse_scralign, NULL},
+ 	{"font", MenuParse_font, NULL},
+ 	{"name", MenuParse_name, NULL},
+ 	{"fullscreen", MenuParse_fullscreen, NULL},
+diff --git a/SP/code/ui/ui_shared.h b/SP/code/ui/ui_shared.h
+index b8d671e8..1495e0ef 100644
+--- a/SP/code/ui/ui_shared.h
++++ b/SP/code/ui/ui_shared.h
+@@ -206,7 +206,7 @@ typedef struct editFieldDef_s {
+ 	int paintOffset;                //
+ } editFieldDef_t;
+ 
+-#define MAX_MULTI_CVARS 32
++#define MAX_MULTI_CVARS 64   /* the Steam release's video modes are 36 */
+ 
+ typedef struct multiDef_s {
+ 	const char *cvarList[MAX_MULTI_CVARS];

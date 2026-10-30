@@ -1,0 +1,387 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 06dd7ff..7997096 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -45,7 +45,7 @@ vmCvar_t eta_pickupCues;
+ vmCvar_t eta_bumpCues;
+ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
+-vmCvar_t eta_walkGuide;
++vmCvar_t eta_autoSteer;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+ vmCvar_t eta_ladderVolume;
+@@ -74,7 +74,7 @@ static const struct {
+ 	{ &eta_bumpCues,            "eta_bumpCues",            "1" },
+ 	{ &eta_markerCues,          "eta_markerCues",          "1" },
+ 	{ &eta_autoLock,            "eta_autoLock",            "1" },
+-	{ &eta_walkGuide,           "eta_walkGuide",           "1" },
++	{ &eta_autoSteer,           "eta_autoSteer",           "0" },
+ 	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+ 	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+ 	{ &eta_crosshairVolume,     "eta_crosshairVolume",     "100" },
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5c22f4c..c7f7cee 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -784,7 +784,7 @@ static int ETA_ChooseFind(const etaAimTarget_t *list, int count, const etaAimTar
+ 	for (i = 0; i < count; i++)
+ 	{
+ 		if (want->entityNum >= 0 ? list[i].entityNum == want->entityNum
+-		    : (list[i].entityNum < 0 && list[i].ladder == want->ladder
++		    : (list[i].ladder == want->ladder && (list[i].entityNum < 0 || !want->ladder)
+ 		       && Distance(list[i].point, want->point) < 48.0f))
+ 		{
+ 			return i;
+@@ -1477,7 +1477,12 @@ static void ETA_UseLineEnd(const vec3_t eye, const vec3_t point, vec3_t end)
+  * It only ever steers while the player walks forward, so stopping gives
+  * the view back; a turn by hand takes it back too, for ETA_AIM_MANUAL_MS,
+  * the way it does from the enemy lock; and the lock, F and a climb all
+- * come first. eta_walkGuide 0 turns it off.
++ * come first.
++ *
++ * Off unless eta_autoSteer is 1. The tester, led by it, asked not to have
++ * their autonomy taken away entirely: W is theirs again, and the way is
++ * told as they walk instead (ETA_WayCueFrame), with O turning them to
++ * face it once when they ask (CG_AccessibilityFaceTheWay).
+  */
+ #define ETA_GUIDE_TOLERANCE  4.0f    /* degrees off the way that need no turn */
+ #define ETA_GUIDE_STUCK_MS   1200    /* this long walking without getting anywhere: stuck */
+@@ -1568,7 +1573,7 @@ static void ETA_GuideFrame(void)
+ 	usercmd_t           cmd;
+ 	vec3_t              target, delta, wanted;
+ 
+-	if (!eta_walkGuide.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
++	if (!eta_autoSteer.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
+ 	    || eta_turn.step || eta_turn.held
+ 	    || (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS)
+ 	    || !CG_AccessibilityMarkerSteerPoint(target))
+@@ -1797,6 +1802,245 @@ static void ETA_GuideFrame(void)
+ 	}
+ }
+ 
++/**
++ * @brief The way, told while the player walks it.
++ *
++ * With a marker set and the walk key down, a turn of the way is said as
++ * it comes - "Way goes left", "Way goes right", "Way goes back" - once
++ * the way has been off to that side for a moment, and not again until it
++ * changes or a few seconds have gone; the marker's ping says the rest.
++ * Held against something, the way's direction is said, and a door ahead
++ * that opens from a switch elsewhere is said with where the switch is,
++ * and chosen for F. The steering is the player's.
++ */
++#define ETA_WAYCUE_SETTLE_MS 400
++#define ETA_WAYCUE_GAP_MS    1500
++#define ETA_WAYCUE_REPEAT_MS 4000
++
++static struct
++{
++	int    side;      /* where the way is now: 0 ahead, -1 left, 1 right, 2 back */
++	int    sideSince;
++	int    saidSide;
++	int    saidAt;
++	vec3_t stillFrom;
++	int    stillAt;
++	int    switchDoor;
++	int    switchAt;
++} eta_wayCue;
++
++static void ETA_WayCueSwitch(void)
++{
++	vec3_t doorAt, opener;
++	int    door = CG_AccessibilityDoorAheadModel(doorAt);
++
++	if (!door || !CG_AccessibilityDoorOpener(door, doorAt, opener)
++	    || (door == eta_wayCue.switchDoor && cg.time - eta_wayCue.switchAt < 10000 && cg.time >= eta_wayCue.switchAt))
++	{
++		return;
++	}
++
++	eta_wayCue.switchDoor = door;
++	eta_wayCue.switchAt   = cg.time;
++
++	/* A switch out of sight from here is on the door's far side - the
++	   dungeon has one: that door is no way through from this side, and
++	   the way goes round it. */
++	{
++		trace_t trace;
++		vec3_t  eye, toward, seen;
++
++		VectorCopy(cg.predictedPlayerState.origin, eye);
++		eye[2] += cg.predictedPlayerState.viewheight;
++		VectorSubtract(eye, opener, toward);
++		VectorNormalize(toward);
++		VectorMA(opener, 12.0f, toward, seen);
++		CG_Trace(&trace, eye, NULL, NULL, seen, cg.predictedPlayerState.clientNum, MASK_SOLID);
++		if (trace.fraction < 1.0f)
++		{
++			CG_AccessibilityMarkerBlocked(doorAt, 56.0f);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("This door opens from the other side. Finding another way. O faces it");
++			return;
++		}
++	}
++
++	/* Chosen, as K would choose it: F turns to it. */
++	memset(&eta_choose.target, 0, sizeof(eta_choose.target));
++	eta_choose.target.entityNum = -1;
++	VectorCopy(opener, eta_choose.target.point);
++	Q_strncpyz(eta_choose.target.name, "Switch", sizeof(eta_choose.target.name));
++	eta_choose.held = qtrue;
++	eta_choose.at   = cg.time;
++
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_AimSay("This door opens with a switch. F turns to it. Switch", opener);
++}
++
++static void ETA_WayCueFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t           cmd;
++	vec3_t              target, delta;
++	float               rel;
++	int                 side;
++
++	if (eta_autoSteer.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
++	    || !CG_AccessibilityMarkerSteerPoint(target)
++	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || cmd.forwardmove <= 0)
++	{
++		eta_wayCue.side    = 0;
++		eta_wayCue.stillAt = 0;
++		return;
++	}
++
++	VectorSubtract(target, ps->origin, delta);
++	delta[2] = 0.0f;
++	if (VectorLength(delta) < 24.0f)
++	{
++		return;
++	}
++
++	/* Positive is to the left: the engine's own sense. */
++	rel  = AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW]);
++	side = fabs(rel) < 35.0f ? 0 : fabs(rel) > 125.0f ? 2 : (rel > 0.0f ? -1 : 1);
++
++	if (side != eta_wayCue.side)
++	{
++		eta_wayCue.side      = side;
++		eta_wayCue.sideSince = cg.time;
++	}
++
++	if (!side)
++	{
++		eta_wayCue.saidSide = 0;
++	}
++	else if (cg.time - eta_wayCue.sideSince >= ETA_WAYCUE_SETTLE_MS
++	         && (cg.time - eta_wayCue.saidAt >= ETA_WAYCUE_GAP_MS || cg.time < eta_wayCue.saidAt)
++	         && (side != eta_wayCue.saidSide || cg.time - eta_wayCue.saidAt >= ETA_WAYCUE_REPEAT_MS))
++	{
++		eta_wayCue.saidSide = side;
++		eta_wayCue.saidAt   = cg.time;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(side == 2 ? "Way goes back" : side < 0 ? "Way goes left" : "Way goes right");
++	}
++
++	/* Walking and getting nowhere: which way the way goes from here, and
++	   the switch of a door in the way. */
++	if (!eta_wayCue.stillAt || cg.time < eta_wayCue.stillAt
++	    || Distance(ps->origin, eta_wayCue.stillFrom) > ETA_GUIDE_STUCK_MOVE)
++	{
++		eta_wayCue.stillAt = cg.time;
++		VectorCopy(ps->origin, eta_wayCue.stillFrom);
++	}
++	else if (cg.time - eta_wayCue.stillAt >= ETA_GUIDE_STUCK_MS)
++	{
++		const char *what;
++		qboolean    plain = qfalse;
++		etaLadder_t ladder;
++
++		eta_wayCue.stillAt = cg.time;
++		ETA_WayCueSwitch();
++
++		/* What the way wants here, when it is not a walk: the key for
++		   it. Otherwise the way's direction - and, held against
++		   something the way did not expect, the way round it. */
++		if (eta_wayCue.switchAt == cg.time)
++		{
++			what  = NULL;   /* the switch was just said */
++		}
++		else if (CG_AccessibilityDoorAhead())
++		{
++			what = "Door here: F opens it";
++		}
++		else if (CG_AccessibilityMarkerJumpNow())
++		{
++			what = "Jump here: Space while walking";
++		}
++		else if (CG_AccessibilityMarkerLadderNext() && CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.0f)
++		{
++			what = "Ladder here: F climbs";
++		}
++		else if (CG_AccessibilityMarkerCrouchNow())
++		{
++			what = "Low here: crouch with C";
++		}
++		else
++		{
++			vec3_t forward, ahead;
++
++			AngleVectors(ps->viewangles, forward, NULL, NULL);
++			forward[2] = 0.0f;
++			VectorNormalize(forward);
++			VectorMA(ps->origin, 40.0f, forward, ahead);
++			if (fabs(rel) < 35.0f)
++			{
++				/* Facing the way and held still: what is in front is
++				   no way through, whatever the search made of it. */
++				CG_AccessibilityMarkerBlocked(ahead, 32.0f);
++				what = "Blocked. Finding a way round. O faces it";
++			}
++			else
++			{
++				what  = va("Blocked. The way goes %s. O faces it", ETA_HudNarrator_RelativeDirection(rel));
++				plain = qtrue;
++			}
++		}
++
++		if (what && (cg.time - eta_wayCue.saidAt >= ETA_WAYCUE_REPEAT_MS || cg.time < eta_wayCue.saidAt || !plain))
++		{
++			eta_wayCue.saidAt   = cg.time;
++			eta_wayCue.saidSide = side;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(what);
++		}
++	}
++}
++
++/**
++ * @brief O again: turned to face the way, once, and how far is left.
++ */
++void CG_AccessibilityFaceTheWay(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              target, origin, delta;
++	const char          *name;
++	char                height[48];
++	int                 meters;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL || !CG_AccessibilityMarkerSteerPoint(target)
++	    || !CG_AccessibilityMarkerInfo(origin, &name))
++	{
++		return;
++	}
++
++	VectorSubtract(target, ps->origin, delta);
++	delta[2] = 0.0f;
++	if (VectorLength(delta) >= 16.0f)
++	{
++		etaAimTarget_t way;
++
++		memset(&way, 0, sizeof(way));
++		way.entityNum = -1;
++		VectorCopy(target, way.point);
++		way.point[2] = ps->origin[2] + ps->viewheight;
++		ETA_AimStartSnap(&way, NULL);
++	}
++
++	VectorSubtract(origin, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++	ETA_HudNarrator_HoldPassive(cg.time);
++	{
++		char what[48];
++
++		Q_strncpyz(what, name, sizeof(what));
++		what[0] = (char)toupper((unsigned char)what[0]);
++		ETA_Speech_Say(va("Facing the way. %s, %d meters%s%s", what, meters < 1 ? 1 : meters,
++		                  height[0] ? ", " : "", height));
++	}
++}
++
+ /**
+  * @brief Shot: who by and where from, and the lock turned on them.
+  *
+@@ -1899,6 +2143,7 @@ void CG_AccessibilityAimFrame(void)
+ 		if (eta_aim.mode == ETA_AIM_NONE)
+ 		{
+ 			ETA_GuideFrame();
++			ETA_WayCueFrame();
+ 			return;
+ 		}
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index dc4ba05..f90246d 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1795,6 +1795,21 @@ qboolean CG_AccessibilityMarkerSteerPoint(vec3_t out)
+ 	return qtrue;
+ }
+ 
++/**
++ * @brief Where the marker is and what it is called, for the words said
++ * when the player is turned to face the way. qfalse with no marker.
++ */
++qboolean CG_AccessibilityMarkerInfo(vec3_t origin, const char **name)
++{
++	if (!eta_marker.active)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_marker.origin, origin);
++	*name = eta_marker.name;
++	return qtrue;
++}
++
+ /**
+  * @brief Whether the way needs a jump just ahead, for the walk guide to
+  * take: the player is at its edge, and the landing is ahead of them.
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 09d9285..54d1104 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4092,10 +4092,11 @@ void CG_AccessibilityWayOut(void)
+ 	}
+ 	ETA_WorldRead();
+ 
+-	/* Pressed again on the way: which way to turn, and how far. */
++	/* Pressed again on the way: turned to face the way, once, and how
++	   far it is - the walking is the player's. */
+ 	if (CG_AccessibilityMarkerActive())
+ 	{
+-		CG_AccessibilityMarkerWhere();
++		CG_AccessibilityFaceTheWay();
+ 		return;
+ 	}
+ 
+@@ -4119,7 +4120,7 @@ void CG_AccessibilityWayOut(void)
+ 	VectorSubtract(best, ps->origin, delta);
+ 	meters = (int)(bestDistance * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. Hold W to be led there", meters,
++	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. O again faces the way", meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+ 	                  height[0] ? ", " : "", height));
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 8f09a3c..308e5ba 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2232,6 +2232,8 @@ void CG_AccessibilityMarkerReplan( void );
+ qboolean CG_AccessibilityMarkerJumpNow( void );
+ qboolean CG_AccessibilityMarkerCrouchNow( void );
+ qboolean CG_AccessibilityMarkerLadderNext( void );
++qboolean CG_AccessibilityMarkerInfo( vec3_t origin, const char **name );
++void CG_AccessibilityFaceTheWay( void );
+ void CG_AccessibilityMarkerBlocked( const vec3_t at, float radius );
+ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+@@ -2336,7 +2338,7 @@ extern vmCvar_t eta_pickupCues;
+ extern vmCvar_t eta_bumpCues;
+ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
+-extern vmCvar_t eta_walkGuide;
++extern vmCvar_t eta_autoSteer;
+ 
+ #ifndef MIN
+ #define MIN( a, b ) ( ( a ) < ( b ) ? ( a ) : ( b ) )

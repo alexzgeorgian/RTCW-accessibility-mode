@@ -1,0 +1,331 @@
+# Return to Castle Wolfenstein accessibility mode, @VERSION@
+
+The single-player campaign of Return to Castle Wolfenstein, made to be
+played with a screen reader. It is iortcw, the open-source engine of
+the game, with the accessibility mode built in. This is the @PLATFORM@
+download. It speaks through VoiceOver on a Mac and NVDA on Windows, or
+the system's own voice when no screen reader is running.
+
+The menus, the briefings and what happens in a mission are spoken, and
+the cutscenes are described as they play. Getting around has begun:
+what is ahead of you and underfoot, the kind of place you are in, who
+is near, and the doors, ladders and things to pick up, each heard as a
+sound from where it is, and a sound to follow to the way out.
+
+## What you need
+
+Your own copy of Return to Castle Wolfenstein. None of the game's own
+files come with this download. You need five files from the game's
+**main** folder:
+
+- pak0.pk3
+- sp_pak1.pk3
+- sp_pak2.pk3
+- sp_pak3.pk3
+- sp_pak4.pk3
+
+On Windows they are in the game's own folder, for example
+`C:\Program Files (x86)\Steam\steamapps\common\Return to Castle Wolfenstein\Main`.
+sp_pak4.pk3 comes with the game's 1.41 patch; Steam and GOG copies
+already have it.
+
+## Installing on a Mac
+
+1. Unzip the download. You get a folder with **iowolfsp.app** in it.
+   Move that folder into your Applications folder with Finder.
+2. In Finder, choose Go, Go to Folder (Command Shift G), and go to
+   `~/Library/Application Support`. Make a folder there called **RTCW**,
+   and in it a folder called **main**.
+3. Copy the five game files into that **main** folder, and nothing else.
+   (The download's own main folder holds the mode's sounds,
+   sp_zaccessibility.pk3. Leave it there, beside the app.)
+   Do not copy your whole Windows main folder: the other files in it -
+   multiplayer packs, mods, old configs, loose folders - take priority
+   over the campaign's own files and stop it with errors such as
+   "BG_IndexForString: unknown token" or "RegisterItem: NULL". The download's
+   own main folder works too, but the one in Application Support works
+   wherever the app is.
+4. Open iowolfsp.app. The first time, the Mac says it cannot check the
+   app, because it is not from the App Store or a registered developer.
+   Choose Done. Then open System Settings, Privacy and Security, and
+   near the bottom, beside "iowolfsp was blocked", choose Open Anyway,
+   and give your password. The app opens, and from then on it opens
+   normally.
+
+### New test builds, on a Mac
+
+The game updates itself, so you only ever do the Open Anyway step once.
+A few seconds into the menus it checks for a newer test build, and if
+there is one you hear "Test build 22 is ready. F12 installs it". Press
+F12: it downloads, the game closes, and it opens again as the new build,
+in the same place. The Mac does not ask about it, because the game
+fetched it itself rather than a browser. F12 with nothing newer says
+"This is the newest test build".
+
+If you hear "First move the game's folder into Applications", the Mac is
+running the game from a temporary copy because it was opened where it
+was unzipped: move the folder into Applications with Finder, open the
+game from there, and press F12 again.
+
+## Installing on Windows
+
+1. Unzip the download anywhere, for example in your Documents folder.
+2. Copy the five game files into the **main** folder of what you
+   unzipped, and nothing else from your RTCW main folder. The
+   sp_zaccessibility.pk3 already there is the mode's own sounds.
+3. Start **ioWolfSP.x64.exe**.
+
+## Playing
+
+The game starts on the main menu, which is said as it opens.
+
+- **Up and Down arrows** move through a menu, and each item is said.
+  **Enter** chooses. **Escape** goes back.
+- **Left and Right arrows** change a setting.
+- In a text box, each letter is said as you type, and the arrows read
+  the character the cursor passes. Enter finishes.
+
+To start the campaign, choose PLAY and then a skill level. The game
+plays its opening cutscene first: press Enter to start it, and Escape,
+Space or Enter skips it. Before each mission its briefing is read: the
+objectives, then the orders. **Press Enter to begin the mission.**
+
+### Keys in a mission
+
+| Key | What it does |
+| --- | --- |
+| F1 | Your status: health, armor, weapon and ammo, what you carry, how many objectives are done, which place you are in, how far you have explored, and the things left: "In place 3, by the switch, of 5 found. 2 new ways left, 4 tried, 3 of 25 doors gone through. 3 things left: 1 item, 1 switch, 1 to break" |
+| F2 | The objectives, each with whether it is done. If none are found, it says why, so you can pass that on |
+| F3 | The ways on from where you stand - the doors, doorways, corridors, stairs and ladders out of the place - each with where it is, how far, and whether you have been through it: "3 ways on: 2 doors, 1 corridor. Door 1 of 2, ahead, 4 meters, new. Door 2 of 2, left, 6 meters, new, toward the way out. Corridor behind, where you came from". It says first how many of each kind there are, and numbers the ways of a kind, nearest first, so you know how many doors there are and which one you are on. "New" is a way you have not been, "been there" one you have, and "where you came from" the one you came in by. "Toward the way out" marks the one way that brings you nearest the level's way out. To choose one, use L, which goes through them first. When you walk into a new place with three ways on or more, or one with a switch, it is given a number and named by what is in it, and you hear "New place 4, by the switch. 3 ways on: 2 doors, 1 doorway"; when you come back to it, "Back in place 4, by the switch". "New place and its ways on" in the Accessibility menu keeps that quiet |
+| V | Explore: leads you to the nearest way you have found but never tried, anywhere in the level, by the ping, as O does to the way out: "3 new ways left, 1 tried, 0 of 25 doors gone through. Nearest new way: Door 1 of 2, behind, 7 meters", and you are turned toward the way there. V again within a few seconds chooses the next nearest; V later, while you are on your way, turns you toward it again. When you get there: "New way reached. 2 new ways left. V leads to the next". Every way F3 or L tells you about, and every one found as you walk, is remembered for the whole level; a way is tried once you have walked to it. With none left: "No new ways found... O leads to the way out" |
+| T | The things left to take, press or break, anywhere in the level, and the secret areas: "6 things left: 1 treasure, 2 items, 1 switch, 1 to break, 1 secret area. Nearest: Button for a door, ahead, 9 meters", and you are turned toward the way there, as O turns you toward the way out: "Facing the way. 6 meters, then left. Button for a door, 9 meters". T knows the level's items, treasure, switches, buttons and secret areas from the moment it starts, as the map lays them out - a lever you have never been near is on the list too - and adds everything else K and J have on their list, such as things to break. Treasure is said as treasure. A secret area says what its way in is when the map shows it: "Secret area, behind a door a switch opens", or "through something to break". Each stays until you pick it up, press it with F, break it, or find it. T again within a few seconds chooses the next nearest; T later, while you are on your way to one, turns you toward the way to it again. One within reach is said with what to do: "Walk onto it", "F uses it". When it is done: "Done. 2 things left. T leads to the next". Coming within about 10 meters of a secret area you have not found, you hear "A secret area is near, 8 meters, left" |
+| O | The way on: the way out of the level - how far, which way, and how far up or down. O always leads on through the level: T, V and L lead you elsewhere, and O takes you back to the way out from wherever you are. The one exception is a place you have just chosen with L: O within 20 seconds goes there. A ping plays from the way to go, round the walls, until you get there: turn until it is in front of you, and walk. While you walk the way, the ping is quiet; it sounds when the way is off to a side or behind you, and when you stop. Press O again, at any time, and you are turned toward the way - always to somewhere you can walk: if a wall or a drop is in the way's direction, you are turned to the nearest opening beside it, "Facing the opening nearest the way". Then you hear where the way turns next, and how far it is to the way out: "Facing the way. 6 meters, then left. The way out, 35 meters". Where the way goes through a closed door just ahead, you are turned to the door: "Facing the way. A door: F opens it". See "Following the way" below |
+| Backspace | Takes the marker away, and its ping stops: "Marker removed". O sets the way out again |
+| P | Marks where you stand as a waypoint, named by what is beside it: "Waypoint 2 set, by the button". Up to nine; the oldest goes for a tenth. A locked door that F turns you to, or that opens only from the other side, is kept as a waypoint by itself - "Waypoint 3: locked door. L finds it again" - so once you have found its switch, L leads you back to it |
+| H | Which way you face, and what is straight ahead: "Facing north-east, looking down. Ahead, stone floor, 4 meters". It also says when you are looking up or down, and when you are on stairs going up or down |
+| L and ; (semicolon) | L steps through the places to go, and semicolon, the key beside it, steps back. First come the ways on from where you stand, nearest first, as F3 says them: "Door ahead, 4 meters, new. O leads there". Then the way out, then each waypoint, each said with its name, how far and where: "Waypoint 3, locked door, 20 meters, behind left, on the way out. O leads there". Walk somewhere else and the list starts again from the ways on there. Each waypoint says whether it is on the way out - nearer the level's way out than you are - or back the way you came, so you know which leads on through the level. Choosing starts nothing: no ping until you press O, which then leads you to the one you chose; O again turns you toward it. A choice you do not take with O within 20 seconds is forgotten, and O leads on again |
+| Left and Right arrows | A tap turns you to the next compass point and says it; two taps, a quarter turn. Held, they turn smoothly as before, and each point is said as you pass it |
+| F or Enter | Uses what is in front of you, as before. With nothing there, it turns you to the nearest thing to use, if it is close - within about 4 meters - a door, a button or a switch, a mounted gun, something on the ground, something you can break, a ladder, stairs - and says what it is and where: "Door, ahead left, 3 meters". F is always the nearest one; pressing it again stays on it. Anything further off, up to 15 meters, you choose with K and J, and then F turns you to it; with nothing close and nothing chosen, F says "Nothing close. K finds things further off". If the thing is out of reach, you are kept facing it while you walk, and you hear "in reach, F to use" when you get there. At a ladder, F climbs it, up or down, and says when you reach the top or the bottom; F again stops the climb |
+| K and J | Step through the things to use near you, nearest first, without turning: "Door, 2 of 4, ahead, 4 meters". Each says what it is for, as the things in BROK the InvestiGator do: a button or a switch says the door it works and where that door is - "Button for a door ahead right 4 meters" - and a door worked from a switch elsewhere says so - "Door that opens with a switch". K goes on to the next, J back. Then F turns you to the one you chose, and uses it when it is in reach. F stays on your choice until you use it, choose another, or half a minute goes by: if it has gone out of sight as you walked, F still turns you to it - "Door, out of sight from here" - and never to something else |
+| Breakables | Crates, windows, boards and other things that break are on the F, K and J list too: "Breakable wood, 1 of 4, ahead, 3 meters", or "Breakable glass", "Breakable, needs dynamite". F turns you to face it, aimed at it, so you can shoot it or knife it. Nothing is pressed |
+| I and Y | Step through the enemies you could shoot, all the way round you, nearest first, without turning: "Soldier, 2 of 3, behind left, 12 meters". I goes on to the next, Y back. Then U locks on to the one you chose |
+| U | The enemy key, as F is for things: turns you to the enemy you chose with I or Y, or else the nearest one in sight, wherever they are, and keeps your aim on them: "Locked, Soldier, behind, 10 meters". When they fall, the lock lets go by itself: "Down. Lock off". U again lets go too, and so does turning with the arrows; "Lock lost" when they are out of sight |
+| Insert, held | The same lock, while you hold the key, for a keyboard that has Insert |
+| M | Switches the enemy callouts off - "Enemy callouts off" - and on again, with the enemies' sound. It is kept for next time |
+| F6 | Says the last thing again |
+| F7 | In a menu, reads everything on the screen; in a mission, the objectives |
+| F8 | Stops the speech |
+| Escape | Pauses the game and opens the menu: save, load, options |
+| N | The notebook, read as it opens. Down arrow to Next page and Enter turns the page, and reads it |
+| F5 | Quick save. F9 loads it |
+
+The game's own keys are as the game sets them: W, A, S and D or the
+arrows to move, Control or the left mouse button to fire, Enter or F to
+use, R to reload, the number keys for weapons, G and X to kick. F does
+not use the same thing twice by accident - a button pressed twice works
+its door twice: pressed again within 15 seconds, near what it just
+used, even when you chose it again with K or J, it says "Just used. F
+twice quickly uses it again". K and J say it too: "Button, just used,
+1 of 2".
+
+Things to use and enemies are kept apart. While you are on a thing -
+chosen with K or J, turned to with F, or walked to with F keeping you
+facing it - no enemy takes your aim: being shot is said, "Hit by
+Soldier, behind left. U turns to them", and U locks on when
+you want it. Otherwise, the aim also locks on by itself, without a key,
+to an enemy who comes into sight within 40 meters - silently, since you have already heard
+where they are, and the tick says when your crosshair is on them. And
+when you are shot, you hear who by and where from - "Hit by Soldier,
+behind left, 8 meters" - and your aim is turned straight onto them, even
+behind you, so you can shoot back at once with Control. Turning
+with the arrows lets go of it, and keeps it off for two seconds, so you
+can look away. To turn it off: "Aim locks on to enemies by itself", in the Accessibility menu.
+
+The mode's keys are given to you once, on F1, F2, F3, F6, F7, F8, H, O,
+Insert, I, J, K, L, M, P, T, U, V, Y, semicolon and Backspace, only where the game left those keys free; on the Left and
+Right arrows only where they still turn you, and on F and Enter only
+where they still use, as the game set them. They never take one of the game's
+own: F4 and Tab show the scores, F5 is quick save, F9 quick load, and F11
+a screenshot, as before. You can move the mode's keys under Options,
+Controls.
+
+### Cutscenes
+
+Each cutscene is described as it plays: where it is, who is there, and
+what is shown - the photographs on the briefing room's screen, say. Each
+thing is said when it happens, in the quiet between the lines the people
+in it speak, never over them, so where they talk without a pause little
+is said. Escape, Space or Enter still skips it.
+
+The intro movie that plays when the game first starts is described the
+same way. Escape, Space or Enter skips it.
+
+### Following the way
+
+Press O, and the way out is set. Then you walk it - W is yours - and the
+way is told as you go:
+
+- The ping, from the way to go: high when it is in front of you, lower
+  from the side it is on, a low double ping when it is behind you. Turn
+  with the arrows until it is the high ping, and walk. While you walk
+  the way it is quiet; it comes back when the way turns off to a side,
+  or when you stop. Backspace takes the marker away altogether.
+- "Left", "Right" or "Back" just before the way turns, a couple of
+  metres ahead, so you can turn at the corner; and "Way goes left", "Way
+  goes right", "Way goes back" if you have walked past it.
+  Or press O: you are turned toward the way, as N does in 1428 - never
+  into a wall, always to an opening - and hear how far, and which way
+  the way goes.
+- "Getting closer", "Getting further" or "Not getting closer", every
+  twelve seconds or so while you walk - along the way round the walls,
+  once it is worked out - so you know you are not going round in circles.
+- "New place 4, by the switch", as you come to a room or a crossing,
+  and "Back in place 4, by the switch" when you come back to it; F1 says
+  which place you are in. "You were here 3 minutes ago", when you walk
+  back onto somewhere else you were at a minute or more ago, marker or
+  none; and "Back at waypoint 2, by the button" when you come back to
+  one of your waypoints.
+- "Jump up, press space", "Ladder up, F climbs", "Crouch", as they come.
+- Held still while walking, you hear what is in the way and what to do:
+  "Door here: F opens it", "Jump here: Space while walking", "Ladder
+  here: F climbs", or which way the way goes. A door that opens with a
+  switch somewhere else says so, and F turns you to the switch. A door
+  that opens only from the other side says so, and the way goes round
+  it. Held against something the way did not expect, the way is found
+  round it.
+- A soldier standing in a doorway blocks it until you deal with him.
+
+If you would rather be led - the game steering you along the way, and
+opening doors, jumping and climbing for you - set "Turned along the way
+as you walk" to Yes in the Accessibility menu; then hold W after O. It is
+off unless you ask for it.
+
+### Stairs
+
+Straight stairs you walk like a ramp: hold W, and you go up or down
+them. Stairs that turn - round a tower, or at a landing - are where a
+sighted player turns with the mouse. Here, the game does that for you
+while you hold W on them: when the next steps go off to one side, you
+are turned to follow them, and you hear "Stairs bend left" or "Stairs
+bend right" at each bend. It never turns you off an open side. It only
+turns you on stairs, and lets go at the top and at the bottom; turning
+with the arrows, or stepping sideways, is always yours. To turn it off:
+"Turned along curved stairs", in the Accessibility menu.
+
+### Getting around
+
+While you move, you hear:
+
+- Which way you face, when you tap an arrow key - and whenever you
+  press H. It is no longer said by itself as you turn; to have it back,
+  "Direction as you turn" in the Accessibility menu.
+- A wall or a thing in your way, when you are walking into it, and a
+  thud or a knock as you bump into it. A step up or down, stairs, a
+  drop ahead and how bad a fall it would be, and water and how deep.
+- What kind of place you are in: a room, a corridor, the open, a ledge.
+  And the ways that open and close to the sides as you walk.
+- Furniture, as you come up to it: a table, a bookcase, a crate.
+- Each enemy in sight within 25 meters, as a low soft double pulse,
+  like a heartbeat, from where they stand - all round you, so in a fight
+  you hear where each one is, even a quiet one.
+- What you choose with K or J, as one soft two-note beep from where it
+  is, as you choose it. F turns you to it.
+- Enemies in sight, with where they are and how far: "Enemy Soldier,
+  right, 2 meters" - in sight whichever way you face, so turning, with
+  F or the arrows, does not name them again. A tick in your ears while your crosshair is on one.
+- The way out, once you have pressed O: a ping from the way to go, high
+  when it is ahead, lower when it is to one side, a double ping when it
+  is behind you. On the way, it tells you of stairs and jumps. "Marker
+  reached" when you get there.
+- Sounds that stay where things are, so you can turn toward them: a
+  creak on each door near you (a different one when it is locked), a
+  sound on each ladder, and on health, ammunition and weapons lying
+  close by.
+
+Each of these is turned on and off, and each sound made louder or
+quieter, in the Accessibility menu: see below.
+
+### The menus
+
+Up and Down go through every row of a screen and Enter chooses. A few
+screens needed more than that, and have it:
+
+- On the Load and Save screens, Down from the last saved game goes on to
+  the buttons under the list - Show autosaves, Back, Load - and Up from
+  the first back to the column headings. Each button is said once.
+- Options opens on Controls. Escape there goes back to the row of tabs
+  above it - Controls, System, Game options, Mods, Defaults, Back - and
+  Escape again to the main menu. In the menu Escape opens during a
+  mission, Escape on Save, Load, Controls, Options or System goes back to
+  that menu, where you were in it; Escape there returns to the game.
+- On Controls, each row says its key in words: "Lookup, Page Down",
+  "Forward, W or Up arrow". Enter, then the new key, changes it.
+- The books' page corners say "Next page" and "Previous page".
+- The skill levels say what they are after the game's names for them:
+  "Don't hurt me, easy", "Bring'em on!, medium", "I am Death incarnate!,
+  hard".
+- A heading the game made a button, with nothing to do - the Save
+  screen's title - is passed over, so "Save" is the button that saves.
+
+### The Accessibility menu
+
+ACCESSIBILITY comes after OPTIONS in the main menu, and after SYSTEM in
+the menu Escape opens during a mission. It has four pages, each a list
+of settings, Up and Down to go through them and Enter to change one:
+
+- **What you are told**: walls, doors, stairs and drops ahead; openings
+  to the side as you walk; the kind of place you walk into; a new place
+  and its ways on; enemies and friends near you; things on the ground;
+  furniture as you pass it; and the direction as you turn.
+- **Sounds**: door, ladder, pickup and bump sounds, the crosshair
+  ticks, the enemies' sound and the marker's ping.
+- **Volumes**: how loud each of those is - full, 75, 50 or 25 percent,
+  or off.
+- **Moving and aiming**: the arrows turning by compass points, being
+  turned along curved stairs, the aim locking on to enemies by itself,
+  being turned along the way as you walk, and whether T leads you
+  straight to secret areas ("T leads straight to secret areas"; with it
+  off, you only hear "A secret area is near" as you come close).
+
+A change takes effect at once, even in the middle of a mission, and is
+kept for next time. Escape goes back a page, and from the first page
+back to the menu you came from.
+
+### What is said while you play
+
+- The weapon you change to, and its ammunition: what is in it, and
+  how much more you carry.
+- Your health as it falls past 75, 50 and 25, and when you die. The
+  game then takes you back to your last save by itself.
+- What you pick up, and how much.
+- What you are looking at when it is something to use: a door, a
+  locked door, a ladder, a button, an alarm, the way out. A way out
+  says if the objectives are not done yet, and the mission's figures
+  the exit shows: the time, the objectives done, the secret areas and
+  treasure found, and the attempts.
+- Each objective as you complete it, and a new page in the notebook.
+- "Fight over. Waypoint 2 is where it began. T finds what is left, O
+  leads on", when no enemy has been in sight for a few seconds after a
+  fight that took you away from where you were. Where it began is kept
+  as a waypoint, so L can lead you back there; O still leads on.
+- "Mission complete", with the same figures, as the screen fades out
+  at the end of a mission.
+- Each secret area and each piece of treasure as you find it, with how
+  many of how many: "2 of 7 secret areas", "5 of 9 treasure".
+- The item you make ready with the item keys: "Wine ready, 2".
+- "Out of breath" when sprinting has used up your stamina.
+- "Overheating" when a gun that heats - the Venom, a mounted gun - is
+  near locking up.
+- "Out of ammo" when the weapon in your hands has nothing left.
+- The dynamite's timer as you set it: "Timer 10".
+- Under water, "Air running out, 5 seconds", and then "Drowning. Go up".
+- The messages the game puts in the middle of the screen.
+- A cutscene starting, and how to skip it.
+- The console opening and closing.
+
+## The source
+
+The engine is iortcw (https://github.com/iortcw/iortcw), under the GNU
+General Public License, version 3; COPYING.txt is its licence. The
+changes made to it are the patches in `integration/iortcw` of
+https://github.com/alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-mode.

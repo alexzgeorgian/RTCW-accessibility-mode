@@ -1,0 +1,334 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index f8ea6fb3..21e24dd3 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1635,6 +1635,129 @@ static eta_loopSoundType_t ETA_MarkerSoundFor(const vec3_t direction)
+ 	return playing;
+ }
+ 
++/**
++ * @brief Getting closer, or not: said every so often on the way.
++ *
++ * The tester asked how they were to know they were going the right way,
++ * and not round in circles. So every ETA_PROGRESS_MS of walking toward
++ * the marker, how far is left is compared with before - along the way
++ * round the walls where it is known, else as the crow flies: "Getting
++ * closer, 40 meters", "Getting further, 52 meters", or, walked a good way
++ * for nothing, "Not getting closer, 45 meters". Standing still says
++ * nothing.
++ */
++#define ETA_PROGRESS_MS     12000
++#define ETA_PROGRESS_WALKED 6.0f    /* metres walked for a reading to count */
++#define ETA_PROGRESS_CHANGE 2.0f    /* metres closer or further that are news */
++
++static struct
++{
++	int    at;
++	float  left;      /* metres left, then */
++	float  walked;    /* metres walked since */
++	vec3_t last;
++	qboolean byWay;   /* left was along the way, not as the crow flies */
++} eta_progress;
++
++/* Metres left to the marker: along the way, where the way is known. */
++static float ETA_MarkerWayLeft(qboolean *byWay)
++{
++	const playerState_t *ps    = &cg.predictedPlayerState;
++	int                 count = ETA_PathFinder_PointCount();
++
++	*byWay = (qboolean)(eta_route.done && eta_route.along >= 0 && eta_route.along < count);
++	if (*byWay)
++	{
++		vec3_t a, b;
++		float  units;
++		int    i;
++
++		ETA_PathFinder_Point(eta_route.along, a);
++		units = Distance(ps->origin, a);
++		for (i = eta_route.along + 1; i < count; i++)
++		{
++			ETA_PathFinder_Point(i, b);
++			units += Distance(a, b);
++			VectorCopy(b, a);
++		}
++		units += Distance(a, eta_marker.origin);
++		return units * ETA_QU_TO_METERS;
++	}
++
++	return Distance(ps->origin, eta_marker.origin) * ETA_QU_TO_METERS;
++}
++
++static void ETA_MarkerProgressFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float               step;
++
++	if (ps->groundEntityNum == ENTITYNUM_NONE || CG_AccessibilityClimbing())
++	{
++		VectorCopy(ps->origin, eta_progress.last);
++		return;
++	}
++
++	if (!eta_progress.at || cg.time < eta_progress.at)
++	{
++		eta_progress.at     = cg.time;
++		eta_progress.left   = ETA_MarkerWayLeft(&eta_progress.byWay);
++		eta_progress.walked = 0.0f;
++		VectorCopy(ps->origin, eta_progress.last);
++		return;
++	}
++
++	/* A jump of the view - a load, a teleport - is not walking. */
++	step = Distance(ps->origin, eta_progress.last) * ETA_QU_TO_METERS;
++	if (step < 3.0f)
++	{
++		eta_progress.walked += step;
++	}
++	VectorCopy(ps->origin, eta_progress.last);
++
++	if (cg.time - eta_progress.at < ETA_PROGRESS_MS)
++	{
++		return;
++	}
++
++	if (eta_progress.walked >= ETA_PROGRESS_WALKED)
++	{
++		qboolean byWay;
++		float    left   = ETA_MarkerWayLeft(&byWay);
++		float    change = eta_progress.left - left;
++		int      meters = (int)(left + 0.5f);
++
++		/* The way found since the last reading: the straight line and the
++		   way round the walls are not to be compared - "Getting further"
++		   was said when the way, longer than the line, was first known. */
++		if (byWay != eta_progress.byWay)
++		{
++			eta_progress.byWay  = byWay;
++			eta_progress.left   = left;
++			eta_progress.at     = cg.time;
++			eta_progress.walked = 0.0f;
++			return;
++		}
++
++		/* No number: along the way round the walls it is not the one the
++		   distance callouts say, as the crow flies, and two numbers that
++		   disagree are worse than none. */
++		(void)meters;
++		ETA_Speech_BeginReport();
++		ETA_Speech_Say(change >= ETA_PROGRESS_CHANGE ? "Getting closer"
++		               : change <= -ETA_PROGRESS_CHANGE ? "Getting further" : "Not getting closer");
++		ETA_Speech_EndReport();
++		eta_progress.left = left;
++	}
++	else
++	{
++		eta_progress.left = ETA_MarkerWayLeft(&eta_progress.byWay);
++	}
++
++	eta_progress.at     = cg.time;
++	eta_progress.walked = 0.0f;
++}
++
+ /**
+  * @brief Every frame: the marker's sound, and arriving at it.
+  *
+@@ -1699,6 +1822,7 @@ void CG_AccessibilityMarkerFrame(void)
+ 	}
+ 
+ 	ETA_RouteFrame();
++	ETA_MarkerProgressFrame();
+ 
+ 	if (eta_markerCues.integer)
+ 	{
+@@ -1781,6 +1905,7 @@ void CG_AccessibilityMarkerSet(const vec3_t origin, const char *name)
+ 	Q_strncpyz(eta_marker.name, name, sizeof(eta_marker.name));
+ 	ETA_RouteForget();
+ 	ETA_NavigationSystem_StartMarkerApproach(ETA_MarkerDistance());
++	eta_progress.at = 0;
+ }
+ 
+ /**
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 4846e149..79ee4bcb 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4300,6 +4300,27 @@ void CG_AccessibilityWayOut(void)
+  */
+ #define ETA_MAX_WAYPOINTS 9
+ 
++#define ETA_TRAIL_MAX     600       /* every two seconds: twenty minutes */
++#define ETA_TRAIL_EVERY   2000
++#define ETA_TRAIL_STEP    48.0f     /* units walked since the last point */
++#define ETA_TRAIL_NEAR    64.0f     /* this near an old point: been here */
++#define ETA_TRAIL_OLD     60000     /* a point at least this old */
++#define ETA_TRAIL_QUIET   30000     /* between two of them */
++#define ETA_TRAIL_ON      600.0f    /* and walked this far since the last */
++#define ETA_WAYPOINT_AT   96.0f     /* this near a waypoint: back at it */
++
++static struct
++{
++	vec3_t at[ETA_TRAIL_MAX];
++	int    time[ETA_TRAIL_MAX];
++	int    head, count;
++	int    lastAt;
++	int    saidAt;
++	vec3_t saidFrom;
++	int    lookAt;
++	int    waypointAt;   /* the waypoint the player is at, 1 to 9, or 0 */
++} eta_trail;
++
+ static vec3_t eta_waypoints[ETA_MAX_WAYPOINTS];
+ static char   eta_waypointNames[ETA_MAX_WAYPOINTS][48];   /* "locked door", or "" */
+ static int    eta_waypointCount, eta_waypointNext, eta_destination;
+@@ -4424,6 +4445,7 @@ void CG_AccessibilityWaypointPlace(void)
+ 	}
+ 
+ 	i = ETA_WaypointAdd(ps->origin, name);
++	eta_trail.waypointAt = i;
+ 	ETA_Speech_Say(name[0] ? va("Waypoint %d set, %s. L chooses where to go", i, name)
+ 	                       : va("Waypoint %d set here. L chooses where to go", i));
+ }
+@@ -4506,6 +4528,127 @@ void CG_AccessibilityWaypointNext(void)
+ 	eta_chosenSet = qtrue;
+ }
+ 
++/**
++ * @brief Where the player has been: "You were here 3 minutes ago", and
++ * "Back at waypoint 2, by the button".
++ *
++ * The tester asked how to tell going round in circles from getting
++ * somewhere. So a trail is kept - a point every couple of seconds, where
++ * the player has walked a metre or more since the last - and walking
++ * back onto a part of it a minute old or more is said, with how long
++ * ago; not again for half a minute, nor until the player has walked on.
++ * Coming back to one of the waypoints is said by its name, once until
++ * they leave it.
++ */
++
++static qboolean ETA_TrailClose(const vec3_t a, const vec3_t b, float near)
++{
++	float dx = a[0] - b[0], dy = a[1] - b[1];
++
++	return (qboolean)(dx * dx + dy * dy < near * near && fabsf(a[2] - b[2]) < 40.0f);
++}
++
++static void ETA_TrailFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 i, newest;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL || ps->groundEntityNum == ENTITYNUM_NONE)
++	{
++		return;
++	}
++
++	/* A point on the trail. */
++	newest = (eta_trail.head + ETA_TRAIL_MAX - 1) % ETA_TRAIL_MAX;
++	if ((cg.time - eta_trail.lastAt >= ETA_TRAIL_EVERY || cg.time < eta_trail.lastAt)
++	    && (!eta_trail.count || Distance(ps->origin, eta_trail.at[newest]) >= ETA_TRAIL_STEP))
++	{
++		VectorCopy(ps->origin, eta_trail.at[eta_trail.head]);
++		eta_trail.time[eta_trail.head] = cg.time;
++		eta_trail.head                 = (eta_trail.head + 1) % ETA_TRAIL_MAX;
++		if (eta_trail.count < ETA_TRAIL_MAX)
++		{
++			eta_trail.count++;
++		}
++		eta_trail.lastAt = cg.time;
++	}
++
++	if (cg.time - eta_trail.lookAt < 500 && cg.time >= eta_trail.lookAt)
++	{
++		return;
++	}
++	eta_trail.lookAt = cg.time;
++
++	/* Back at a waypoint: by its name. */
++	{
++		int at = 0;
++
++		for (i = 0; i < eta_waypointCount; i++)
++		{
++			if (ETA_TrailClose(ps->origin, eta_waypoints[i], ETA_WAYPOINT_AT))
++			{
++				at = i + 1;
++				break;
++			}
++		}
++		if (at && at != eta_trail.waypointAt)
++		{
++			eta_trail.waypointAt = at;
++			eta_trail.saidAt     = cg.time;
++			VectorCopy(ps->origin, eta_trail.saidFrom);
++			ETA_Speech_BeginReport();
++			ETA_Speech_Say(eta_waypointNames[at - 1][0]
++			               ? va("Back at waypoint %d, %s", at, eta_waypointNames[at - 1])
++			               : va("Back at waypoint %d", at));
++			ETA_Speech_EndReport();
++			return;
++		}
++		if (!at)
++		{
++			eta_trail.waypointAt = 0;
++		}
++		else
++		{
++			return;
++		}
++	}
++
++	if (eta_trail.saidAt && cg.time >= eta_trail.saidAt
++	    && (cg.time - eta_trail.saidAt < ETA_TRAIL_QUIET || Distance(ps->origin, eta_trail.saidFrom) < ETA_TRAIL_ON))
++	{
++		return;
++	}
++
++	/* Back on the trail: the latest old point here, for how long ago. */
++	{
++		int ago = -1;
++
++		for (i = 0; i < eta_trail.count; i++)
++		{
++			int k = (eta_trail.head + ETA_TRAIL_MAX - 1 - i) % ETA_TRAIL_MAX;
++
++			if (cg.time - eta_trail.time[k] < ETA_TRAIL_OLD || cg.time < eta_trail.time[k])
++			{
++				continue;
++			}
++			if (ETA_TrailClose(ps->origin, eta_trail.at[k], ETA_TRAIL_NEAR))
++			{
++				ago = (cg.time - eta_trail.time[k]) / 60000;
++				break;
++			}
++		}
++
++		if (ago >= 0)
++		{
++			eta_trail.saidAt = cg.time;
++			VectorCopy(ps->origin, eta_trail.saidFrom);
++			ETA_Speech_BeginReport();
++			ETA_Speech_Say(ago <= 1 ? "You were here a minute ago" : va("You were here %d minutes ago", ago));
++			ETA_Speech_EndReport();
++		}
++	}
++}
++
+ /**
+  * @brief Reads what the map file holds about the map: its doors, its
+  *        ladders and the things in its rooms. Once a map, on its first
+@@ -4517,6 +4660,7 @@ void CG_AccessibilityWorldInit(void)
+ {
+ 	eta_worldRead     = qfalse;
+ 	eta_waypointCount = eta_waypointNext = eta_destination = 0;
++	memset(&eta_trail, 0, sizeof(eta_trail));
+ 	eta_chosenSet     = qfalse;
+ 	CG_AccessibilityMarkerReset();
+ }
+@@ -4563,6 +4707,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 		ETA_NarrateFurniture();
+ 		ETA_NarrateLadder();
+ 		CG_AccessibilityMarkerApproach();
++		ETA_TrailFrame();
+ 		ETA_NarrateFacing();
+ 		ETA_NarrateLookAround();
+ 		/* Most urgent last: a backend that cuts off the line in progress

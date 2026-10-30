@@ -1,0 +1,57 @@
+#include "ui/menudef.h"
+
+// The Accessibility button, put into the game's own menus as they load
+// (ui_main.c, UI_AccessibilityMenus): after OPTIONS in the main menu, and
+// after SYSTEM among the paused game's tabs, so the arrows come to it
+// there. Not among the Setup tabs that OPTIONS opens: that screen gives
+// the keyboard to its Controls page at once, and the tabs above it are
+// out of the arrows' reach. The game's menu files are the game's, and are
+// not shipped; this is the one item added to each.
+//
+//   tab <menu it goes in> <item it follows> itemDef { ... }
+//
+// The two names bare, not quoted: the menu reader joins quoted strings
+// side by side into one.
+
+{
+	tab main options itemDef {
+		text "ACCESSIBILITY"
+		type ITEM_TYPE_BUTTON
+		style 0
+		textstyle 6
+		rect 290 396 110 14
+		textalign 0
+		textscale .2308
+		textalignx 2
+		textaligny 14
+		forecolor .9 .9 .9 1
+		visible 1
+		textfont UI_FONT_NORMAL
+		action { play "sound/misc/zap.wav" ;
+			uiScript etaAccessibilityClose ;
+			open eta_accessibility }
+	}
+
+	tab ingame system itemDef {
+		text "ACCESSIBILITY"
+		type ITEM_TYPE_BUTTON
+		textfont UI_FONT_NORMAL
+		rect 454 110 120 14
+		textstyle 6
+		textalign 1
+		textalignx 60
+		textaligny 11
+		textscale .2
+		forecolor .8 .8 .8 1
+		backcolor .4 .4 .4 .6
+		visible 1
+		action { close ingame_options ;
+			close ingame_controls ;
+			close ingame_system ;
+			close ingame_save ;
+			close ingame_load ;
+			close ingame_leave ;
+			uiScript etaAccessibilityClose ;
+			open eta_accessibility }
+	}
+}

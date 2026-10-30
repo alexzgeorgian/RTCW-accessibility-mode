@@ -1,0 +1,493 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index ae711d86..8b403683 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1019,6 +1019,177 @@ static void CG_AccessibilityCameraShots( void ) {
+ 	eta.cameraShotTime = cg.time + 2500;
+ }
+ 
++/*
++ * What the screen shows and nothing said: the HUD's corners and the
++ * mission's figures. The secret areas and the treasure found so far, the
++ * item ready to use, the stamina bar run out, a gun's heat bar near the
++ * top, the last of the ammo, the dynamite's timer as it is set, and the
++ * air left under water - which the game shows no bar for, but a sighted
++ * player sees the surface and a blind one does not.
++ */
++#define ETA_AIR_MS      12000   /* g_active.c: under water this long, drowning */
++#define ETA_AIR_WARN_MS 7000
++
++static struct {
++	qboolean read;
++	int secrets, treasure;
++	int holding;
++	qboolean complete;
++	qboolean breathless, hot, empty;
++	int ammo;
++	int timer;
++	int underSince;
++	int airSaid;
++} etaHud;
++
++/* The mission's figures, as the exit shows them: hours, minutes and
++   seconds played, objectives done and in all, secret areas and treasure
++   found and in all, and the attempts (G_SendMissionStats). */
++static qboolean CG_AccessibilityMissionStats( int v[10] ) {
++	const char *s = CG_ConfigString( CS_MISSIONSTATS );
++
++	return (qboolean)( s && sscanf( s, "s=,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d",
++									&v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7], &v[8], &v[9] ) == 10 );
++}
++
++static const char *CG_AccessibilityMissionStatsText( void ) {
++	static char text[256];
++	int v[10];
++
++	if ( !CG_AccessibilityMissionStats( v ) ) {
++		return "";
++	}
++	Com_sprintf( text, sizeof( text ), "Time %s%i minute%s %i second%s", v[0] ? va( "%i hour%s ", v[0], v[0] == 1 ? "" : "s" ) : "",
++				 v[1], v[1] == 1 ? "" : "s", v[2], v[2] == 1 ? "" : "s" );
++	/* A figure the map has none of is left out. */
++	if ( v[4] ) {
++		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i", v[3], v[4] ) );
++	}
++	if ( v[6] ) {
++		Q_strcat( text, sizeof( text ), va( ". Secret areas %i of %i", v[5], v[6] ) );
++	}
++	if ( v[8] ) {
++		Q_strcat( text, sizeof( text ), va( ". Treasure %i of %i", v[7], v[8] ) );
++	}
++	Q_strcat( text, sizeof( text ), va( ". Attempts %i", v[9] ) );
++	return text;
++}
++
++static void CG_AccessibilityHudFrame( playerState_t *ps ) {
++	int v[10];
++	int ammo = -1;
++
++	/* Secret areas and treasure: how many so far, as each is found. The
++	   game says "Secret area" and the treasure's name; not how many. */
++	if ( CG_AccessibilityMissionStats( v ) ) {
++		if ( etaHud.read && v[5] > etaHud.secrets ) {
++			CG_AccessibilitySay( va( "%i of %i secret areas", v[5], v[6] ) );
++		}
++		if ( etaHud.read && v[7] > etaHud.treasure ) {
++			CG_AccessibilitySay( va( "%i of %i treasure", v[7], v[8] ) );
++		}
++		etaHud.secrets = v[5];
++		etaHud.treasure = v[7];
++	}
++
++	/* The item the item keys made ready. */
++	if ( etaHud.read && ps->holding != etaHud.holding && ps->holding > HI_NONE && ps->holding < MAX_HOLDABLE ) {
++		gitem_t *item = BG_FindItemForHoldable( ps->holding );
++
++		if ( item ) {
++			CG_AccessibilitySay( va( "%s ready, %i", CG_AccessibilityItemName( item ), ps->holdable[ps->holding] ) );
++		}
++	}
++	etaHud.holding = ps->holding;
++
++	/* The stamina bar, run out: sprinting stops. Said again once it has
++	   come back half way. */
++	if ( ps->sprintTime < 2000 && !ps->powerups[PW_NOFATIGUE] ) {
++		if ( !etaHud.breathless && etaHud.read ) {
++			CG_AccessibilitySay( "Out of breath" );
++		}
++		etaHud.breathless = qtrue;
++	} else if ( ps->sprintTime > 10000 ) {
++		etaHud.breathless = qfalse;
++	}
++
++	/* A gun that heats - the Venom, a mounted gun - near the top of its
++	   bar, where it locks up until it cools. */
++	if ( ps->curWeapHeat > 215 ) {
++		if ( !etaHud.hot ) {
++			CG_AccessibilitySay( "Overheating" );
++		}
++		etaHud.hot = qtrue;
++	} else if ( ps->curWeapHeat < 100 ) {
++		etaHud.hot = qfalse;
++	}
++
++	/* The last of the ammo for the weapon in hand. */
++	if ( ps->weapon > WP_NONE && ps->weapon < WP_NUM_WEAPONS && ps->weapon != WP_KNIFE && ps->weapon == eta.weapon ) {
++		ammo = ps->ammoclip[BG_FindClipForWeapon( ps->weapon )] + ps->ammo[BG_FindAmmoForWeapon( ps->weapon )];
++		if ( ps->weapon == WP_AKIMBO ) {
++			ammo += ps->ammoclip[BG_FindClipForWeapon( WP_COLT )];
++		}
++		if ( etaHud.read && etaHud.ammo > 0 && ammo == 0 ) {
++			CG_AccessibilitySay( "Out of ammo" );
++		}
++	}
++	etaHud.ammo = ammo;
++
++	/* The dynamite's timer, as fire held sets it. */
++	if ( ps->weapon == WP_DYNAMITE && ps->grenadeTimeLeft > 0 ) {
++		int seconds = ps->grenadeTimeLeft * 5;
++
++		seconds = ( seconds - seconds % 5000 + 5000 ) / 1000;
++		if ( seconds != etaHud.timer ) {
++			CG_AccessibilitySay( va( "Timer %i", seconds ) );
++			etaHud.timer = seconds;
++		}
++	} else {
++		etaHud.timer = 0;
++	}
++
++	/* Air, with the head under water. */
++	{
++		vec3_t eye;
++
++		VectorCopy( ps->origin, eye );
++		eye[2] += ps->viewheight;
++		if ( CG_PointContents( eye, -1 ) & CONTENTS_WATER ) {
++			if ( !etaHud.underSince ) {
++				etaHud.underSince = cg.time;
++				etaHud.airSaid = 0;
++			}
++			if ( etaHud.airSaid < 1 && cg.time - etaHud.underSince >= ETA_AIR_WARN_MS ) {
++				CG_AccessibilitySay( va( "Air running out, %i seconds", ( ETA_AIR_MS - ETA_AIR_WARN_MS ) / 1000 ) );
++				etaHud.airSaid = 1;
++			} else if ( etaHud.airSaid < 2 && cg.time - etaHud.underSince >= ETA_AIR_MS ) {
++				CG_AccessibilitySay( "Drowning. Go up" );
++				etaHud.airSaid = 2;
++			}
++		} else {
++			etaHud.underSince = 0;
++		}
++	}
++
++	/* The mission done: the screen fades and the next one loads. */
++	{
++		char value[16];
++		int reloading;
++
++		trap_Cvar_VariableStringBuffer( "g_reloading", value, sizeof( value ) );
++		reloading = atoi( value );
++		if ( ( reloading & ( RELOAD_NEXTMAP_WAITING | RELOAD_ENDGAME ) ) && !etaHud.complete ) {
++			const char *stats = CG_AccessibilityMissionStatsText();
++
++			etaHud.complete = qtrue;
++			ETA_Speech_SayLong( stats[0] ? va( "Mission complete. %s", stats ) : "Mission complete" );
++		}
++	}
++
++	etaHud.read = qtrue;
++}
++
+ void CG_AccessibilityFrame( void ) {
+ 	playerState_t *ps;
+ 	int health, hint, bits, mail;
+@@ -1033,6 +1204,7 @@ void CG_AccessibilityFrame( void ) {
+ 	if ( !eta.started ) {
+ 		eta.started = qtrue;
+ 		eta.startTime = cg.time;
++		memset( &etaHud, 0, sizeof( etaHud ) );
+ 		CG_AccessibilityLoadObjectives();
+ 		eta.objectives = CG_AccessibilityObjectiveBits();
+ 		eta.weapon = ps->weapon;
+@@ -1110,7 +1282,12 @@ void CG_AccessibilityFrame( void ) {
+ 		/* The crosshair slipping off the edge of a door and back is the
+ 		   same door: said again only after a pause. */
+ 		if ( name && ( hint != eta.spokenHint || cg.time - eta.spokenHintTime > 2000 ) ) {
+-			CG_AccessibilitySay( name );
++			/* The exit shows the mission's figures as it comes in view. */
++			if ( hint >= HINT_EXIT && hint <= HINT_NOEXIT_FAR && CG_AccessibilityMissionStatsText()[0] ) {
++				CG_AccessibilitySay( va( "%s. %s", name, CG_AccessibilityMissionStatsText() ) );
++			} else {
++				CG_AccessibilitySay( name );
++			}
+ 			eta.spokenHint = hint;
+ 		}
+ 		if ( name ) {
+@@ -1119,6 +1296,8 @@ void CG_AccessibilityFrame( void ) {
+ 		eta.hint = hint;
+ 	}
+ 
++	CG_AccessibilityHudFrame( ps );
++
+ 	bits = CG_AccessibilityObjectiveBits();
+ 	if ( bits != eta.objectives ) {
+ 		int i;
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 3f1f849f..6d9a3149 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -177,6 +177,7 @@ static void UI_AccessibilityMenuOpened( menuDef_t *menu );
+ static void UI_AccessibilityMenus( void );
+ static void UI_AccessibilityCloseMenus( void );
+ static void UI_AccessibilityLeave( void );
++static qboolean UI_AccessibilitySetupPage( const char *name );
+ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+ static qboolean UI_AccessibilityKey( int key );
+ static void UI_AccessibilityUpdateFrame( int realtime );
+@@ -7019,6 +7020,19 @@ void _UI_KeyEvent( int key, qboolean down ) {
+ 			UI_RunMenuScript( &args );
+ 			return;
+ 		}
++#endif
++#ifdef FEATURE_ACCESSIBILITY
++		/* Escape on a page of the main menu's Options - Controls, System,
++		   Game options - goes back to the row of tabs above it rather
++		   than out to the main menu: OPTIONS opens on Controls with the
++		   keyboard in it, and the tabs were out of the arrows' reach.
++		   Escape on the tabs goes on to the main menu, as before. */
++		if ( down && key == K_ESCAPE && menu && menu->window.name && !g_waitingForKey
++			 && UI_AccessibilitySetupPage( menu->window.name ) ) {
++			Menus_CloseByName( menu->window.name );
++			Menus_ActivateByName( "setup_menu" );
++			return;
++		}
+ #endif
+ 		if ( menu ) {
+ 			if ( key == K_ESCAPE && down && !Menus_AnyFullScreenVisible()
+@@ -8145,6 +8159,25 @@ static void UI_AccessibilityAddTab( menuDef_t *menu, const char *after, int hand
+ 	}
+ }
+ 
++/* A page of the main menu's Options, open over its row of tabs. */
++static qboolean UI_AccessibilitySetupPage( const char *name ) {
++	static const char *pages[] = {
++		"control_menu", "system_menu", "options_menu", "mods_menu", "default_menu", "resetscore_menu", "cdkey_menu"
++	};
++	menuDef_t *setup = Menus_FindByName( "setup_menu" );
++	int i;
++
++	if ( !setup || !( setup->window.flags & WINDOW_VISIBLE ) ) {
++		return qfalse;
++	}
++	for ( i = 0; i < (int)ARRAY_LEN( pages ); i++ ) {
++		if ( !Q_stricmp( name, pages[i] ) ) {
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static void UI_AccessibilityMenus( void ) {
+ 	pc_token_t token;
+ 	int handle;
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 5dc1596a..8be9ae8b 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -1854,14 +1854,63 @@ static void ETA_TextFieldValue( itemDef_t *item, char *out, size_t size ) {
+  * Which key or keys a control is on, said out loud: the string the
+  * screen draws beside the label, so the two cannot disagree.
+  */
++/* A key as said: "Page Down", not the "PGDN" the screen shows, which a
++   screen reader spells out letter by letter. */
++static const char *ETA_SpokenKey( int keynum ) {
++	static const struct {
++		const char *key;
++		const char *spoken;
++	} names[] = {
++		{ "PGDN", "Page Down" }, { "PGUP", "Page Up" }, { "DEL", "Delete" }, { "INS", "Insert" },
++		{ "HOME", "Home" }, { "END", "End" }, { "UPARROW", "Up arrow" }, { "DOWNARROW", "Down arrow" },
++		{ "LEFTARROW", "Left arrow" }, { "RIGHTARROW", "Right arrow" }, { "SPACE", "Space" },
++		{ "CTRL", "Control" }, { "ALT", "Alt" }, { "SHIFT", "Shift" }, { "ENTER", "Enter" },
++		{ "TAB", "Tab" }, { "BACKSPACE", "Backspace" }, { "ESCAPE", "Escape" }, { "PAUSE", "Pause" },
++		{ "CAPSLOCK", "Caps Lock" }, { "COMMAND", "Command" },
++		{ "MOUSE1", "Left mouse button" }, { "MOUSE2", "Right mouse button" },
++		{ "MOUSE3", "Middle mouse button" }, { "MOUSE4", "Mouse button 4" }, { "MOUSE5", "Mouse button 5" },
++		{ "MWHEELUP", "Mouse wheel up" }, { "MWHEELDOWN", "Mouse wheel down" },
++		{ "KP_HOME", "Keypad 7" }, { "KP_UPARROW", "Keypad 8" }, { "KP_PGUP", "Keypad 9" },
++		{ "KP_LEFTARROW", "Keypad 4" }, { "KP_5", "Keypad 5" }, { "KP_RIGHTARROW", "Keypad 6" },
++		{ "KP_END", "Keypad 1" }, { "KP_DOWNARROW", "Keypad 2" }, { "KP_PGDN", "Keypad 3" },
++		{ "KP_INS", "Keypad 0" }, { "KP_DEL", "Keypad period" }, { "KP_ENTER", "Keypad Enter" },
++		{ "KP_SLASH", "Keypad slash" }, { "KP_MINUS", "Keypad minus" }, { "KP_PLUS", "Keypad plus" },
++		{ "KP_STAR", "Keypad star" }, { "SEMICOLON", "Semicolon" },
++		{ "\\", "Backslash" }, { "/", "Slash" }, { "=", "Equals" }, { "-", "Minus" },
++		{ ",", "Comma" }, { ".", "Period" }, { "[", "Left bracket" }, { "]", "Right bracket" },
++		{ "'", "Apostrophe" }, { "`", "Grave" }, { ";", "Semicolon" },
++	};
++	static char buf[2][32];
++	static int which;
++	char *out = buf[which ^= 1];
++	int i;
++
++	DC->keynumToStringBuf( keynum, out, 32 );
++	for ( i = 0; i < (int)( sizeof( names ) / sizeof( names[0] ) ); i++ ) {
++		if ( !Q_stricmp( out, names[i].key ) ) {
++			return names[i].spoken;
++		}
++	}
++	if ( out[0] && !out[1] ) {
++		out[0] = (char)toupper( (unsigned char)out[0] );
++	}
++	return out;
++}
++
++static qboolean ETA_BindingKeys( const char *command, int *bind1, int *bind2 );
++
+ static const char *ETA_BindingText( itemDef_t *item ) {
+-	BindingFromName( item->cvar );
++	static char text[96];
++	int bind1, bind2;
+ 
+-	if ( !g_nameBind1[0] || !Q_stricmp( g_nameBind1, "???" ) ) {
++	if ( !item->cvar || !ETA_BindingKeys( item->cvar, &bind1, &bind2 ) || bind1 == -1 ) {
+ 		return "not bound";
+ 	}
+-
+-	return g_nameBind1;
++	Q_strncpyz( text, ETA_SpokenKey( bind1 ), sizeof( text ) );
++	if ( bind2 != -1 ) {
++		Q_strcat( text, sizeof( text ), va( " or %s", ETA_SpokenKey( bind2 ) ) );
++	}
++	return text;
+ }
+ 
+ /* Set by the ui module: a fuller line for a row of a list it feeds - a
+@@ -1876,6 +1925,20 @@ const char *ETA_MenuItem_Label( itemDef_t *item ) {
+ 		return NULL;
+ 	}
+ 	if ( item->text && item->text[0] ) {
++		/* Without the colon and the spaces the screen puts between a
++		   label and its value: "Lookup:  , Page Down" read as it is. */
++		static char trimmed[4][ETA_MAX_MENU_TEXT_LENGTH];
++		static int which;
++		char *out = trimmed[which = ( which + 1 ) & 3];
++		int end;
++
++		Q_strncpyz( out, item->text, ETA_MAX_MENU_TEXT_LENGTH );
++		for ( end = (int)strlen( out ); end > 0 && ( out[end - 1] == ' ' || out[end - 1] == ':' ); end-- ) {
++			out[end - 1] = '\0';
++		}
++		if ( out[0] ) {
++			return out;
++		}
+ 		return item->text;
+ 	}
+ 	/* Buttons the game draws as a picture alone: the notebook's page
+@@ -1888,6 +1951,7 @@ const char *ETA_MenuItem_Label( itemDef_t *item ) {
+ 			{ "button_prev", "Previous page" },
+ 			{ "button_next", "Next page" },
+ 			{ "but2_alt",    "Begin the mission" },
++			{ "autosave",    "Show autosaves" },
+ 		};
+ 		int i;
+ 
+@@ -1896,6 +1960,13 @@ const char *ETA_MenuItem_Label( itemDef_t *item ) {
+ 				return pictures[i].label;
+ 			}
+ 		}
++		/* The books' page corners, one pair a page: b_next1, b_prev2. */
++		if ( !Q_stricmpn( item->window.name, "b_next", 6 ) ) {
++			return "Next page";
++		}
++		if ( !Q_stricmpn( item->window.name, "b_prev", 6 ) ) {
++			return "Previous page";
++		}
+ 	}
+ 	if ( item->type == ITEM_TYPE_LISTBOX ) {
+ 		switch ( (int)item->special ) {
+@@ -1993,8 +2064,17 @@ const char *ETA_MenuItem_SettingText( itemDef_t *item ) {
+ 	switch ( item->type ) {
+ 	case ITEM_TYPE_MULTI:
+ 		/* Item_Multi_Setting reads the choices without asking whether
+-		   there are any. */
+-		return item->typeData ? Item_Multi_Setting( item ) : NULL;
++		   there are any. A switch whose choices have no words - the load
++		   screen's autosaves, a picture that toggles - is a yes or no. */
++		if ( item->typeData ) {
++			const char *setting = Item_Multi_Setting( item );
++
++			if ( setting && setting[0] ) {
++				return setting;
++			}
++			return ( DC->getCVarValue( item->cvar ) != 0.f ) ? "Yes" : "No";
++		}
++		return NULL;
+ 	case ITEM_TYPE_CHECKBOX:
+ 		return ( DC->getCVarValue( item->cvar ) != 0.f ) ? "On" : "Off";
+ 	case ITEM_TYPE_YESNO:
+@@ -2299,8 +2379,26 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
+ 	}
+ 
+ #ifdef FEATURE_ACCESSIBILITY
+-	if ( item->window.flags & WINDOW_HASFOCUS ) {
+-		ETA_MenuNarrator_OnFocusChanged( parent ? parent->window.name : NULL, ETA_MenuItem_FocusText( item ) );
++	/* A button the game draws twice, one copy over the other for the
++	   pointer to light up - BACK and back_alt - passes the focus from the
++	   first to the second as it lights: one press, said once. */
++	{
++	static char eta_lastFocus[ETA_MAX_MENU_TEXT_LENGTH + 1];
++	static int eta_lastFocusAt;
++	static menuDef_t *eta_lastFocusMenu;
++	const char *eta_focus = ( item->window.flags & WINDOW_HASFOCUS ) ? ETA_MenuItem_FocusText( item ) : NULL;
++
++	if ( eta_focus && parent == eta_lastFocusMenu && DC->realTime - eta_lastFocusAt < 250
++		 && DC->realTime >= eta_lastFocusAt && !Q_stricmp( eta_focus, eta_lastFocus ) ) {
++		eta_focus = NULL;
++	} else if ( eta_focus ) {
++		Q_strncpyz( eta_lastFocus, eta_focus, sizeof( eta_lastFocus ) );
++		eta_lastFocusAt = DC->realTime;
++		eta_lastFocusMenu = parent;
++	}
++	if ( eta_focus ) {
++		ETA_MenuNarrator_OnFocusChanged( parent ? parent->window.name : NULL, eta_focus );
++	}
+ 	}
+ #endif
+ 
+@@ -2671,6 +2769,17 @@ qboolean Item_ListBox_HandleKey( itemDef_t *item, int key, qboolean down, qboole
+ 			}
+ 		} else {
+ 			viewmax = ( item->window.rect.h / listPtr->elementHeight );
++#ifdef FEATURE_ACCESSIBILITY
++			/* Up from the first row and Down from the last go on to the
++			   buttons above and below the list, as they do between any
++			   two rows of a menu. The list took them, and the keyboard
++			   could never reach a screen's Load or Back below it. */
++			if ( !force && !listPtr->notselectable
++				 && ( ( ( key == K_UPARROW || key == K_KP_UPARROW ) && listPtr->cursorPos <= 0 )
++					  || ( ( key == K_DOWNARROW || key == K_KP_DOWNARROW ) && listPtr->cursorPos >= count - 1 ) ) ) {
++				return qfalse;
++			}
++#endif
+ 			if ( key == K_UPARROW || key == K_KP_UPARROW ) {
+ 				if ( !listPtr->notselectable ) {
+ 					listPtr->cursorPos--;
+@@ -4512,6 +4621,22 @@ int BindingIDFromName( const char *name ) {
+ char g_nameBind1[32];
+ char g_nameBind2[32];
+ 
++#ifdef FEATURE_ACCESSIBILITY
++/* The keys on a command, for ETA_BindingText. */
++static qboolean ETA_BindingKeys( const char *command, int *bind1, int *bind2 ) {
++	int i;
++
++	for ( i = 0; i < g_bindCount; i++ ) {
++		if ( !Q_stricmp( command, g_bindings[i].command ) ) {
++			*bind1 = g_bindings[i].bind1;
++			*bind2 = g_bindings[i].bind2;
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++#endif
++
+ void BindingFromName( const char *cvar ) {
+ 	int i, b1, b2;
+ 
+@@ -4624,8 +4749,16 @@ qboolean Item_Bind_HandleKey( itemDef_t *item, int key, qboolean down ) {
+ 			ETA_MenuNarrator_OnValueChanged( ETA_MenuItem_SpokenLabel( item ),
+ 											 "press the key to use. Escape to cancel, backspace to clear" );
+ #endif
++			return qtrue;
+ 		}
++#ifdef FEATURE_ACCESSIBILITY
++		/* Any other key is the menu's: the arrows go on to the next row
++		   and Escape goes back. The row took them all, and the keyboard
++		   was stuck on the first key of the Controls page. */
++		return qfalse;
++#else
+ 		return qtrue;
++#endif
+ 	}
+ 	else
+ 	{

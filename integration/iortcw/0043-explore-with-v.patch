@@ -1,0 +1,386 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 99a8bf84..411b544c 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -615,6 +615,14 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i done", done, count ) );
+ 	}
+ 
++	/* How far the exploring has got, as V says it. */
++	{
++		char progress[160];
++
++		CG_AccessibilityExploreProgress( progress, sizeof( progress ) );
++		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
++	}
++
+ 	CG_AccessibilitySay( text );
+ }
+ 
+@@ -698,6 +706,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "accessibilityWaypointPrev" );
++	trap_AddCommand( "accessibilityExplore" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+ 	trap_AddCommand( "-accessibilityTurnLeft" );
+ 	trap_AddCommand( "+accessibilityTurnRight" );
+@@ -742,6 +751,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityWaypointNext();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPrev" ) ) {
+ 		CG_AccessibilityWaypointPrev();
++	} else if ( !Q_stricmp( cmd, "accessibilityExplore" ) ) {
++		CG_AccessibilityExplore();
+ 	} else if ( !Q_stricmp( cmd, "+accessibilityTurnLeft" ) ) {
+ 		CG_AccessibilityTurnLeftDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityTurnLeft" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 7ba02b51..8eee9d75 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -177,6 +177,41 @@ static struct
+ 	qboolean      background;
+ } eta_ways;
+ 
++/*
++ * The ways found across the whole level, and which have been tried: for
++ * V, the explore key, and for how far the exploring has got.
++ *
++ * The tester still got lost with the ways on said from where they stood:
++ * nothing said which of the level's ways they had never tried. Each look
++ * at the ways on (ETA_WaysMake) puts every new way it finds here - one
++ * entry for each, however many looks see it - and a way is tried once
++ * the player has walked to where it starts, or on to where O would lead.
++ * V leads to the nearest way not yet tried, wherever in the level it is;
++ * V again soon after, to the next nearest.
++ */
++#define ETA_FRONTIER_MAX    160
++#define ETA_FRONTIER_SAME   128.0f   /* this near another, the same way */
++#define ETA_FRONTIER_AT     72.0f    /* this near where it starts: tried */
++#define ETA_FRONTIER_PICK_MS 8000    /* V again this soon: the next one */
++
++typedef struct
++{
++	vec3_t        feature;   /* where it starts */
++	vec3_t        lead;      /* where O would lead, past its start */
++	eta_wayKind_t kind;
++	qboolean      tried;
++} eta_frontier_t;
++
++static struct
++{
++	eta_frontier_t ways[ETA_FRONTIER_MAX];
++	int            count;
++	int            target;       /* the one V leads to, or -1 */
++	int            pickedAt;
++	int            picks;        /* how far V has gone down the list */
++	qboolean       doorPassed[MAX_MODELS];
++} eta_frontier;
++
+ static int ETA_WaysCell(const float at[3])
+ {
+ 	int ix = (int)floor((at[0] - eta_ways.start[0]) / ETA_WAYS_CELL + 0.5f) + ETA_WAYS_GRID_HALF;
+@@ -872,6 +907,51 @@ static int ETA_WaysCompare(const void *a, const void *b)
+ 	return d < 0.0f ? -1 : d > 0.0f ? 1 : 0;
+ }
+ 
++static qboolean ETA_FrontierNear(const vec3_t a, const vec3_t b, float near)
++{
++	float dx = a[0] - b[0], dy = a[1] - b[1];
++
++	return (qboolean)(dx * dx + dy * dy < near * near && fabsf(a[2] - b[2]) < 64.0f);
++}
++
++/* The ways this look found, into the level's list: a new one added, one
++   the trail has already been past marked tried. */
++static void ETA_FrontierRecord(void)
++{
++	int i, j;
++
++	for (i = 0; i < eta_ways.wayCount; i++)
++	{
++		const eta_way_t *way = &eta_ways.ways[i];
++
++		for (j = 0; j < eta_frontier.count; j++)
++		{
++			if (ETA_FrontierNear(eta_frontier.ways[j].feature, way->feature, ETA_FRONTIER_SAME)
++			    || ETA_FrontierNear(eta_frontier.ways[j].lead, way->lead, ETA_FRONTIER_SAME))
++			{
++				break;
++			}
++		}
++		if (j < eta_frontier.count)
++		{
++			if (way->status)
++			{
++				eta_frontier.ways[j].tried = qtrue;
++			}
++			continue;
++		}
++		if (eta_frontier.count >= ETA_FRONTIER_MAX)
++		{
++			continue;
++		}
++		VectorCopy(way->feature, eta_frontier.ways[eta_frontier.count].feature);
++		VectorCopy(way->lead, eta_frontier.ways[eta_frontier.count].lead);
++		eta_frontier.ways[eta_frontier.count].kind  = way->kind;
++		eta_frontier.ways[eta_frontier.count].tried = (qboolean)(way->status != 0);
++		eta_frontier.count++;
++	}
++}
++
+ /* From the spread, the ways. */
+ static void ETA_WaysMake(void)
+ {
+@@ -1194,6 +1274,7 @@ static void ETA_WaysMake(void)
+ 	}
+ 
+ 	qsort(eta_ways.ways, eta_ways.wayCount, sizeof(eta_ways.ways[0]), ETA_WaysCompare);
++	ETA_FrontierRecord();
+ }
+ 
+ /* How many ways of a kind there are, and which of them this one is,
+@@ -1401,6 +1482,198 @@ void CG_AccessibilityWaysOn(void)
+ 	ETA_WaysSayAll();
+ }
+ 
++/* How far the exploring has got: "3 new ways left, 5 tried, 6 of 30
++   doors gone through". */
++static void ETA_ExploreProgress(char *out, size_t size)
++{
++	int i, left = 0, tried = 0, doors = 0, passed = 0;
++
++	for (i = 0; i < eta_frontier.count; i++)
++	{
++		if (eta_frontier.ways[i].tried)
++		{
++			tried++;
++		}
++		else
++		{
++			left++;
++		}
++	}
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		qboolean opens;
++
++		if (CG_AccessibilityDoorModel(i, &opens))
++		{
++			doors++;
++			passed += eta_frontier.doorPassed[i];
++		}
++	}
++	Com_sprintf(out, size, "%d new %s left, %d tried", left, left == 1 ? "way" : "ways", tried);
++	if (doors)
++	{
++		Q_strcat(out, size, va(", %d of %d doors gone through", passed, doors));
++	}
++}
++
++/* For F1: the same. */
++void CG_AccessibilityExploreProgress(char *out, size_t size)
++{
++	ETA_ExploreProgress(out, size);
++}
++
++/* How far a way is, for choosing the nearest: a floor up or down counts
++   double, as it does for the way out. */
++static float ETA_FrontierFar(const vec3_t from, const vec3_t to)
++{
++	float dx = to[0] - from[0], dy = to[1] - from[1];
++
++	return sqrtf(dx * dx + dy * dy) + 2.0f * fabsf(to[2] - from[2]);
++}
++
++/*
++ * V: to the nearest way never tried. The ping and the walk guide lead
++ * there round the walls, as they do to the way out; arriving is said with
++ * what is left. V again within a few seconds, the next nearest.
++ */
++void CG_AccessibilityExplore(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 order[ETA_FRONTIER_MAX];
++	int                 count = 0, i, j, pick, meters, number, kinds;
++	char                progress[160], name[64];
++	eta_frontier_t      *way;
++	vec3_t              delta;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++
++	/* A look from here first, so the ways around are in the list. */
++	{
++		int stamp;
++
++		CG_AccessibilityWaysList(&stamp);
++	}
++
++	for (i = 0; i < eta_frontier.count; i++)
++	{
++		if (!eta_frontier.ways[i].tried)
++		{
++			order[count++] = i;
++		}
++	}
++	ETA_ExploreProgress(progress, sizeof(progress));
++	if (!count)
++	{
++		ETA_Speech_Say(va("No new ways found. %s. O leads to the way out", progress));
++		eta_frontier.target = -1;
++		return;
++	}
++
++	/* Nearest first. */
++	for (i = 0; i < count; i++)
++	{
++		for (j = i + 1; j < count; j++)
++		{
++			if (ETA_FrontierFar(ps->origin, eta_frontier.ways[order[j]].feature)
++			    < ETA_FrontierFar(ps->origin, eta_frontier.ways[order[i]].feature))
++			{
++				int t = order[i];
++
++				order[i] = order[j];
++				order[j] = t;
++			}
++		}
++	}
++
++	if (cg.time >= eta_frontier.pickedAt && cg.time - eta_frontier.pickedAt < ETA_FRONTIER_PICK_MS)
++	{
++		eta_frontier.picks++;
++	}
++	else
++	{
++		eta_frontier.picks = 0;
++	}
++	pick                  = order[eta_frontier.picks % count];
++	way                   = &eta_frontier.ways[pick];
++	eta_frontier.target   = pick;
++	eta_frontier.pickedAt = cg.time;
++
++	/* Numbered among the new ways of its kind, nearest first. */
++	for (i = 0, number = 0, kinds = 0; i < count; i++)
++	{
++		if (eta_frontier.ways[order[i]].kind == way->kind)
++		{
++			kinds++;
++			if (order[i] == pick)
++			{
++				number = kinds;
++			}
++		}
++	}
++
++	VectorSubtract(way->feature, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	meters = meters < 1 ? 1 : meters;
++	Com_sprintf(name, sizeof(name), "the new %s", eta_wayWords[way->kind]);
++	name[8] = (char)tolower((unsigned char)name[8]);
++
++	ETA_Speech_BeginReport();
++	ETA_Speech_Say(va("%s. %s new way: %s%s, %s, %d %s. Follow the ping", progress,
++	                  eta_frontier.picks ? "Next" : "Nearest", eta_wayWords[way->kind],
++	                  kinds > 1 ? va(" %d of %d", number, kinds) : "",
++	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(way->feature)),
++	                  meters, meters == 1 ? "meter" : "meters"));
++	ETA_Speech_EndReport();
++	CG_AccessibilityMarkerSet(way->lead, name);
++}
++
++/* Each frame: the ways the player has walked to, and the doors gone
++   through. */
++static void ETA_FrontierFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 i;
++
++	for (i = 0; i < eta_frontier.count; i++)
++	{
++		eta_frontier_t *way = &eta_frontier.ways[i];
++
++		if (way->tried)
++		{
++			continue;
++		}
++		if (ETA_FrontierNear(ps->origin, way->feature, ETA_FRONTIER_AT)
++		    || ETA_FrontierNear(ps->origin, way->lead, ETA_FRONTIER_AT))
++		{
++			way->tried = qtrue;
++			if (i == eta_frontier.target)
++			{
++				char progress[160];
++
++				eta_frontier.target = -1;
++				ETA_ExploreProgress(progress, sizeof(progress));
++				ETA_Speech_BeginReport();
++				ETA_Speech_Say(va("New way reached. %s. V leads to the next", progress));
++				ETA_Speech_EndReport();
++			}
++		}
++	}
++
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		qboolean opens;
++
++		if (!eta_frontier.doorPassed[i] && CG_AccessibilityDoorModel(i, &opens)
++		    && ETA_FrontierNear(ps->origin, cgs.inlineModelMidpoints[i], 56.0f))
++		{
++			eta_frontier.doorPassed[i] = qtrue;
++		}
++	}
++}
++
+ /* Whether the trail has been here before, a while ago. */
+ static qboolean ETA_WaysKnownPlace(const vec3_t at)
+ {
+@@ -1440,6 +1713,8 @@ void CG_AccessibilityWaysFrame(void)
+ 		return;
+ 	}
+ 
++	ETA_FrontierFrame();
++
+ 	if (eta_ways.scanning)
+ 	{
+ 		if (!ETA_WaysSpread(eta_ways.keyWaiting ? 12 : 3))
+@@ -1486,6 +1761,8 @@ void CG_AccessibilityWaysReset(void)
+ {
+ 	memset(&eta_ways, 0, sizeof(eta_ways));
+ 	VectorSet(eta_ways.saidFrom, 99999.0f, 99999.0f, 99999.0f);
++	memset(&eta_frontier, 0, sizeof(eta_frontier));
++	eta_frontier.target = -1;
+ }
+ 
+ #endif
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index b38f6644..eda1a475 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2256,6 +2256,8 @@ int CG_AccessibilityTrailPoint( int index, vec3_t out );
+ void CG_AccessibilityWaysOn( void );
+ void CG_AccessibilityWaysFrame( void );
+ void CG_AccessibilityWaysReset( void );
++void CG_AccessibilityExplore( void );
++void CG_AccessibilityExploreProgress( char *out, size_t size );
+ void CG_AccessibilitySpeakLocation( void );
+ void CG_AccessibilityFooting( int footstep );
+ void CG_AccessibilityStuckFrame( playerState_t *ps, playerState_t *ops );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index d671fd45..b7eabfd5 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8402,6 +8402,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   out, the waypoints - on the key beside it, free in the stock
+ 		   config. */
+ 		{ ';',          "accessibilityWaypointPrev",  12, NULL },
++		/* Explore: to the nearest way never tried, anywhere in the level.
++		   V is free in the stock config. */
++		{ 'v',          "accessibilityExplore",       13, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

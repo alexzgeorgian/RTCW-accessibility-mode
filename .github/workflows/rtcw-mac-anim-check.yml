@@ -1,0 +1,141 @@
+name: RTCW animation scripts on the Mac
+
+# On the Mac the prologue stopped with "BG_IndexForString: unknown token"
+# on line 10 of a character's animation script, where Windows and Linux
+# read the same files. This reads RTCW's own player script with iortcw's
+# reader, built on a Mac for both chips with the Mac build's flags.
+on:
+  push:
+    branches:
+      - 'claude/rtcw-story-game'
+    paths:
+      - 'tests/rtcw/**'
+      - 'integration/iortcw-sp/**'
+      - '.github/workflows/rtcw-mac-anim-check.yml'
+  workflow_dispatch:
+
+permissions:
+  # A draft release, which holds RTCW's files, is only visible with write.
+  contents: write
+
+env:
+  RTCW_FILES_RELEASE: 412639196
+
+jobs:
+  check:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Fetch RTCW's player scripts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RTCW_FILES_RELEASE/assets" \
+                  --jq '.[] | select(.name == "RTCW.files.zip") | .id')
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" > rtcw.zip
+          unzip -q -j rtcw.zip '*/pak0.pk3' -d rtcw
+          unzip -q -j rtcw/pak0.pk3 models/players/bj2/wolfanim.cfg models/players/bj2/wolfanim.script -d bj2
+
+      - name: Fetch iortcw with the mode's patches
+        run: |
+          set -e
+          . accessibility-mode/integration/iortcw-sp/base.txt
+          git init -q iortcw
+          git -C iortcw fetch -q --depth 1 "$repo" "$commit"
+          git -C iortcw checkout -q FETCH_HEAD
+          for p in accessibility-mode/integration/iortcw-sp/*.patch; do git -C iortcw apply "$PWD/$p"; done
+
+      - name: Read the player's script, built for each chip
+        run: |
+          G=iortcw/SP/code
+          status=0
+          for arch in arm64 x86_64; do
+            for flags in "-O0" "-O3 -ffast-math -fPIC -fno-common"; do
+              echo "== $arch $flags"
+              clang -arch $arch $flags -w -DGAMEDLL -DARCH_STRING=\"$arch\" -I$G/game -I$G/qcommon \
+                -o check accessibility-mode/tests/rtcw/anim_script_check.c \
+                $G/game/bg_animation.c $G/game/bg_misc.c $G/qcommon/q_shared.c $G/qcommon/q_math.c
+              arch -$arch ./check bj2/wolfanim.cfg bj2/wolfanim.script || status=1
+            done
+          done
+          exit $status
+
+  game:
+    # The real thing: the Mac app built by release/build-rtcw-story-mac.sh,
+    # started on the prologue, with its console log kept.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Fetch RTCW's files and the story levels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RTCW_FILES_RELEASE/assets" \
+                  --jq '.[] | select(.name == "RTCW.files.zip") | .id')
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" > rtcw.zip
+          mkdir -p rtcw
+          # iortcw will not start without sp_pak4.pk3, the GOTY edition's.
+          unzip -q -j rtcw.zip '*/pak0.pk3' '*/sp_pak1.pk3' '*/sp_pak2.pk3' '*/sp_pak3.pk3' '*/sp_pak4.pk3' -d rtcw
+          # The story levels from the newest Windows test build: only one is kept.
+          tag=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 50 --json tagName --jq '.[].tagName' \
+                | grep '^rtcw-story-test-' | head -1)
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*-windows.zip'
+          unzip -q -j *-windows.zip '*/main/zzz_story.pk3' -d story
+
+      - name: Build the Mac app
+        working-directory: accessibility-mode
+        run: bash ./release/build-rtcw-story-mac.sh --story-pk3 "$GITHUB_WORKSPACE/story/zzz_story.pk3" --version check --out "$GITHUB_WORKSPACE/out"
+
+      - name: Start the prologue, with another RTCW install's files in the shared folder
+        run: |
+          set -x
+          cd out && ditto -x -k *.zip . && cd wolfs-lair-rtcw-check-mac
+          cp ../../rtcw/*.pk3 iowolfsp.app/Contents/MacOS/main/
+          # What a RealRTCW install leaves where every RTCW shares its
+          # settings: a player script naming a weapon RTCW has not got.
+          shared="$HOME/Library/Application Support/RTCW/main"
+          mkdir -p "$shared/models/players/bj2" && cd "$shared"
+          unzip -p "$GITHUB_WORKSPACE/rtcw/pak0.pk3" models/players/bj2/wolfanim.script \
+            | sed 's/SP5 Pistol/TT33/' > models/players/bj2/wolfanim.script
+          zip -qr zz_other_install.pk3 models && rm -rf models
+          cd "$GITHUB_WORKSPACE/out/wolfs-lair-rtcw-check-mac"
+
+          run() {   # $1 log name, then the launcher's own command line
+            log="$GITHUB_WORKSPACE/$1.log"; shift
+            ( cd iowolfsp.app/Contents/MacOS && "$@" +set s_initsound 0 +set r_fullscreen 0 \
+                +set developer 1 > "$log" 2>&1 & echo $! > "$GITHUB_WORKSPACE/pid" )
+            sleep 100
+            kill "$(cat "$GITHUB_WORKSPACE/pid")" 2>/dev/null || true
+            sleep 2
+          }
+
+          # The stock game's shared folder: the error the player heard.
+          run shared ./iowolfsp +set vm_game 0 +set vm_cgame 0 +set vm_ui 0 +spdevmap wl_prologue
+          grep -n "unknown token\|rockandroll" "$GITHUB_WORKSPACE/shared.log" || true
+
+          # The launcher's own command, its folder of its own.
+          cmd=$(grep '^exec ./iowolfsp' "Play the prologue.command" | sed 's/^exec //; s/+spmap/+spdevmap/')
+          eval "run own $cmd"
+          grep -n "unknown token\|rockandroll" "$GITHUB_WORKSPACE/own.log" || true
+
+          if grep -q "unknown token" "$GITHUB_WORKSPACE/own.log"; then
+            echo "::error::the launcher still reads the shared RTCW folder"; exit 1
+          fi
+          grep -q "rockandroll" "$GITHUB_WORKSPACE/own.log" \
+            || { echo "::error::the prologue did not reach its briefing"; tail -40 "$GITHUB_WORKSPACE/own.log"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-game-log
+          path: |
+            shared.log
+            own.log

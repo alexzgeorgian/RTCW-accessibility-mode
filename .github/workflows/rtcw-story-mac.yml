@@ -1,0 +1,105 @@
+name: RTCW story game for macOS
+
+# Build a native, universal Intel and Apple Silicon package for the RTCW
+# story game. The RTCW data used to compile maps is never included.
+on:
+  push:
+    branches:
+      - 'macos/rtcws-story-port'
+    paths:
+      - 'integration/iortcw-sp/**'
+      - 'story/**'
+      - 'release/build-rtcw-story-mac.sh'
+      - 'release/RTCW-STORY-MAC-README.txt.in'
+      - 'release/make-cue-sounds.py'
+      - 'src/accessibility/**'
+      - '.github/workflows/rtcw-story-mac.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rtcw-story-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RTCW_FILES_RELEASE: 412639196
+
+jobs:
+  story:
+    name: Build the platform-independent story map
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Install map compiler dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-multilib libglib2.0-dev libxml2-dev libpng-dev libjpeg-dev zip unzip
+
+      - name: Build map tools
+        working-directory: accessibility-mode
+        run: ./story/build-tools.sh "$RUNNER_TEMP/tools"
+
+      - name: Fetch RTCW's game data to compile the level
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          asset=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RTCW_FILES_RELEASE/assets" \
+                  --jq '.[] | select(.name == "RTCW.files.zip") | .id')
+          [ -n "$asset" ] || { echo "::error::RTCW.files.zip is missing from the source release"; exit 1; }
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" \
+            > "$RUNNER_TEMP/rtcw.zip"
+          mkdir -p "$RUNNER_TEMP/rtcw"
+          unzip -q -j "$RUNNER_TEMP/rtcw.zip" \
+            '*/pak0.pk3' '*/sp_pak1.pk3' '*/sp_pak2.pk3' '*/sp_pak3.pk3' \
+            -d "$RUNNER_TEMP/rtcw"
+          rm "$RUNNER_TEMP/rtcw.zip"
+
+      - name: Compile the story map
+        working-directory: accessibility-mode
+        run: |
+          ./story/build-story.sh --rtcw "$RUNNER_TEMP/rtcw" \
+            --q3map2 "$RUNNER_TEMP/tools/q3map2" --bspc "$RUNNER_TEMP/tools/bspc" \
+            --out "$RUNNER_TEMP/story"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rtcw-story-map
+          path: ${{ runner.temp }}/story/zzz_story.pk3
+          if-no-files-found: error
+          retention-days: 3
+
+  mac:
+    name: Build the universal macOS game package
+    needs: story
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: rtcw-story-map
+          path: ${{ runner.temp }}/story
+
+      - name: Build the Mac download
+        working-directory: accessibility-mode
+        run: |
+          bash ./release/build-rtcw-story-mac.sh \
+            --story-pk3 "$RUNNER_TEMP/story/zzz_story.pk3" \
+            --version "mac-test-${{ github.run_number }}" \
+            --out "$RUNNER_TEMP/out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wolfs-lair-rtcw-mac-${{ github.run_number }}
+          path: ${{ runner.temp }}/out/wolfs-lair-rtcw-mac-test-${{ github.run_number }}-mac.zip
+          if-no-files-found: error
+          retention-days: 30

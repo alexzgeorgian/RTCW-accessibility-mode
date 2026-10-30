@@ -1,0 +1,4 @@
+# The iortcw commit these patches apply to. The single-player half of
+# the tree (SP/) is the engine the story campaign runs on.
+repo=https://github.com/iortcw/iortcw.git
+commit=438e7d413b5f7277187c35b032eb0ef9093ae778

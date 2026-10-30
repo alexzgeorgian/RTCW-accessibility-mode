@@ -1,0 +1,131 @@
+diff --git a/SP/Makefile b/SP/Makefile
+index 74a126d..be5004e 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -141,6 +141,12 @@ ifndef BASEGAME_CFLAGS
+ BASEGAME_CFLAGS=
+ endif
+ 
++# [Accessibility]: the spoken accessibility mode, built into cgame and ui.
++# ETA_SOURCE_DIR is the checkout of the mode, whose library they link.
++ifndef FEATURE_ACCESSIBILITY
++FEATURE_ACCESSIBILITY=0
++endif
++
+ ifndef COPYDIR
+ COPYDIR="/usr/local/games/wolf"
+ endif
+@@ -1354,21 +1360,55 @@ $(Q)$(CC) $(BASEGAME_CFLAGS) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
+ $(Q)$(DO_QVM_DEP)
+ endef
+ 
++ifeq ($(FEATURE_ACCESSIBILITY),1)
++  ifndef ETA_SOURCE_DIR
++    ETA_SOURCE_DIR=$(MOUNT_DIR)/../../accessibility-mode
++  endif
++  ETA_DIR=$(ETA_SOURCE_DIR)/src/accessibility
++  ETA_CFLAGS=-DFEATURE_ACCESSIBILITY -I$(ETA_DIR)
++  ifdef ETA_RELEASE_VERSION
++    ETA_LIB_CFLAGS=-DETA_RELEASE_VERSION=\"$(ETA_RELEASE_VERSION)\"
++  endif
++  # The library's own files: every module, and the Windows backends,
++  # which build to nothing elsewhere. The Mac's speech is Objective-C.
++  ETA_SRCS=$(wildcard $(ETA_DIR)/*/*.c) $(wildcard $(ETA_DIR)/platform/windows/*.c)
++  ifeq ($(PLATFORM),darwin)
++    ETA_SRCS+=$(wildcard $(ETA_DIR)/platform/macos/*.m)
++    ETA_LIBS=-framework AppKit -framework AVFoundation -framework Foundation
++  endif
++  ifdef MINGW
++    ETA_LIBS=-lole32 -loleaut32 -lwinmm -lwinhttp
++  endif
++  ETA_OBJ=$(patsubst $(ETA_DIR)/%,$(B)/eta/%.o,$(basename $(ETA_SRCS)))
++endif
++
++define DO_ETA_CC
++$(echo_cmd) "ETA_CC $<"
++$(Q)$(MKDIR) $(dir $@)
++$(Q)$(CC) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -std=gnu99 -I$(ETA_DIR) $(ETA_LIB_CFLAGS) -o $@ -c $<
++endef
++
++define DO_ETA_OBJC
++$(echo_cmd) "ETA_OBJC $<"
++$(Q)$(MKDIR) $(dir $@)
++$(Q)$(CC) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -fobjc-arc -I$(ETA_DIR) -o $@ -c $<
++endef
++
+ define DO_GAME_CC
+ $(echo_cmd) "GAME_CC $<"
+-$(Q)$(CC) $(BASEGAME_CFLAGS) -DGAMEDLL -DQAGAME $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
++$(Q)$(CC) $(BASEGAME_CFLAGS) -DGAMEDLL -DQAGAME $(ETA_CFLAGS) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
+ $(Q)$(DO_QVM_DEP)
+ endef
+ 
+ define DO_CGAME_CC
+ $(echo_cmd) "CGAME_CC $<"
+-$(Q)$(CC) $(BASEGAME_CFLAGS) -DCGAMEDLL -DCGAME $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
++$(Q)$(CC) $(BASEGAME_CFLAGS) -DCGAMEDLL -DCGAME $(ETA_CFLAGS) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
+ $(Q)$(DO_QVM_DEP)
+ endef
+ 
+ define DO_UI_CC
+ $(echo_cmd) "UI_CC $<"
+-$(Q)$(CC) $(BASEGAME_CFLAGS) -DUI $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
++$(Q)$(CC) $(BASEGAME_CFLAGS) -DUI $(ETA_CFLAGS) $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
+ $(Q)$(DO_QVM_DEP)
+ endef
+ 
+@@ -2537,17 +2577,17 @@ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \
+   $(B)/$(BASEGAME)/qcommon/q_shared.o
+ 
+-Q3CGOBJ = $(Q3CGOBJ_) $(B)/$(BASEGAME)/cgame/cg_syscalls.o
++Q3CGOBJ = $(Q3CGOBJ_) $(B)/$(BASEGAME)/cgame/cg_syscalls.o $(ETA_OBJ)
+ Q3CGVMOBJ = $(Q3CGOBJ_:%.o=%.asm)
+ 
+ ifdef MINGW
+ $(B)/$(BASEGAME)/cgame_sp_$(SHLIBNAME): $(Q3CGOBJ)
+ 	$(echo_cmd) "LD $@"
+-	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3CGOBJ) $(LIBS)
++	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3CGOBJ) $(LIBS) $(ETA_LIBS)
+ else
+ $(B)/$(BASEGAME)/cgame.sp.$(SHLIBNAME): $(Q3CGOBJ)
+ 	$(echo_cmd) "LD $@"
+-	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3CGOBJ) $(LIBS)
++	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3CGOBJ) $(LIBS) $(ETA_LIBS)
+ endif
+ $(B)/$(BASEGAME)/vm/cgame.sp.qvm: $(Q3CGVMOBJ) $(CGDIR)/cg_syscalls.asm $(Q3ASM)
+ 	$(echo_cmd) "Q3ASM $@"
+@@ -2646,17 +2686,17 @@ Q3UIOBJ_ = \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \
+   $(B)/$(BASEGAME)/qcommon/q_shared.o
+ 
+-Q3UIOBJ = $(Q3UIOBJ_) $(B)/$(BASEGAME)/ui/ui_syscalls.o
++Q3UIOBJ = $(Q3UIOBJ_) $(B)/$(BASEGAME)/ui/ui_syscalls.o $(ETA_OBJ)
+ Q3UIVMOBJ = $(Q3UIOBJ_:%.o=%.asm)
+ 
+ ifdef MINGW
+ $(B)/$(BASEGAME)/ui_sp_$(SHLIBNAME): $(Q3UIOBJ)
+ 	$(echo_cmd) "LD $@"
+-	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3UIOBJ) $(LIBS)
++	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3UIOBJ) $(LIBS) $(ETA_LIBS)
+ else
+ $(B)/$(BASEGAME)/ui.sp.$(SHLIBNAME): $(Q3UIOBJ)
+ 	$(echo_cmd) "LD $@"
+-	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3UIOBJ) $(LIBS)
++	$(Q)$(CC) $(CFLAGS) $(SHLIBLDFLAGS) -o $@ $(Q3UIOBJ) $(LIBS) $(ETA_LIBS)
+ endif
+ $(B)/$(BASEGAME)/vm/ui.sp.qvm: $(Q3UIVMOBJ) $(UIDIR)/ui_syscalls.asm $(Q3ASM)
+ 	$(echo_cmd) "Q3ASM $@"
+@@ -2867,6 +2907,12 @@ endif
+ ## GAME MODULE RULES
+ #############################################################################
+ 
++$(B)/eta/%.o: $(ETA_DIR)/%.c
++	$(DO_ETA_CC)
++
++$(B)/eta/%.o: $(ETA_DIR)/%.m
++	$(DO_ETA_OBJC)
++
+ $(B)/$(BASEGAME)/cgame/bg_%.o: $(GDIR)/bg_%.c
+ 	$(DO_CGAME_CC)
+ 

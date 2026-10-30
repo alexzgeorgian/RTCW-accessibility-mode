@@ -1,0 +1,45 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index f396e65..feba7e3 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -7954,6 +7954,7 @@ static const struct {
+  */
+ static void UI_AccessibilityPregame( menuDef_t *menu ) {
+ 	char text[4096];
++	char page[4096];
+ 	char map[MAX_QPATH];
+ 
+ 	trap_Cvar_VariableStringBuffer( "mapname", map, sizeof( map ) );
+@@ -7963,11 +7964,15 @@ static void UI_AccessibilityPregame( menuDef_t *menu ) {
+ 		UI_AccessibilitySay( "Cutscene. Press Enter to watch it. Escape, Space or Enter skips it once it plays" );
+ 		return;
+ 	}
+-	UI_AccessibilitySay( va( "%s. Briefing", UI_AccessibilityMapName( map ) ) );
++	/* One line, heading, page and the key together: VoiceOver keeps only
++	   the last of several said at once, and the page was lost. */
++	Com_sprintf( page, sizeof( page ), "%s. Briefing. ", UI_AccessibilityMapName( map ) );
+ 	if ( ETA_MenuScreenText( menu, text, sizeof( text ) ) ) {
+-		ETA_Speech_SayLong( text );
++		Q_strcat( page, sizeof( page ), text );
++		Q_strcat( page, sizeof( page ), " " );
+ 	}
+-	ETA_Speech_Say( "Press Enter to begin the mission. F7 reads this again" );
++	Q_strcat( page, sizeof( page ), "Press Enter to begin the mission. F7 reads this again." );
++	ETA_Speech_SayLong( page );
+ }
+ 
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu ) {
+@@ -8000,9 +8005,11 @@ static void UI_AccessibilityMenuOpened( menuDef_t *menu ) {
+ 
+ 	for ( i = 0; i < (int)( sizeof( eta_menus ) / sizeof( eta_menus[0] ) ); i++ ) {
+ 		if ( !Q_stricmp( name, eta_menus[i].menu ) ) {
+-			UI_AccessibilitySay( eta_menus[i].name );
+ 			if ( eta_menus[i].read && ETA_MenuScreenText( menu, text, sizeof( text ) ) ) {
+-				ETA_Speech_SayLong( text );
++				/* The name and the page as one line, for VoiceOver. */
++				ETA_Speech_SayLong( va( "%s. %s", eta_menus[i].name, text ) );
++			} else {
++				UI_AccessibilitySay( eta_menus[i].name );
+ 			}
+ 			return;
+ 		}

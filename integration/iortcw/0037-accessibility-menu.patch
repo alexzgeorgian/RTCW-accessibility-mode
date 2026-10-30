@@ -1,0 +1,333 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 4a0c5aea..ae711d86 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -62,31 +62,9 @@ static const struct {
+ 	const char *name;
+ 	const char *defaultValue;
+ } etaSettings[] = {
+-	{ &eta_environmentCallouts, "eta_environmentCallouts", "1" },
+-	{ &eta_facingCallouts,      "eta_facingCallouts",      "0" },
+-	{ &eta_placeCallouts,       "eta_placeCallouts",       "1" },
+-	{ &eta_openingCallouts,     "eta_openingCallouts",     "1" },
+-	{ &eta_doorCues,            "eta_doorCues",            "1" },
+-	{ &eta_ladderCues,          "eta_ladderCues",          "1" },
+-	{ &eta_crosshairCues,       "eta_crosshairCues",       "1" },
+-	{ &eta_turnSteps,           "eta_turnSteps",           "1" },
+-	{ &eta_playerCallouts,      "eta_playerCallouts",      "1" },
+-	{ &eta_groundCallouts,      "eta_groundCallouts",      "1" },
+-	{ &eta_furnitureCallouts,   "eta_furnitureCallouts",   "1" },
+-	{ &eta_pickupCues,          "eta_pickupCues",          "1" },
+-	{ &eta_bumpCues,            "eta_bumpCues",            "1" },
+-	{ &eta_markerCues,          "eta_markerCues",          "1" },
+-	{ &eta_autoLock,            "eta_autoLock",            "1" },
+-	{ &eta_autoSteer,           "eta_autoSteer",           "0" },
+-	{ &eta_stairKeeper,         "eta_stairKeeper",         "1" },
+-	{ &eta_waysCallouts,        "eta_waysCallouts",        "1" },
+-	{ &eta_enemyCues,           "eta_enemyCues",           "1" },
+-	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+-	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+-	{ &eta_crosshairVolume,     "eta_crosshairVolume",     "100" },
+-	{ &eta_pickupVolume,        "eta_pickupVolume",        "100" },
+-	{ &eta_bumpVolume,          "eta_bumpVolume",          "100" },
+-	{ &eta_markerVolume,        "eta_markerVolume",        "100" },
++#define ETA_SETTING( cvar, value ) { &cvar, #cvar, value },
++#include "cg_accessibility_settings.h"
++#undef ETA_SETTING
+ };
+ 
+ /*
+@@ -1181,6 +1159,16 @@ void CG_AccessibilityFrame( void ) {
+ 	/* Getting around: what is ahead and around, said and sounded. Not
+ 	   in the map's first moments, when a cutscene may be about to take
+ 	   the view. */
++	/* A setting changed in the Accessibility menu takes effect now, not
++	   at the next mission. */
++	{
++		int i;
++
++		for ( i = 0; i < (int)ARRAY_LEN( etaSettings ); i++ ) {
++			trap_Cvar_Update( etaSettings[i].cvar );
++		}
++	}
++
+ 	if ( cg.time - eta.startTime > 1500 ) {
+ 		CG_AccessibilityWorldFrame( qfalse );
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_settings.h b/SP/code/cgame/cg_accessibility_settings.h
+new file mode 100644
+index 00000000..918253ff
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility_settings.h
+@@ -0,0 +1,36 @@
++/*
++ * name:	cg_accessibility_settings.h
++ *
++ * desc:	[Accessibility]: the mode's settings, by cvar and default.
++ *			Included by the cgame, which reads them, and by the ui, whose
++ *			Accessibility pages (release/rtcw/ui/accessibility.menu) set
++ *			them - so the menus show the right value before a mission has
++ *			ever loaded the cgame, and the two cannot disagree on a
++ *			default. Each line is ETA_SETTING( cvar, default ).
++ */
++
++ETA_SETTING( eta_environmentCallouts, "1" )
++ETA_SETTING( eta_facingCallouts,      "0" )
++ETA_SETTING( eta_placeCallouts,       "1" )
++ETA_SETTING( eta_openingCallouts,     "1" )
++ETA_SETTING( eta_doorCues,            "1" )
++ETA_SETTING( eta_ladderCues,          "1" )
++ETA_SETTING( eta_crosshairCues,       "1" )
++ETA_SETTING( eta_turnSteps,           "1" )
++ETA_SETTING( eta_playerCallouts,      "1" )
++ETA_SETTING( eta_groundCallouts,      "1" )
++ETA_SETTING( eta_furnitureCallouts,   "1" )
++ETA_SETTING( eta_pickupCues,          "1" )
++ETA_SETTING( eta_bumpCues,            "1" )
++ETA_SETTING( eta_markerCues,          "1" )
++ETA_SETTING( eta_autoLock,            "1" )
++ETA_SETTING( eta_autoSteer,           "0" )
++ETA_SETTING( eta_stairKeeper,         "1" )
++ETA_SETTING( eta_waysCallouts,        "1" )
++ETA_SETTING( eta_enemyCues,           "1" )
++ETA_SETTING( eta_doorVolume,          "100" )
++ETA_SETTING( eta_ladderVolume,        "100" )
++ETA_SETTING( eta_crosshairVolume,     "100" )
++ETA_SETTING( eta_pickupVolume,        "100" )
++ETA_SETTING( eta_bumpVolume,          "100" )
++ETA_SETTING( eta_markerVolume,        "100" )
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 37d3b87a..3f1f849f 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -174,6 +174,9 @@ extern qboolean g_waitingForKey;
+ extern qboolean g_editingField;
+ static void UI_AccessibilityConsoleFrame( void );
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu );
++static void UI_AccessibilityMenus( void );
++static void UI_AccessibilityCloseMenus( void );
++static void UI_AccessibilityLeave( void );
+ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+ static qboolean UI_AccessibilityKey( int key );
+ static void UI_AccessibilityUpdateFrame( int realtime );
+@@ -1103,6 +1106,10 @@ void UI_LoadMenus( const char *menuFile, qboolean reset ) {
+ 	Com_DPrintf( "UI menu load time = %d milli seconds\n", trap_Milliseconds() - start );
+ 
+ 	trap_PC_FreeSource( handle );
++
++#ifdef FEATURE_ACCESSIBILITY
++	UI_AccessibilityMenus();
++#endif
+ }
+ 
+ 
+@@ -4635,6 +4642,16 @@ static void UI_RunMenuScript( char **args ) {
+ 
+ 	if ( String_Parse( args, &name ) ) {
+ 		//#ifdef MISSIONPACK			// NERVE - SMF - enabled for multiplayer
++#ifdef FEATURE_ACCESSIBILITY
++		if ( Q_stricmp( name, "etaAccessibilityClose" ) == 0 ) {
++			UI_AccessibilityCloseMenus();
++			return;
++		}
++		if ( Q_stricmp( name, "etaAccessibilityLeave" ) == 0 ) {
++			UI_AccessibilityLeave();
++			return;
++		}
++#endif
+ 		if ( Q_stricmp( name, "StartServer" ) == 0 ) {
+ 			float skill;
+ 			int i, clients;
+@@ -6968,6 +6985,11 @@ void _UI_Init( qboolean inGameLoad ) {
+ 	ETA_AccessibilityRuntime_Init();
+ 	ETA_MenuNarrator_Init();
+ 	UI_AccessibilityInstallBinds();
++	/* The mode's settings, as the cgame registers them: the Accessibility
++	   pages show them right before any mission has loaded it. */
++#define ETA_SETTING( cvar, value ) trap_Cvar_Register( NULL, #cvar, value, CVAR_ARCHIVE );
++#include "../cgame/cg_accessibility_settings.h"
++#undef ETA_SETTING
+ 	ETA_FeederRowText = UI_AccessibilityFeederRow;
+ 	ETA_MenuOpened = UI_AccessibilityMenuOpened;
+ #endif
+@@ -6999,7 +7021,14 @@ void _UI_KeyEvent( int key, qboolean down ) {
+ 		}
+ #endif
+ 		if ( menu ) {
+-			if ( key == K_ESCAPE && down && !Menus_AnyFullScreenVisible() ) {
++			if ( key == K_ESCAPE && down && !Menus_AnyFullScreenVisible()
++#ifdef FEATURE_ACCESSIBILITY
++				 /* Escape on an Accessibility page goes back a page, to
++				    the paused game's menu last, rather than out of the
++				    menus altogether. */
++				 && !( menu->window.name && !Q_stricmpn( menu->window.name, "eta_acc", 7 ) )
++#endif
++				 ) {
+ 				Menus_CloseAll();
+ 			} else {
+ 				Menu_HandleKey( menu, key, down );
+@@ -7956,6 +7985,11 @@ static const struct {
+ 	{ "default_menu",           "Reset to defaults",              qfalse },
+ 	{ "resetscore_menu",        "Reset the high scores",          qfalse },
+ 	{ "cdkey_menu",             "CD key",                         qfalse },
++	{ "eta_accessibility",      "Accessibility",                  qfalse },
++	{ "eta_acc_told",           "What you are told",              qfalse },
++	{ "eta_acc_sounds",         "Sounds",                         qfalse },
++	{ "eta_acc_volumes",        "Volumes",                        qfalse },
++	{ "eta_acc_moving",         "Moving and aiming",              qfalse },
+ };
+ 
+ /*
+@@ -8027,6 +8061,135 @@ static void UI_AccessibilityPregame( menuDef_t *menu ) {
+ 	ETA_Speech_SayLong( page );
+ }
+ 
++/*
++ * The Accessibility pages: the mode's settings, as the ET mode keeps its
++ * own under ACCESSIBILITY - so the tester turns a callout or a sound off
++ * there, not with a key or the console.
++ *
++ * The pages are the mode's own file, in its pk3. The button that opens
++ * them goes into the game's menus as they load - after OPTIONS in the
++ * main menu, after SYSTEM among the paused game's tabs - from the mode's
++ * ui/accessibility_tabs.menu: the game's menu files are the game's, and
++ * are not shipped. It is placed after the item it follows, so the arrows
++ * come to it there. The game's other buttons close the pages as they open
++ * their own, as they do each other's.
++ */
++static const char *eta_accessibilityMenus[] = {
++	"eta_accessibility", "eta_acc_told", "eta_acc_sounds", "eta_acc_volumes", "eta_acc_moving"
++};
++
++#define ETA_ACCESSIBILITY_TAB "eta_accessibility_tab"
++
++static void UI_AccessibilityCloseMenus( void ) {
++	int i;
++
++	for ( i = 0; i < (int)ARRAY_LEN( eta_accessibilityMenus ); i++ ) {
++		Menus_CloseByName( eta_accessibilityMenus[i] );
++	}
++}
++
++/* Back out of the pages, to the menu they were opened from: the paused
++   game's, or the main menu. */
++static void UI_AccessibilityLeave( void ) {
++	menuDef_t *ingame = Menus_FindByName( "ingame" );
++
++	UI_AccessibilityCloseMenus();
++	Menus_ActivateByName( ingame && ( ingame->window.flags & WINDOW_VISIBLE ) ? "ingame" : "main" );
++}
++
++/* Reads past one { } block, for a tab whose menu is not loaded. */
++static void UI_AccessibilitySkipBlock( int handle ) {
++	pc_token_t token;
++	int depth = 0;
++
++	while ( trap_PC_ReadToken( handle, &token ) ) {
++		if ( token.string[0] == '{' ) {
++			depth++;
++		} else if ( token.string[0] == '}' && --depth <= 0 ) {
++			return;
++		}
++	}
++}
++
++static void UI_AccessibilityAddTab( menuDef_t *menu, const char *after, int handle ) {
++	itemDef_t *tab;
++	int i, at = -1;
++
++	if ( !MenuParse_itemDef( (itemDef_t*)menu, handle ) || menu->itemCount <= 0 ) {
++		return;
++	}
++	tab = menu->items[menu->itemCount - 1];
++	tab->window.name = String_Alloc( ETA_ACCESSIBILITY_TAB );
++	Item_UpdatePosition( tab );
++
++	/* Next after the tab it follows. */
++	for ( i = 0; i < menu->itemCount - 1; i++ ) {
++		if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, after ) ) {
++			at = i + 1;
++		}
++	}
++	if ( at >= 0 ) {
++		for ( i = menu->itemCount - 1; i > at; i-- ) {
++			menu->items[i] = menu->items[i - 1];
++		}
++		menu->items[at] = tab;
++	}
++
++	/* The game's other tabs close the pages, as they close each other's. */
++	for ( i = 0; i < menu->itemCount; i++ ) {
++		itemDef_t *item = menu->items[i];
++
++		if ( item != tab && item->action && Q_stristr( item->action, "open " ) ) {
++			item->action = String_Alloc( va( "%s ; uiScript etaAccessibilityClose", item->action ) );
++		}
++	}
++}
++
++static void UI_AccessibilityMenus( void ) {
++	pc_token_t token;
++	int handle;
++
++	if ( !Menus_FindByName( "eta_accessibility" ) ) {
++		UI_ParseMenu( "ui/accessibility.menu" );
++	}
++
++	handle = trap_PC_LoadSource( "ui/accessibility_tabs.menu" );
++	if ( !handle ) {
++		return;
++	}
++	/* tab <menu> <item it follows> itemDef { ... } */
++	while ( trap_PC_ReadToken( handle, &token ) ) {
++		char name[64], after[64];
++		menuDef_t *menu;
++
++		if ( token.string[0] == '{' ) {
++			continue;
++		}
++		if ( token.string[0] == '}' || Q_stricmp( token.string, "tab" ) ) {
++			break;
++		}
++		if ( !trap_PC_ReadToken( handle, &token ) ) {
++			break;
++		}
++		Q_strncpyz( name, token.string, sizeof( name ) );
++		if ( !trap_PC_ReadToken( handle, &token ) ) {
++			break;
++		}
++		Q_strncpyz( after, token.string, sizeof( after ) );
++		if ( !trap_PC_ReadToken( handle, &token ) || Q_stricmp( token.string, "itemDef" ) ) {
++			break;
++		}
++
++		menu = Menus_FindByName( name );
++		if ( !menu || Menu_FindItemByName( menu, ETA_ACCESSIBILITY_TAB ) ) {
++			UI_AccessibilitySkipBlock( handle );
++			continue;
++		}
++		UI_AccessibilityAddTab( menu, after, handle );
++	}
++	trap_PC_FreeSource( handle );
++}
++
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu ) {
+ 	char text[4096];
+ 	const char *name = menu->window.name;
+diff --git a/SP/code/ui/ui_shared.h b/SP/code/ui/ui_shared.h
+index 1495e0ef..124d2be1 100644
+--- a/SP/code/ui/ui_shared.h
++++ b/SP/code/ui/ui_shared.h
+@@ -498,6 +498,12 @@ void        Menus_OpenByName( const char *p );
+ menuDef_t   *Menus_FindByName( const char *p );
+ void        Menus_ShowByName( const char *p );
+ void        Menus_CloseByName( const char *p );
++#ifdef FEATURE_ACCESSIBILITY
++/* For the Accessibility tab put into the game's own menus (ui_main.c). */
++qboolean    MenuParse_itemDef( itemDef_t *item, int handle );
++itemDef_t   *Menu_FindItemByName( menuDef_t *menu, const char *p );
++void        Item_UpdatePosition( itemDef_t *item );
++#endif
+ void        Display_HandleKey( int key, qboolean down, int x, int y );
+ void        LerpColor( vec4_t a, vec4_t b, vec4_t c, float t );
+ void        Menus_CloseAll( void );

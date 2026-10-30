@@ -1,0 +1,199 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 2820e78f..59e34df4 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -47,6 +47,7 @@ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
+ vmCvar_t eta_autoSteer;
+ vmCvar_t eta_stairKeeper;
++vmCvar_t eta_enemyCues;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+ vmCvar_t eta_ladderVolume;
+@@ -77,6 +78,7 @@ static const struct {
+ 	{ &eta_autoLock,            "eta_autoLock",            "1" },
+ 	{ &eta_autoSteer,           "eta_autoSteer",           "0" },
+ 	{ &eta_stairKeeper,         "eta_stairKeeper",         "1" },
++	{ &eta_enemyCues,           "eta_enemyCues",           "1" },
+ 	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+ 	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+ 	{ &eta_crosshairVolume,     "eta_crosshairVolume",     "100" },
+@@ -104,6 +106,8 @@ static const char *etaLoopSoundFiles[] = {
+ 	"sound/accessibility/weapon_ground.wav",
+ 	"sound/accessibility/bump_wall.wav",
+ 	"sound/accessibility/bump_object.wav",
++	"sound/accessibility/chosen_beacon.wav",
++	"sound/accessibility/enemy_presence.wav",
+ };
+ static sfxHandle_t etaLoopSounds[ARRAY_LEN( etaLoopSoundFiles )];
+ 
+@@ -143,6 +147,9 @@ int CG_AccessibilityLoopVolume( eta_loopSoundType_t which ) {
+ 	case ETA_LOOP_BUMP_OBJECT:
+ 		cvar = &eta_bumpVolume;
+ 		break;
++	case ETA_LOOP_ENEMY:
++		cvar = &eta_crosshairVolume;
++		break;
+ 	default:
+ 		cvar = &eta_markerVolume;
+ 		break;
+@@ -580,6 +587,8 @@ static void CG_AccessibilityEnemyCallouts_f( void ) {
+ 
+ 	trap_Cvar_Set( "eta_playerCallouts", on ? "1" : "0" );
+ 	trap_Cvar_Update( &eta_playerCallouts );
++	trap_Cvar_Set( "eta_enemyCues", on ? "1" : "0" );
++	trap_Cvar_Update( &eta_enemyCues );
+ 	CG_AccessibilitySay( on ? "Enemy callouts on" : "Enemy callouts off. M turns them on" );
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 31ba3214..3b1eb562 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2785,12 +2785,98 @@ static void ETA_HitFrame(void)
+ 	VectorCopy(point, eta_aim.point);
+ }
+ 
++/**
++ * @brief The thing chosen with K or J, heard from where it is.
++ *
++ * 1428, the tester said, had no marker for it: a beep from the point
++ * chosen, and the turn to it on a key. So the thing chosen plays its own
++ * sound, softer and quicker than the marker's ping, from where it is -
++ * out of sight too - until the player reaches it, chooses another, or
++ * uses it.
++ */
++static void ETA_ChosenBeaconFrame(void)
++{
++	vec3_t point;
++
++	if (!eta_choose.held || !eta_choose.byPlayer || cg.time < eta_choose.at
++	    || cg.time - eta_choose.at >= ETA_CHOOSE_HOLD_MS || !ETA_ChooseWhere(&eta_choose.target, point))
++	{
++		return;
++	}
++
++	/* Reached: there is nothing more to find. */
++	if (Distance(cg.predictedPlayerState.origin, point) * ETA_QU_TO_METERS <= ETA_USE_REACH_METERS + 0.5f)
++	{
++		return;
++	}
++
++	CG_AccessibilityLoopAt(point, CG_AccessibilityLoopSound(ETA_LOOP_CHOSEN),
++	                       CG_AccessibilityLoopVolume(ETA_LOOP_CHOSEN), 1200.0f);
++}
++
++/**
++ * @brief Each enemy in sight, heard from where they stand.
++ *
++ * As BROK the InvestiGator plays its fights: a low soft pulse from every
++ * enemy in clear sight within ETA_ENEMY_CUE_RANGE, all round, so where
++ * each is can be heard while the guns are firing, and a quiet one is
++ * not lost. Looked for ten times a second; the sound kept on in between.
++ * eta_enemyCues 0, or M with the enemy callouts, turns it off.
++ */
++#define ETA_ENEMY_CUE_RANGE 25.0f   /* metres */
++#define ETA_ENEMY_CUE_MAX   6
++
++static void ETA_EnemyCueFrame(void)
++{
++	static vec3_t points[ETA_ENEMY_CUE_MAX];
++	static int    entities[ETA_ENEMY_CUE_MAX];
++	static int    count, lookAt;
++	int           i;
++
++	if (!eta_enemyCues.integer || !cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL || cg.cameraMode)
++	{
++		count = 0;
++		return;
++	}
++
++	if (cg.time - lookAt >= 100 || cg.time < lookAt)
++	{
++		etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++		int            n = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qtrue);
++
++		lookAt = cg.time;
++		count  = 0;
++		for (i = 0; i < n && count < ETA_ENEMY_CUE_MAX; i++)
++		{
++			if (list[i].meters <= ETA_ENEMY_CUE_RANGE)
++			{
++				entities[count] = list[i].entityNum;
++				VectorCopy(list[i].point, points[count]);
++				count++;
++			}
++		}
++	}
++
++	for (i = 0; i < count; i++)
++	{
++		/* Where they are now, between looks: they move. */
++		if (entities[i] >= 0 && entities[i] < MAX_GENTITIES && cg_entities[entities[i]].currentValid)
++		{
++			VectorCopy(cg_entities[entities[i]].lerpOrigin, points[i]);
++		}
++		CG_AccessibilityLoopAt(points[i], CG_AccessibilityLoopSound(ETA_LOOP_ENEMY),
++		                       CG_AccessibilityLoopVolume(ETA_LOOP_ENEMY) / 2, 1200.0f);
++	}
++}
++
+ void CG_AccessibilityAimFrame(void)
+ {
+ 	if (cg.snap && cg.snap->ps.pm_type == PM_NORMAL)
+ 	{
+ 		ETA_HitFrame();
+ 		ETA_FacePendingFrame();
++		ETA_ChosenBeaconFrame();
++		ETA_EnemyCueFrame();
+ 	}
+ 
+ 	/* A climb has the keys to itself. */
+@@ -2982,6 +3068,24 @@ void CG_AccessibilityAimFrame(void)
+ 		return;
+ 	}
+ 
++	/* The one locked on has fallen: the lock lets go by itself. The
++	   tester had to press U again over a dead enemy - or was carried on
++	   to the next one without asking. "Down", and the aim is theirs. */
++	if (eta_aim.entityNum >= 0 && eta_aim.entityNum < MAX_GENTITIES
++	    && (!cg_entities[eta_aim.entityNum].currentValid
++	        || (cg_entities[eta_aim.entityNum].currentState.eFlags & EF_DEAD)))
++	{
++		qboolean automatic = eta_aim.automatic;
++
++		ETA_AimStop();
++		if (!automatic)
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("Down. Lock off");
++		}
++		return;
++	}
++
+ 	/* Gone - down, behind a wall, out of view: hold still a moment, then
+ 	   take the next one in sight, or say it is over. */
+ 	ETA_AimKeys(0, 0);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 73142333..c76f9002 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2322,7 +2322,9 @@ typedef enum {
+ 	ETA_LOOP_AMMO,				// ammunition
+ 	ETA_LOOP_WEAPON,			// a weapon
+ 	ETA_LOOP_BUMP_WALL,			// walked into a wall - played once, not looped
+-	ETA_LOOP_BUMP_OBJECT		// walked into a thing - played once, not looped
++	ETA_LOOP_BUMP_OBJECT,		// walked into a thing - played once, not looped
++	ETA_LOOP_CHOSEN,			// the thing chosen with K or J
++	ETA_LOOP_ENEMY				// an enemy in sight
+ } eta_loopSoundType_t;
+ 
+ sfxHandle_t CG_AccessibilityLoopSound( eta_loopSoundType_t which );
+@@ -2346,6 +2348,7 @@ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
+ extern vmCvar_t eta_autoSteer;
+ extern vmCvar_t eta_stairKeeper;
++extern vmCvar_t eta_enemyCues;
+ int CG_AccessibilityOnStairs( void );
+ 
+ #ifndef MIN

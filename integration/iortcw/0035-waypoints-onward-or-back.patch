@@ -1,0 +1,54 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 19e25370..2f709925 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4465,6 +4465,17 @@ void CG_AccessibilityWaypointPlace(void)
+ 	                       : va("Waypoint %d set here. L chooses where to go", i));
+ }
+ 
++/* How far a place is from the way out, in metres, a floor up or down
++   counting double. */
++#define ETA_ONWARD_METERS 5.0f
++
++static float ETA_WayOutFar(const vec3_t from, const vec3_t exitPoint)
++{
++	float dx = exitPoint[0] - from[0], dy = exitPoint[1] - from[1], dz = exitPoint[2] - from[2];
++
++	return (sqrtf(dx * dx + dy * dy) + 2.0f * fabsf(dz)) * ETA_QU_TO_METERS;
++}
++
+ void CG_AccessibilityWaypointNext(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -4530,9 +4541,28 @@ void CG_AccessibilityWaypointNext(void)
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 	name[0] = (char)toupper((unsigned char)name[0]);
+-	ETA_Speech_Say(va("%s, %d meters, %s%s%s. O leads there", name, meters < 1 ? 1 : meters,
+-	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+-	                  height[0] ? ", " : "", height));
++
++	/* Onward or back: the tester went round in circles, not knowing
++	   which waypoint led on through the level and which back. A waypoint
++	   nearer the way out than the player is on the way out; one further
++	   from it is back the way they came. Height counts double: the way
++	   out is often a floor or two up, and a place under it is not near. */
++	{
++		const char *way = "";
++
++		if (eta_destination && model)
++		{
++			float mine  = ETA_WayOutFar(ps->origin, exitPoint);
++			float there = ETA_WayOutFar(point, exitPoint);
++
++			way = there < mine - ETA_ONWARD_METERS ? ", on the way out"
++			      : there > mine + ETA_ONWARD_METERS ? ", back the way you came" : "";
++		}
++
++		ETA_Speech_Say(va("%s, %d meters, %s%s%s%s. O leads there", name, meters < 1 ? 1 : meters,
++		                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++		                  height[0] ? ", " : "", height, way));
++	}
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+ 
+ 	/* Chosen, not yet gone to: the marker, and its ping, wait for O. The

@@ -1,0 +1,257 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 0c524f5..3dcbc42 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -176,6 +176,8 @@ static void UI_AccessibilityConsoleFrame( void );
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu );
+ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+ static qboolean UI_AccessibilityKey( int key );
++static void UI_AccessibilityUpdateFrame( int realtime );
++static qboolean UI_AccessibilityUpdateKey( int key );
+ #endif
+ void _UI_Shutdown( void );
+ void _UI_KeyEvent( int key, qboolean down );
+@@ -723,6 +725,7 @@ void _UI_Refresh( int realtime ) {
+ 
+ #ifdef FEATURE_ACCESSIBILITY
+ 	UI_AccessibilityConsoleFrame();
++	UI_AccessibilityUpdateFrame( realtime );
+ #endif
+ 
+ 	if ( Menu_Count() > 0 ) {
+@@ -8203,6 +8206,10 @@ static qboolean UI_AccessibilityKey( int key ) {
+ 		return qfalse;
+ 	}
+ 
++	if ( UI_AccessibilityUpdateKey( key ) ) {
++		return qtrue;
++	}
++
+ 	bind[0] = '\0';
+ 	trap_Key_GetBindingBuf( key, bind, sizeof( bind ) );
+ 	if ( !bind[0] ) {
+@@ -8212,6 +8219,205 @@ static qboolean UI_AccessibilityKey( int key ) {
+ 	return UI_AccessibilityCommand( bind );
+ }
+ 
++/*
++ * A newer test build, offered and installed from the menus - on the Mac.
++ *
++ * Every test build downloaded with a browser is quarantined, and the Mac
++ * would not open it until the tester found Open Anyway in System Settings,
++ * each time. One the game downloads itself is not quarantined
++ * (platform/macos/macos_update.h): so a few seconds into the menus the
++ * game asks the downloads page for the newest test build
++ * (rtcw-update.txt, which the test build workflow keeps on a release of
++ * its own, rtcw-updates), says when there is a newer one, and F12
++ * downloads it, checks it against the checksum the page gives, and puts
++ * it in place of this one as the game closes, opening the new one. Only a
++ * build the workflow made checks - one built by hand is "dev" - and only
++ * a newer number is offered.
++ */
++#if defined( __APPLE__ )
++#include "platform/windows/windows_update.h"
++#include "platform/macos/macos_update.h"
++#include "update/update_check.h"
++
++#define UI_UPDATE_MANIFEST_URL ETA_UPDATE_RELEASES_URL "/download/rtcw-updates/rtcw-update.txt"
++#define UI_UPDATE_PREFIX       "rtcw-test-"
++
++enum {
++	UI_UPDATE_START,
++	UI_UPDATE_CHECKING,
++	UI_UPDATE_OFFERED,
++	UI_UPDATE_DOWNLOADING,
++	UI_UPDATE_INSTALLING,
++	UI_UPDATE_NONE          /* checked: nothing newer, or no check to make */
++};
++
++static struct {
++	int state;
++	int number;             /* of the build offered */
++	qboolean said;
++	char url[512];
++	char sha256[ETA_UPDATE_SHA256_HEX_LENGTH + 1];
++	long size;
++	char zip[1024];
++} uiUpdate;
++
++static int UI_AccessibilityBuildNumber( const char *version ) {
++	if ( !version || Q_stricmpn( version, UI_UPDATE_PREFIX, strlen( UI_UPDATE_PREFIX ) ) ) {
++		return 0;
++	}
++	return atoi( version + strlen( UI_UPDATE_PREFIX ) );
++}
++
++/* Reads the page's few lines: version=, url=, sha256=, size=. */
++static void UI_AccessibilityUpdateRead( const char *text ) {
++	char line[600];
++	const char *p = text;
++
++	uiUpdate.number = 0;
++	uiUpdate.url[0] = uiUpdate.sha256[0] = '\0';
++	uiUpdate.size = 0;
++
++	while ( p && *p ) {
++		const char *end = strchr( p, '\n' );
++		int length = end ? (int)( end - p ) : (int)strlen( p );
++
++		if ( length >= (int)sizeof( line ) ) {
++			length = sizeof( line ) - 1;
++		}
++		memcpy( line, p, length );
++		line[length] = '\0';
++		while ( length > 0 && ( line[length - 1] == '\r' || line[length - 1] == ' ' ) ) {
++			line[--length] = '\0';
++		}
++
++		if ( !Q_stricmpn( line, "version=", 8 ) ) {
++			uiUpdate.number = UI_AccessibilityBuildNumber( line + 8 );
++		} else if ( !Q_stricmpn( line, "url=", 4 ) ) {
++			Q_strncpyz( uiUpdate.url, line + 4, sizeof( uiUpdate.url ) );
++		} else if ( !Q_stricmpn( line, "sha256=", 7 ) ) {
++			Q_strncpyz( uiUpdate.sha256, line + 7, sizeof( uiUpdate.sha256 ) );
++		} else if ( !Q_stricmpn( line, "size=", 5 ) ) {
++			uiUpdate.size = atol( line + 5 );
++		}
++
++		p = end ? end + 1 : NULL;
++	}
++}
++
++static void UI_AccessibilityUpdateFrame( int realtime ) {
++	ETA_WindowsUpdateState state;
++
++	switch ( uiUpdate.state ) {
++	case UI_UPDATE_START:
++		/* A few seconds in, once the menu's own words are said. */
++		if ( realtime < 4000 ) {
++			return;
++		}
++		if ( UI_AccessibilityBuildNumber( ETA_Update_InstalledVersion() ) <= 0
++			 || !ETA_WindowsUpdate_StartFetch( UI_UPDATE_MANIFEST_URL ) ) {
++			uiUpdate.state = UI_UPDATE_NONE;
++			return;
++		}
++		uiUpdate.state = UI_UPDATE_CHECKING;
++		return;
++
++	case UI_UPDATE_CHECKING:
++		state = ETA_WindowsUpdate_Poll();
++		if ( state == ETA_WINDOWS_UPDATE_BUSY ) {
++			return;
++		}
++		if ( state == ETA_WINDOWS_UPDATE_DONE ) {
++			UI_AccessibilityUpdateRead( ETA_WindowsUpdate_Text() );
++			if ( uiUpdate.number > UI_AccessibilityBuildNumber( ETA_Update_InstalledVersion() )
++				 && !Q_stricmpn( uiUpdate.url, "https://", 8 )
++				 && strlen( uiUpdate.sha256 ) == ETA_UPDATE_SHA256_HEX_LENGTH
++				 && uiUpdate.size > 0 && uiUpdate.size < 512L * 1024 * 1024 ) {
++				uiUpdate.state = UI_UPDATE_OFFERED;
++				uiUpdate.said = qfalse;
++				return;
++			}
++		}
++		uiUpdate.state = UI_UPDATE_NONE;
++		return;
++
++	case UI_UPDATE_OFFERED:
++		if ( !uiUpdate.said && realtime >= 6000 ) {
++			uiUpdate.said = qtrue;
++			ETA_Speech_Say( va( "Test build %d is ready. F12 installs it", uiUpdate.number ) );
++		}
++		return;
++
++	case UI_UPDATE_DOWNLOADING:
++		state = ETA_WindowsUpdate_Poll();
++		if ( state == ETA_WINDOWS_UPDATE_BUSY ) {
++			return;
++		}
++		if ( state == ETA_WINDOWS_UPDATE_DONE
++			 && !Q_stricmp( ETA_WindowsUpdate_DownloadSha256(), uiUpdate.sha256 )
++			 && ETA_WindowsUpdate_DownloadedBytes() == uiUpdate.size
++			 && ETA_MacUpdate_ScheduleAppReplace( uiUpdate.zip ) ) {
++			uiUpdate.state = UI_UPDATE_INSTALLING;
++			ETA_Speech_Say( va( "Test build %d downloaded. The game closes now, and opens again as the new build", uiUpdate.number ) );
++			trap_Cmd_ExecuteText( EXEC_APPEND, "quit\n" );
++			return;
++		}
++		ETA_WindowsUpdate_RemoveFile( uiUpdate.zip );
++		uiUpdate.state = UI_UPDATE_OFFERED;
++		uiUpdate.said = qtrue;
++		ETA_Speech_Say( "The download did not come through whole. F12 tries again" );
++		return;
++
++	default:
++		return;
++	}
++}
++
++static qboolean UI_AccessibilityUpdateKey( int key ) {
++	char app[8];
++
++	if ( key != K_F12 ) {
++		return qfalse;
++	}
++
++	switch ( uiUpdate.state ) {
++	case UI_UPDATE_OFFERED:
++		break;
++	case UI_UPDATE_DOWNLOADING:
++		ETA_Speech_Say( "Still downloading" );
++		return qtrue;
++	case UI_UPDATE_NONE:
++		ETA_Speech_Say( "This is the newest test build" );
++		return qtrue;
++	default:
++		return qfalse;
++	}
++
++	if ( ETA_MacUpdate_AppPath( app, sizeof( app ) ) < 0 ) {
++		/* The Mac runs an app from a read-only copy until it has been
++		   moved out of the folder it was unzipped in. */
++		ETA_Speech_Say( "First move the game's folder into Applications with Finder, open the game from there, and press F12 again" );
++		return qtrue;
++	}
++
++	if ( !ETA_MacUpdate_SupportPath( "rtcw-update.zip", uiUpdate.zip, sizeof( uiUpdate.zip ) )
++		 || !ETA_WindowsUpdate_StartDownload( uiUpdate.url, uiUpdate.zip, uiUpdate.size ) ) {
++		ETA_Speech_Say( "The download could not start. F12 tries again" );
++		return qtrue;
++	}
++
++	uiUpdate.state = UI_UPDATE_DOWNLOADING;
++	ETA_Speech_Say( va( "Downloading test build %d. The game closes and opens again when it is in", uiUpdate.number ) );
++	return qtrue;
++}
++#else
++static void UI_AccessibilityUpdateFrame( int realtime ) {
++}
++
++static qboolean UI_AccessibilityUpdateKey( int key ) {
++	return qfalse;
++}
++#endif
++
+ /* The accessibility commands the ui answers, by name; qtrue if it did. */
+ qboolean UI_AccessibilityCommand( const char *cmd ) {
+ 	/* Reached two ways. Before a game there is no cgame, so the name the
+diff --git a/SP/ui_main.d b/SP/ui_main.d
+new file mode 100644
+index 0000000..c881ce0
+--- /dev/null
++++ b/SP/ui_main.d
+@@ -0,0 +1,13 @@
++ui_main.o: code/ui/ui_main.c code/ui/ui_local.h \
++ code/ui/../qcommon/q_shared.h code/ui/../qcommon/q_platform.h \
++ code/ui/../qcommon/surfaceflags.h code/ui/../renderer/tr_types.h \
++ code/ui/ui_public.h code/ui/../client/keycodes.h \
++ code/ui/../game/bg_public.h code/ui/ui_shared.h \
++ code/ui/../../main/ui/menudef.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/core/accessibility_runtime.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/menu/menu_narrator.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/speech/speech_manager.h \
++ code/ui/ui_accessibility_intro.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/platform/windows/windows_update.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/platform/macos/macos_update.h \
++ /home/user/Wolfenstein-Enemy-territory-accessibility-mode/src/accessibility/update/update_check.h

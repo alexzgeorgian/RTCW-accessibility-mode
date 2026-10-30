@@ -1,0 +1,114 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c2bf64bf..31ba3214 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -263,6 +263,8 @@ static struct
+ 	int      releaseAt;
+ 	int      usedAt;    /* last pressed on something, for the player */
+ 	vec3_t   usedFrom;  /* where the player stood */
++	int      usedEntity;/* what it was pressed on: its entity, or -1 */
++	vec3_t   usedPoint; /* and where */
+ 	int      fAt;       /* F last pressed */
+ } eta_use;
+ 
+@@ -274,12 +276,28 @@ static struct
+ #define ETA_USE_AGAIN_NEAR   96.0f
+ #define ETA_USE_DOUBLE_MS    1500
+ 
+-static void ETA_UseRemember(void)
++static void ETA_UseRemember(int entityNum, const vec3_t point)
+ {
+-	eta_use.usedAt = cg.time;
++	eta_use.usedAt     = cg.time;
++	eta_use.usedEntity = entityNum;
++	VectorCopy(point, eta_use.usedPoint);
+ 	VectorCopy(cg.predictedPlayerState.origin, eta_use.usedFrom);
+ }
+ 
++/* Whether a thing on the list is the one F has just used. */
++static qboolean ETA_UseJustUsed(const etaAimTarget_t *target)
++{
++	if (!eta_use.usedAt || cg.time < eta_use.usedAt || cg.time - eta_use.usedAt >= ETA_USE_AGAIN_MS)
++	{
++		return qfalse;
++	}
++	if (target->entityNum >= 0 && target->entityNum == eta_use.usedEntity)
++	{
++		return qtrue;
++	}
++	return (qboolean)(Distance(target->point, eta_use.usedPoint) < 48.0f);
++}
++
+ static void ETA_UseKey(qboolean down)
+ {
+ 	if (down == eta_use.pressed)
+@@ -881,7 +899,8 @@ static void ETA_ChooseStep(int step)
+ 	eta_choose.target   = list[index];
+ 
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_AimSay(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point);
++	ETA_AimSay(va("%s%s, %d of %d", list[index].name, ETA_UseJustUsed(&list[index]) ? ", just used" : "",
++	              index + 1, count), list[index].point);
+ }
+ 
+ void CG_AccessibilityUseNext_f(void)
+@@ -1242,10 +1261,13 @@ void CG_AccessibilityActivateDown_f(void)
+ 		                              && cg.time - eta_use.fAt < ETA_USE_DOUBLE_MS);
+ 
+ 		eta_use.fAt = cg.time;
++		/* A thing chosen with K or J goes ahead - unless it is the one
++		   just used: the button, still the nearest thing, was what K chose
++		   next, and F pressed it again. */
+ 		if (!doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
+ 		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
+ 		    && Distance(cg.predictedPlayerState.origin, eta_use.usedFrom) < ETA_USE_AGAIN_NEAR
+-		    && !(eta_choose.held && eta_choose.byPlayer))
++		    && (!(eta_choose.held && eta_choose.byPlayer) || ETA_UseJustUsed(&eta_choose.target)))
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			ETA_Speech_Say("Just used. F twice quickly uses it again");
+@@ -1348,7 +1370,16 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 		if (hint)
+ 		{
+-			ETA_UseRemember();
++			/* What the crosshair is on: where the view meets something. */
++			trace_t trace;
++			vec3_t  eye, forward, end;
++
++			VectorCopy(cg.refdef.vieworg, eye);
++			AngleVectors(cg.refdefViewAngles, forward, NULL, NULL);
++			VectorMA(eye, 128.0f, forward, end);
++			CG_Trace(&trace, eye, NULL, NULL, end, cg.predictedPlayerState.clientNum, MASK_SHOT);
++			ETA_UseRemember(trace.fraction < 1.0f && trace.entityNum < ENTITYNUM_WORLD ? trace.entityNum : -1,
++			                trace.endpos);
+ 		}
+ 		ETA_UseKey(qtrue);
+ 		return;
+@@ -2932,7 +2963,7 @@ void CG_AccessibilityAimFrame(void)
+ 
+ 			if (use)
+ 			{
+-				ETA_UseRemember();
++				ETA_UseRemember(body, eta_aim.point);
+ 				ETA_UseKey(qtrue);
+ 				if (!eta_use.held)
+ 				{
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 8d4c060f..37d3b87a 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8170,10 +8170,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* The marker taken away, and its ping with it, as Keypad star does
+ 		   in the Enemy Territory mode: a laptop has no keypad. */
+ 		{ K_BACKSPACE,  "accessibilityMarkerClear",   9, NULL },
+-		/* G kicked, beside F: a kick works a button as use does, and the
+-		   tester, catching G, locked again the door they had opened. G
+-		   is let go of; X still kicks. */
+-		{ 'g',          "",                           10, "+kick" },
++		/* G back on the kick, where the tenth generation let go of it on
++		   a misheard report: only where it is still empty. */
++		{ 'g',          "+kick",                      11, NULL },
+ 	};
+ 
+ 	vmCvar_t installed;

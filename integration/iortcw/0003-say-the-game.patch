@@ -1,0 +1,725 @@
+diff --git a/SP/Makefile b/SP/Makefile
+index c9120de..1f545e7 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -2574,6 +2574,7 @@ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/cgame/cg_trails.o \
+   $(B)/$(BASEGAME)/cgame/cg_view.o \
+   $(B)/$(BASEGAME)/cgame/cg_weapons.o \
++  $(B)/$(BASEGAME)/cgame/cg_accessibility.o \
+   $(B)/$(BASEGAME)/ui/ui_shared.o \
+   \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+new file mode 100644
+index 0000000..7d09f57
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -0,0 +1,587 @@
++/*
++ * [Accessibility]: the campaign, said. Built only with FEATURE_ACCESSIBILITY;
++ * the game's own files call into it from marked hooks.
++ *
++ * What is said, and when:
++ *  - the weapon in hand and its ammunition, as it changes;
++ *  - health crossing three quarters, half and a quarter, and dying;
++ *  - what the game prints in the middle of the screen;
++ *  - what was picked up, with how much;
++ *  - what the crosshair is on that can be used: a door, locked or not, a
++ *    ladder, a button, an alarm, the way out;
++ *  - the mission's objectives as each is done, and a new notebook page;
++ *  - a cutscene starting, and how to skip it;
++ *  - the console opening and closing.
++ * And on keys: the status (F1) and the objectives (F2). F6 repeats, F7
++ * reads the screen on top and F8 stops speech, here or in the menus.
++ */
++
++#ifdef FEATURE_ACCESSIBILITY
++
++#include "cg_local.h"
++
++#include "core/accessibility_runtime.h"
++#include "speech/speech_manager.h"
++
++#define ETA_MAX_OBJECTIVES 8
++
++static struct {
++	qboolean started;
++	int weapon;
++	int health;
++	int hint;
++	int spokenHint;
++	int spokenHintTime;
++	qboolean camera;
++	qboolean dead;
++	qboolean console;
++	int objectives;             /* bits: which g_objective cvars read 1 */
++	int mail;
++	char map[MAX_QPATH];
++	int numObjectiveTexts;
++	char objectiveText[ETA_MAX_OBJECTIVES][256];
++} eta;
++
++static void CG_AccessibilitySay( const char *text ) {
++	if ( text && text[0] ) {
++		ETA_Speech_Say( text );
++	}
++}
++
++/* An item by the name the screen gives it: the game's own translation
++   table, text/pickupnames.txt, else the item's own name. */
++static const char *CG_AccessibilityItemName( gitem_t *item ) {
++	int index;
++
++	if ( !item ) {
++		return "nothing";
++	}
++	index = item - bg_itemlist;
++	if ( index > 0 && index < bg_numItems && cgs.itemPrintNames[index][0] ) {
++		return cgs.itemPrintNames[index];
++	}
++	return item->pickup_name ? item->pickup_name : "something";
++}
++
++static const char *CG_AccessibilityWeaponName( int weapon ) {
++	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
++		return "no weapon";
++	}
++	switch ( weapon ) {
++	case WP_SNIPERRIFLE:
++		return "Mauser, scope";
++	case WP_SNOOPERSCOPE:
++		return "Snooper rifle, scope";
++	case WP_FG42SCOPE:
++		return "FG42, scope";
++	case WP_AKIMBO:
++		return "Two Colts";
++	default:
++		return CG_AccessibilityItemName( BG_FindItemForWeapon( weapon ) );
++	}
++}
++
++/* What the weapon has: in the clip and in reserve, as the HUD counts. */
++static const char *CG_AccessibilityAmmoText( playerState_t *ps, int weapon ) {
++	int clip, reserve;
++
++	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS || weapon == WP_KNIFE ) {
++		return "";
++	}
++
++	clip = ps->ammoclip[BG_FindClipForWeapon( weapon )];
++	reserve = ps->ammo[BG_FindAmmoForWeapon( weapon )];
++
++	if ( weapon == WP_GRENADE_LAUNCHER || weapon == WP_GRENADE_PINEAPPLE || weapon == WP_DYNAMITE ) {
++		return va( "%i", clip + reserve );
++	}
++	if ( weapon == WP_AKIMBO ) {
++		clip += ps->ammoclip[BG_FindClipForWeapon( WP_COLT )];
++	}
++	if ( cgs.dmflags & DF_NO_WEAPRELOAD ) {
++		return va( "%i", reserve );
++	}
++	return va( "%i, %i more", clip, reserve );
++}
++
++/*
++ * What the crosshair is on, by the icon the game shows for it. Only the
++ * ones that mean something to do; a reticle over nothing says nothing.
++ */
++static const char *CG_AccessibilityHintName( int hint ) {
++	switch ( hint ) {
++	case HINT_ACTIVATE:             return "Something to use";
++	case HINT_DOOR:                 return "Door";
++	case HINT_DOOR_ROTATING:        return "Door";
++	case HINT_DOOR_LOCKED:          return "Locked door";
++	case HINT_DOOR_ROTATING_LOCKED: return "Locked door";
++	case HINT_MG42:                 return "Mounted gun";
++	case HINT_BREAKABLE:            return "Breakable";
++	case HINT_BREAKABLE_DYNAMITE:   return "Needs dynamite";
++	case HINT_CHAIR:                return "Chair, can be picked up";
++	case HINT_ALARM:                return "Alarm";
++	case HINT_HEALTH:               return "Health";
++	case HINT_TREASURE:             return "Treasure";
++	case HINT_KNIFE:                return "Sleeping, knife them";
++	case HINT_LADDER:               return "Ladder";
++	case HINT_BUTTON:               return "Button";
++	case HINT_WATER:                return "Water";
++	case HINT_CAUTION:              return "Caution";
++	case HINT_DANGER:               return "Danger";
++	case HINT_SECRET:               return "Secret";
++	case HINT_QUESTION:             return "Something here";
++	case HINT_EXCLAMATION:          return "Look here";
++	case HINT_CLIPBOARD:            return "Something to read";
++	case HINT_WEAPON:               return "Weapon";
++	case HINT_AMMO:                 return "Ammo";
++	case HINT_ARMOR:                return "Armor";
++	case HINT_POWERUP:              return "Power up";
++	case HINT_HOLDABLE:             return "Item";
++	case HINT_INVENTORY:            return "Item";
++	case HINT_SCENARIC:             return "Something to use";
++	case HINT_EXIT:                 return "Exit";
++	case HINT_EXIT_FAR:             return "Exit";
++	case HINT_NOEXIT:               return "Exit, but the objectives are not done";
++	case HINT_NOEXIT_FAR:           return "Exit, but the objectives are not done";
++	case HINT_PLYR_FRIEND:          return "Friend";
++	default:                        return NULL;
++	}
++}
++
++/*
++ * The mission's objectives, in the words of its notebook. The briefing
++ * page draws them from a text file per map, named in ui/briefing.menu
++ * beside the map's name; each objective is a paragraph under the
++ * heading, and its check box is the cvar g_objective1, 2 and on.
++ */
++static void CG_AccessibilityLoadObjectives( void ) {
++	static char menu[65536];
++	char file[MAX_QPATH];
++	char page[4096];
++	fileHandle_t f;
++	int len;
++	char *p, *token;
++	char itemMap[MAX_QPATH], itemFile[MAX_QPATH];
++	int depth = 0;
++
++	eta.numObjectiveTexts = 0;
++	file[0] = '\0';
++
++	len = trap_FS_FOpenFile( "ui/briefing.menu", &f, FS_READ );
++	if ( !f ) {
++		return;
++	}
++	if ( len <= 0 || len >= (int)sizeof( menu ) ) {
++		trap_FS_FCloseFile( f );
++		return;
++	}
++	trap_FS_Read( menu, len, f );
++	menu[len] = '\0';
++	trap_FS_FCloseFile( f );
++
++	/* Each itemDef that shows for this map and reads a file ending in
++	   _p1a.txt is the objectives page. */
++	p = menu;
++	itemMap[0] = itemFile[0] = '\0';
++	while ( !file[0] ) {
++		token = COM_Parse( &p );
++		if ( !token[0] ) {
++			break;
++		}
++		if ( !Q_stricmp( token, "{" ) ) {
++			depth++;
++			continue;
++		}
++		if ( !Q_stricmp( token, "}" ) ) {
++			if ( depth == 3 && !Q_stricmp( itemMap, eta.map ) && strstr( itemFile, "_p1" ) ) {
++				Q_strncpyz( file, itemFile, sizeof( file ) );
++			}
++			if ( depth == 3 ) {
++				itemMap[0] = itemFile[0] = '\0';
++			}
++			depth--;
++			continue;
++		}
++		if ( !Q_stricmp( token, "showcvar" ) ) {
++			token = COM_Parse( &p );
++			if ( !Q_stricmp( token, "{" ) ) {
++				token = COM_Parse( &p );
++				Q_strncpyz( itemMap, token, sizeof( itemMap ) );
++				/* the list's own close */
++				while ( token[0] && Q_stricmp( token, "}" ) ) {
++					token = COM_Parse( &p );
++				}
++			}
++			continue;
++		}
++		if ( !Q_stricmp( token, "textfile" ) ) {
++			token = COM_Parse( &p );
++			Q_strncpyz( itemFile, token, sizeof( itemFile ) );
++		}
++	}
++
++	if ( !file[0] ) {
++		return;
++	}
++
++	len = trap_FS_FOpenFile( file, &f, FS_READ );
++	if ( !f ) {
++		return;
++	}
++	if ( len <= 0 || len >= (int)sizeof( page ) ) {
++		trap_FS_FCloseFile( f );
++		return;
++	}
++	trap_FS_Read( page, len, f );
++	page[len] = '\0';
++	trap_FS_FCloseFile( f );
++
++	/* Paragraphs after the heading; each one's lines joined. */
++	p = strstr( page, "OBJECTIVES:" );
++	p = p ? p + strlen( "OBJECTIVES:" ) : page;
++	while ( *p && eta.numObjectiveTexts < ETA_MAX_OBJECTIVES ) {
++		char *out = eta.objectiveText[eta.numObjectiveTexts];
++		int used = 0;
++		qboolean space = qtrue;
++
++		/* skip to the paragraph's first word */
++		while ( *p && ( *p == '\n' || *p == '\r' || *p == ' ' || *p == '\t' ) ) {
++			p++;
++		}
++		while ( *p ) {
++			if ( *p == '\n' ) {
++				/* a blank line ends the paragraph */
++				char *q = p + 1;
++
++				while ( *q == ' ' || *q == '\t' || *q == '\r' ) {
++					q++;
++				}
++				if ( *q == '\n' || !*q ) {
++					p = q;
++					break;
++				}
++			}
++			if ( *p == '\n' || *p == '\r' || *p == ' ' || *p == '\t' ) {
++				if ( !space && used < 254 ) {
++					out[used++] = ' ';
++				}
++				space = qtrue;
++			} else if ( *p == '^' && p[1] && p[1] != '^' ) {
++				p++;
++			} else if ( used < 254 ) {
++				out[used++] = *p;
++				space = qfalse;
++			}
++			p++;
++		}
++		while ( used > 0 && out[used - 1] == ' ' ) {
++			used--;
++		}
++		out[used] = '\0';
++		if ( used > 0 ) {
++			eta.numObjectiveTexts++;
++		}
++	}
++}
++
++static int CG_AccessibilityObjectiveBits( void ) {
++	char value[16];
++	int i, bits = 0;
++
++	for ( i = 0; i < ETA_MAX_OBJECTIVES; i++ ) {
++		trap_Cvar_VariableStringBuffer( va( "g_objective%i", i + 1 ), value, sizeof( value ) );
++		if ( atoi( value ) ) {
++			bits |= 1 << i;
++		}
++	}
++	return bits;
++}
++
++static int CG_AccessibilityObjectiveCount( void ) {
++	return eta.numObjectiveTexts;
++}
++
++static void CG_AccessibilityObjectives_f( void ) {
++	int i, count = CG_AccessibilityObjectiveCount();
++	int bits = CG_AccessibilityObjectiveBits();
++	char text[2048];
++
++	if ( !count ) {
++		CG_AccessibilitySay( "No objectives for this map" );
++		return;
++	}
++
++	Com_sprintf( text, sizeof( text ), "Objectives." );
++	for ( i = 0; i < count; i++ ) {
++		Q_strcat( text, sizeof( text ), va( " %i, %s%s.", i + 1, eta.objectiveText[i],
++											( bits & ( 1 << i ) ) ? ", done" : "" ) );
++	}
++	ETA_Speech_SayLong( text );
++}
++
++static void CG_AccessibilityStatus_f( void ) {
++	playerState_t *ps = &cg.snap->ps;
++	char text[1024];
++	int count = CG_AccessibilityObjectiveCount();
++	int bits = CG_AccessibilityObjectiveBits();
++	int i, done = 0;
++
++	if ( ps->stats[STAT_HEALTH] <= 0 ) {
++		Com_sprintf( text, sizeof( text ), "Dead" );
++	} else {
++		Com_sprintf( text, sizeof( text ), "Health %i", ps->stats[STAT_HEALTH] );
++		if ( ps->stats[STAT_ARMOR] > 0 ) {
++			Q_strcat( text, sizeof( text ), va( ", armor %i", ps->stats[STAT_ARMOR] ) );
++		}
++		Q_strcat( text, sizeof( text ), va( ". %s", CG_AccessibilityWeaponName( ps->weapon ) ) );
++		if ( CG_AccessibilityAmmoText( ps, ps->weapon )[0] ) {
++			Q_strcat( text, sizeof( text ), va( ", %s", CG_AccessibilityAmmoText( ps, ps->weapon ) ) );
++		}
++	}
++
++	/* What is carried besides the weapons: keys, and the items the item
++	   keys cycle through. */
++	for ( i = 1; i < bg_numItems; i++ ) {
++		gitem_t *item = &bg_itemlist[i];
++
++		if ( item->giType == IT_KEY && ( ps->stats[STAT_KEYS] & ( 1 << item->giTag ) ) ) {
++			Q_strcat( text, sizeof( text ), va( ". %s", CG_AccessibilityItemName( item ) ) );
++		} else if ( item->giType == IT_HOLDABLE && item->giTag > HI_NONE && item->giTag < MAX_HOLDABLE
++					&& ps->holdable[item->giTag] > 0 ) {
++			Q_strcat( text, sizeof( text ), va( ". %s, %i%s", CG_AccessibilityItemName( item ), ps->holdable[item->giTag],
++												ps->holding == item->giTag ? ", ready" : "" ) );
++		}
++	}
++
++	if ( count ) {
++		for ( i = 0; i < count; i++ ) {
++			if ( bits & ( 1 << i ) ) {
++				done++;
++			}
++		}
++		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i done", done, count ) );
++	}
++
++	CG_AccessibilitySay( text );
++}
++
++/* F6, F7 and F8 belong to the menus while one is open. */
++static qboolean CG_AccessibilityMenuOpen( void ) {
++	return ( trap_Key_GetCatcher() & KEYCATCH_UI ) ? qtrue : qfalse;
++}
++
++static void CG_AccessibilityRepeat_f( void ) {
++	if ( CG_AccessibilityMenuOpen() ) {
++		trap_SendConsoleCommand( "accessibilityRepeatMenu\n" );
++		return;
++	}
++	ETA_Speech_RepeatLast();
++}
++
++static void CG_AccessibilityStop_f( void ) {
++	if ( CG_AccessibilityMenuOpen() ) {
++		trap_SendConsoleCommand( "accessibilityStopSpeechMenu\n" );
++		return;
++	}
++	ETA_Speech_Stop();
++}
++
++static void CG_AccessibilityReadScreen_f( void ) {
++	if ( CG_AccessibilityMenuOpen() ) {
++		trap_SendConsoleCommand( "accessibilityReadScreenMenu\n" );
++		return;
++	}
++	/* In the game, the screen is the mission: what is to be done. */
++	CG_AccessibilityObjectives_f();
++}
++
++void CG_AccessibilityInit( void ) {
++	ETA_AccessibilityRuntime_Init();
++	memset( &eta, 0, sizeof( eta ) );
++	eta.weapon = -1;
++	eta.health = -1;
++
++	trap_AddCommand( "accessibilityStatus" );
++	trap_AddCommand( "accessibilityObjectives" );
++	trap_AddCommand( "accessibilityRepeat" );
++	trap_AddCommand( "accessibilityStopSpeech" );
++	trap_AddCommand( "accessibilityReadScreen" );
++}
++
++void CG_AccessibilityShutdown( void ) {
++	ETA_AccessibilityRuntime_Shutdown();
++}
++
++/* The commands this module answers; qtrue if it did. */
++qboolean CG_AccessibilityCommand( const char *cmd ) {
++	if ( !Q_stricmp( cmd, "accessibilityStatus" ) ) {
++		CG_AccessibilityStatus_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityObjectives" ) ) {
++		CG_AccessibilityObjectives_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityRepeat" ) ) {
++		CG_AccessibilityRepeat_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityStopSpeech" ) ) {
++		CG_AccessibilityStop_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityReadScreen" ) ) {
++		CG_AccessibilityReadScreen_f();
++	} else {
++		return qfalse;
++	}
++	return qtrue;
++}
++
++/* What the game prints in the middle of the screen. */
++void CG_AccessibilityCenterPrint( const char *text ) {
++	char clean[1024];
++	char *c;
++
++	if ( !text || !text[0] ) {
++		return;
++	}
++	Q_strncpyz( clean, text, sizeof( clean ) );
++	for ( c = clean; *c; c++ ) {
++		if ( *c == '\n' || *c == '\r' ) {
++			*c = ' ';
++		}
++	}
++	Q_CleanStr( clean );
++	CG_AccessibilitySay( clean );
++}
++
++/* What was picked up, as the screen writes it, with how much. */
++void CG_AccessibilityPickup( int itemNum ) {
++	gitem_t *item;
++	int amount;
++
++	if ( itemNum < 1 || itemNum >= bg_numItems ) {
++		return;
++	}
++	item = &bg_itemlist[itemNum];
++	amount = item->gameskillnumber[cg_gameSkill.integer];
++
++	if ( ( item->giType == IT_AMMO || item->giType == IT_HEALTH || item->giType == IT_ARMOR )
++		 && !item->world_model[2] && amount > 1 ) {
++		CG_AccessibilitySay( va( "%s, %i", CG_AccessibilityItemName( item ), amount ) );
++	} else {
++		CG_AccessibilitySay( CG_AccessibilityItemName( item ) );
++	}
++}
++
++void CG_AccessibilityFrame( void ) {
++	playerState_t *ps;
++	int health, hint, bits, mail;
++	qboolean console;
++	char value[16];
++
++	if ( !cg.snap ) {
++		return;
++	}
++	ps = &cg.snap->ps;
++
++	if ( !eta.started ) {
++		eta.started = qtrue;
++		Q_strncpyz( eta.map, Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "mapname" ), sizeof( eta.map ) );
++		CG_AccessibilityLoadObjectives();
++		eta.objectives = CG_AccessibilityObjectiveBits();
++		eta.weapon = ps->weapon;
++		eta.health = ps->stats[STAT_HEALTH];
++		trap_Cvar_VariableStringBuffer( "cg_youGotMail", value, sizeof( value ) );
++		eta.mail = atoi( value );
++	}
++
++	/* A cutscene: the game takes every key but the three that skip it. */
++	if ( cg.cameraMode != eta.camera ) {
++		eta.camera = cg.cameraMode;
++		CG_AccessibilitySay( eta.camera ? "Cutscene. Escape skips it" : "Cutscene over" );
++	}
++	if ( eta.camera ) {
++		return;
++	}
++
++	/* The console, opened by mistake, takes every key and says nothing. */
++	console = ( trap_Key_GetCatcher() & KEYCATCH_CONSOLE ) ? qtrue : qfalse;
++	if ( console != eta.console ) {
++		eta.console = console;
++		CG_AccessibilitySay( console ? "Console open. The same key closes it" : "Console closed" );
++	}
++
++	health = ps->stats[STAT_HEALTH];
++	if ( health <= 0 ) {
++		if ( !eta.dead ) {
++			eta.dead = qtrue;
++			CG_AccessibilitySay( "You died" );
++		}
++		eta.health = health;
++		return;
++	}
++	if ( eta.dead ) {
++		eta.dead = qfalse;
++	}
++	if ( eta.health > 0 && health < eta.health ) {
++		static const int marks[] = { 75, 50, 25 };
++		int i;
++
++		for ( i = 0; i < 3; i++ ) {
++			if ( eta.health > marks[i] && health <= marks[i] ) {
++				CG_AccessibilitySay( va( "Health %i", health ) );
++				break;
++			}
++		}
++	}
++	eta.health = health;
++
++	if ( ps->weapon != eta.weapon ) {
++		eta.weapon = ps->weapon;
++		if ( ps->weapon > WP_NONE ) {
++			const char *ammo = CG_AccessibilityAmmoText( ps, ps->weapon );
++
++			CG_AccessibilitySay( ammo[0] ? va( "%s, %s", CG_AccessibilityWeaponName( ps->weapon ), ammo )
++								 : CG_AccessibilityWeaponName( ps->weapon ) );
++		}
++	}
++
++	/* What the crosshair is on, once as it arrives, and again if it
++	   comes back after a while. */
++	hint = ps->serverCursorHint;
++	if ( hint != eta.hint ) {
++		const char *name = CG_AccessibilityHintName( hint );
++
++		/* The crosshair slipping off the edge of a door and back is the
++		   same door: said again only after a pause. */
++		if ( name && ( hint != eta.spokenHint || cg.time - eta.spokenHintTime > 2000 ) ) {
++			CG_AccessibilitySay( name );
++			eta.spokenHint = hint;
++		}
++		if ( name ) {
++			eta.spokenHintTime = cg.time;
++		}
++		eta.hint = hint;
++	}
++
++	bits = CG_AccessibilityObjectiveBits();
++	if ( bits != eta.objectives ) {
++		int i;
++
++		for ( i = 0; i < ETA_MAX_OBJECTIVES; i++ ) {
++			if ( ( bits & ( 1 << i ) ) && !( eta.objectives & ( 1 << i ) ) ) {
++				CG_AccessibilitySay( i < eta.numObjectiveTexts
++									 ? va( "Objective done: %s", eta.objectiveText[i] )
++									 : va( "Objective %i done", i + 1 ) );
++			}
++		}
++		eta.objectives = bits;
++	}
++
++	trap_Cvar_VariableStringBuffer( "cg_youGotMail", value, sizeof( value ) );
++	mail = atoi( value );
++	if ( mail != eta.mail ) {
++		if ( mail == 1 ) {
++			CG_AccessibilitySay( "New page in the notebook" );
++		} else if ( mail == 2 ) {
++			CG_AccessibilitySay( "Objectives updated" );
++		}
++		eta.mail = mail;
++	}
++}
++
++#endif
+diff --git a/SP/code/cgame/cg_consolecmds.c b/SP/code/cgame/cg_consolecmds.c
+index 7f940a9..ece014a 100644
+--- a/SP/code/cgame/cg_consolecmds.c
++++ b/SP/code/cgame/cg_consolecmds.c
+@@ -439,6 +439,12 @@ qboolean CG_ConsoleCommand( void ) {
+ 
+ 	cmd = CG_Argv( 0 );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	if ( CG_AccessibilityCommand( cmd ) ) {
++		return qtrue;
++	}
++#endif
++
+ 	for ( i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
+ 		if ( !Q_stricmp( cmd, commands[i].cmd ) ) {
+ 			commands[i].function();
+diff --git a/SP/code/cgame/cg_draw.c b/SP/code/cgame/cg_draw.c
+index 0801786..1cc27a3 100644
+--- a/SP/code/cgame/cg_draw.c
++++ b/SP/code/cgame/cg_draw.c
+@@ -1945,6 +1945,9 @@ void CG_CenterPrint( const char *str, int y, int charWidth ) {
+ //----(SA)	added translation lookup
+ 	Q_strncpyz( cg.centerPrint, CG_translateString( (char*)str ), sizeof( cg.centerPrint ) );
+ //----(SA)	end
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityCenterPrint( cg.centerPrint );
++#endif
+ 
+ 
+ 	cg.centerPrintTime = cg.time;
+diff --git a/SP/code/cgame/cg_event.c b/SP/code/cgame/cg_event.c
+index 3f33ee7..00d552c 100644
+--- a/SP/code/cgame/cg_event.c
++++ b/SP/code/cgame/cg_event.c
+@@ -441,6 +441,10 @@ static void CG_ItemPickup( int itemNum ) {
+ 
+ 	itemid = bg_itemlist[itemNum].giTag;
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityPickup( itemNum );
++#endif
++
+ 	cg.itemPickup           = itemNum;
+ 	cg.itemPickupTime       = cg.time;
+ 	cg.itemPickupBlendTime  = cg.time;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index b3e3997..f8c3f5c 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2195,6 +2195,16 @@ void CG_DrawTourneyScoreboard( void );
+ // cg_consolecmds.c
+ //
+ qboolean CG_ConsoleCommand( void );
++
++#ifdef FEATURE_ACCESSIBILITY
++// [Accessibility]: cg_accessibility.c
++void CG_AccessibilityInit( void );
++void CG_AccessibilityShutdown( void );
++void CG_AccessibilityFrame( void );
++qboolean CG_AccessibilityCommand( const char *cmd );
++void CG_AccessibilityCenterPrint( const char *text );
++void CG_AccessibilityPickup( int itemNum );
++#endif
+ void CG_InitConsoleCommands( void );
+ 
+ //
+diff --git a/SP/code/cgame/cg_main.c b/SP/code/cgame/cg_main.c
+index 13362af..5f39a50 100644
+--- a/SP/code/cgame/cg_main.c
++++ b/SP/code/cgame/cg_main.c
+@@ -2286,6 +2286,10 @@ void CG_Init( int serverMessageNum, int serverCommandSequence ) {
+ 	memset( cg_weapons, 0, sizeof( cg_weapons ) );
+ 	memset( cg_items, 0, sizeof( cg_items ) );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityInit();
++#endif
++
+ 	// RF, init the anim scripting
+ 	cgs.animScriptData.soundIndex = CG_SoundScriptPrecache;
+ 	cgs.animScriptData.playSound = CG_SoundPlayIndexedScript;
+@@ -2430,6 +2434,9 @@ Called before every level change or subsystem restart
+ void CG_Shutdown( void ) {
+ 	// some mods may need to do cleanup work here,
+ 	// like closing files or archiving session data
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityShutdown();
++#endif
+ }
+ 
+ void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume ) {
+diff --git a/SP/code/cgame/cg_view.c b/SP/code/cgame/cg_view.c
+index 02448b9..b61aa32 100644
+--- a/SP/code/cgame/cg_view.c
++++ b/SP/code/cgame/cg_view.c
+@@ -1640,6 +1640,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ 	// update audio positions
+ 	trap_S_Respatialize( cg.snap->ps.clientNum, cg.refdef.vieworg, cg.refdef.viewaxis, inwater );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityFrame();
++#endif
++
+ 	if ( cg_stats.integer ) {
+ 		CG_Printf( "cg.clientFrame:%i\n", cg.clientFrame );
+ 	}
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 030a14a..f396e65 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8064,6 +8064,8 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ K_F6, "accessibilityRepeat",     1 },
+ 		{ K_F7, "accessibilityReadScreen", 1 },
+ 		{ K_F8, "accessibilityStopSpeech", 1 },
++		{ K_F1, "accessibilityStatus",     1 },
++		{ K_F2, "accessibilityObjectives", 1 },
+ 	};
+ 
+ 	vmCvar_t installed;

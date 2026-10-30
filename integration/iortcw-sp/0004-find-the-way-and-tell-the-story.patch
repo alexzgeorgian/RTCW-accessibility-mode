@@ -1,0 +1,424 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Accessibility mode <noreply@example.invalid>
+Date: Sun, 18 Oct 2026 09:58:07 +0000
+Subject: [PATCH] find the way and tell the story
+
+---
+ SP/Makefile                      |   5 +-
+ SP/code/cgame/cg_accessibility.c | 246 ++++++++++++++++++++++++++++++-
+ SP/code/game/ai_cast_script.c    |   7 +
+ SP/code/ui/ui_shared.c           |  19 ++-
+ 4 files changed, 269 insertions(+), 8 deletions(-)
+
+diff --git a/SP/Makefile b/SP/Makefile
+index 1313de1..e68ec6f 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -1356,7 +1356,7 @@ endef
+ 
+ define DO_GAME_CC
+ $(echo_cmd) "GAME_CC $<"
+-$(Q)$(CC) $(BASEGAME_CFLAGS) -DGAMEDLL -DQAGAME $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
++$(Q)$(CC) $(BASEGAME_CFLAGS) $(ETA_GAME_CFLAGS) -DGAMEDLL -DQAGAME $(SHLIBCFLAGS) $(CFLAGS) $(OPTIMIZEVM) -o $@ -c $<
+ $(Q)$(DO_QVM_DEP)
+ endef
+ 
+@@ -2516,6 +2516,8 @@ ETA_RELEASE_VERSION ?= dev
+ ETA_CFLAGS = -DFEATURE_ACCESSIBILITY -I$(ETADIR)
+ # The engine has a few marked changes of its own: keys it would swallow.
+ CLIENT_CFLAGS += -DFEATURE_ACCESSIBILITY
++# So does the game: the room a level script has for a line of story.
++ETA_GAME_CFLAGS = -DFEATURE_ACCESSIBILITY
+ 
+ ETAOBJ = \
+   $(B)/eta/audio/audio_cue_system.o \
+@@ -2560,6 +2562,7 @@ $(B)/eta/%.o: $(ETADIR)/%.m
+ 	$(Q)$(CC) $(SHLIBCFLAGS) $(CFLAGS) -fobjc-arc -I$(ETADIR) -o $@ -c $<
+ else
+ ETA_CFLAGS =
++ETA_GAME_CFLAGS =
+ ETAOBJ =
+ ETA_LIBS =
+ endif
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index cb4df9b..6acbd86 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -76,6 +76,19 @@ typedef struct {
+ 
+ 	int lastEnemyCue;
+ 
++	/* the goal the level's script marked, and its beacon */
++	char goalSpec[MAX_STRING_CHARS];
++	qboolean hasGoal;
++	vec3_t goal;
++	char goalName[64];
++	int lastBeacon;
++	qboolean atGoal;
++
++	int lastBump;
++
++	sfxHandle_t cueBeacon;
++	sfxHandle_t cueBump;
++
+ 	sfxHandle_t cueEnemy;
+ 	sfxHandle_t cueOnTarget;
+ 	sfxHandle_t cueLowHealth;
+@@ -84,6 +97,33 @@ typedef struct {
+ } eta_game_t;
+ 
+ static eta_game_t eta;
++
++static const char *CG_AccessibilityGoalText( void );
++
++/*
++ * Whether the story values are this level's. A level built for the mode
++ * names itself in eta_storyMap as it spawns; the values another level
++ * left behind are never read on one that did not set them.
++ */
++static qboolean CG_AccessibilityStoryLevel( void ) {
++	char storyMap[MAX_QPATH], mapname[MAX_QPATH];
++
++	trap_Cvar_VariableStringBuffer( "eta_storyMap", storyMap, sizeof( storyMap ) );
++	trap_Cvar_VariableStringBuffer( "mapname", mapname, sizeof( mapname ) );
++	return ( storyMap[0] && !Q_stricmp( storyMap, mapname ) ) ? qtrue : qfalse;
++}
++
++/* A story value, or empty on a level that is not telling one. A script
++   cannot set a cvar to nothing, so "none" clears one. */
++static void CG_AccessibilityStoryValue( const char *name, char *out, int size ) {
++	out[0] = '\0';
++	if ( CG_AccessibilityStoryLevel() ) {
++		trap_Cvar_VariableStringBuffer( name, out, size );
++		if ( !Q_stricmp( out, "none" ) ) {
++			out[0] = '\0';
++		}
++	}
++}
+ static eta_enemy_t eta_enemies[MAX_GENTITIES];
+ 
+ /*
+@@ -169,8 +209,50 @@ static void CG_AccessibilityAmmo( int weapon, int *loaded, int *reserve ) {
+ 	*reserve = ps->ammo[BG_FindAmmoForWeapon( weapon )];
+ }
+ 
++/*
++ * A name the level gives a kind of character, from eta_enemyNames:
++ * "1=Sentinel;7=Elite sentinel", by RTCW's character numbers. A story set
++ * on another world calls its soldiers what the book calls them.
++ */
++static const char *CG_AccessibilityLevelName( int aiChar ) {
++	static char name[64];
++	char names[MAX_STRING_CHARS];
++	char *p;
++
++	CG_AccessibilityStoryValue( "eta_enemyNames", names, sizeof( names ) );
++	for ( p = names; *p; ) {
++		int number = atoi( p );
++		char *eq = strchr( p, '=' );
++		char *end = strchr( p, ';' );
++
++		if ( !eq ) {
++			break;
++		}
++		if ( number == aiChar && ( !end || eq < end ) ) {
++			int length = end ? (int)( end - eq - 1 ) : (int)strlen( eq + 1 );
++
++			if ( length >= (int)sizeof( name ) ) {
++				length = sizeof( name ) - 1;
++			}
++			memcpy( name, eq + 1, length );
++			name[length] = '\0';
++			return name[0] ? name : NULL;
++		}
++		if ( !end ) {
++			break;
++		}
++		p = end + 1;
++	}
++	return NULL;
++}
++
+ /* An enemy as the player would name him. */
+ static const char *CG_AccessibilityEnemyName( const centity_t *cent ) {
++	const char *named = CG_AccessibilityLevelName( cent->currentState.aiChar );
++
++	if ( named ) {
++		return named;
++	}
+ 	switch ( cent->currentState.aiChar ) {
+ 	case AICHAR_SOLDIER:        return "Soldier";
+ 	case AICHAR_AMERICAN:       return "American";
+@@ -592,11 +674,23 @@ static void CG_AccessibilityEnemies_f( void ) {
+ static void CG_AccessibilityObjective_f( void ) {
+ 	char objective[MAX_STRING_CHARS];
+ 
+-	trap_Cvar_VariableStringBuffer( "eta_objective", objective, sizeof( objective ) );
++	CG_AccessibilityStoryValue( "eta_objective", objective, sizeof( objective ) );
+ 	if ( !objective[0] ) {
+ 		CG_AccessibilitySayNow( "No objective given. The notebook, on N, has this level's orders" );
+ 		return;
+ 	}
++	if ( eta.hasGoal ) {
++		char goal[MAX_STRING_CHARS];
++		size_t length = strlen( objective );
++
++		/* The objective is a sentence with its own full stop. */
++		if ( length && objective[length - 1] == '.' ) {
++			objective[length - 1] = '\0';
++		}
++		Q_strncpyz( goal, CG_AccessibilityGoalText(), sizeof( goal ) );
++		CG_AccessibilitySayNow( va( "Objective: %s. Go to %s", objective, goal ) );
++		return;
++	}
+ 	CG_AccessibilitySayNow( va( "Objective: %s", objective ) );
+ }
+ 
+@@ -755,7 +849,7 @@ static void CG_AccessibilityStoryFrame( void ) {
+ 	char line[MAX_STRING_CHARS];
+ 	char objective[MAX_STRING_CHARS];
+ 
+-	trap_Cvar_VariableStringBuffer( "eta_line", line, sizeof( line ) );
++	CG_AccessibilityStoryValue( "eta_line", line, sizeof( line ) );
+ 	if ( line[0] && strcmp( line, eta.lastLine ) ) {
+ 		char *bar = strchr( line, '|' );
+ 		const char *words = line;
+@@ -792,7 +886,7 @@ static void CG_AccessibilityStoryFrame( void ) {
+ 	if ( cg.time < eta_storyUntil ) {
+ 		return;
+ 	}
+-	trap_Cvar_VariableStringBuffer( "eta_objective", objective, sizeof( objective ) );
++	CG_AccessibilityStoryValue( "eta_objective", objective, sizeof( objective ) );
+ 	if ( strcmp( objective, eta.lastObjective ) ) {
+ 		Q_strncpyz( eta.lastObjective, objective, sizeof( eta.lastObjective ) );
+ 		if ( objective[0] ) {
+@@ -804,6 +898,138 @@ static void CG_AccessibilityStoryFrame( void ) {
+ 	}
+ }
+ 
++/*
++=================
++The goal
++
++A level's script marks the next place to go with eta_goal: "x y z" and
++a name, "480 1216 48 the generator". A beacon sounds from there, a
++soft tone every second and a bit, which the engine's 3D sound puts
++where it is; O says its direction and distance; arriving is said. An
++empty eta_goal clears it.
++=================
++*/
++
++#define ETA_GOAL_REACHED 80.0f
++
++static void CG_AccessibilityGoalFrame( void ) {
++	char spec[MAX_STRING_CHARS];
++	float distance;
++
++	CG_AccessibilityStoryValue( "eta_goal", spec, sizeof( spec ) );
++	if ( strcmp( spec, eta.goalSpec ) ) {
++		char *p = spec;
++		int i;
++
++		Q_strncpyz( eta.goalSpec, spec, sizeof( eta.goalSpec ) );
++		eta.hasGoal = qfalse;
++		eta.atGoal = qfalse;
++		eta.goalName[0] = '\0';
++		for ( i = 0; i < 3; i++ ) {
++			char *token = COM_Parse( &p );
++
++			if ( !token[0] ) {
++				break;
++			}
++			eta.goal[i] = atof( token );
++		}
++		if ( i == 3 ) {
++			while ( *p == ' ' ) {
++				p++;
++			}
++			Q_strncpyz( eta.goalName, p[0] ? p : "the goal", sizeof( eta.goalName ) );
++			eta.hasGoal = qtrue;
++			eta.lastBeacon = 0;
++		}
++	}
++
++	if ( !eta.hasGoal ) {
++		return;
++	}
++
++	distance = Distance( eta.goal, cg.predictedPlayerState.origin );
++	if ( distance < ETA_GOAL_REACHED ) {
++		if ( !eta.atGoal ) {
++			eta.atGoal = qtrue;
++			CG_AccessibilitySay( va( "At %s", eta.goalName ) );
++		}
++	} else if ( distance > ETA_GOAL_REACHED * 2 ) {
++		eta.atGoal = qfalse;
++	}
++
++	if ( eta.cueBeacon && cg.time - eta.lastBeacon >= 1300 && !eta.atGoal ) {
++		trap_S_StartSound( eta.goal, ENTITYNUM_WORLD, CHAN_AUTO, eta.cueBeacon );
++		eta.lastBeacon = cg.time;
++	}
++}
++
++/* The goal in words: "the generator, ahead right, 12 meters". */
++static const char *CG_AccessibilityGoalText( void ) {
++	int meters;
++	const char *where;
++
++	if ( !eta.hasGoal ) {
++		return NULL;
++	}
++	where = CG_AccessibilityDirection( eta.goal, &meters );
++	return va( "%s, %s, %i %s%s", eta.goalName, where, meters, meters == 1 ? "meter" : "meters",
++			   CG_AccessibilityHeight( eta.goal ) );
++}
++
++/*
++=================
++Walking into things
++
++Pressing to walk and not moving is the one thing a sighted player never
++has to be told. A thud from the side that is blocked says it: a wall
++ahead, a crate to the left.
++=================
++*/
++
++static void CG_AccessibilityBumpFrame( void ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t cmd;
++	vec3_t angles, forward, right, wish, end, mins, maxs;
++	trace_t tr;
++	float speed;
++
++	if ( !eta.cueBump || cg.time - eta.lastBump < 450 ) {
++		return;
++	}
++	if ( !trap_GetUserCmd( trap_GetCurrentCmdNumber(), &cmd ) ) {
++		return;
++	}
++	if ( !cmd.forwardmove && !cmd.rightmove ) {
++		return;
++	}
++	speed = sqrt( ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1] );
++	if ( speed > 40.0f ) {
++		return;
++	}
++
++	VectorSet( angles, 0, ps->viewangles[YAW], 0 );
++	AngleVectors( angles, forward, right, NULL );
++	VectorScale( forward, cmd.forwardmove, wish );
++	VectorMA( wish, cmd.rightmove, right, wish );
++	wish[2] = 0;
++	if ( VectorNormalize( wish ) < 0.1f ) {
++		return;
++	}
++
++	VectorSet( mins, -15, -15, 0 );
++	VectorSet( maxs, 15, 15, 40 );
++	VectorMA( ps->origin, 24.0f, wish, end );
++	CG_Trace( &tr, ps->origin, mins, maxs, end, ps->clientNum, MASK_PLAYERSOLID );
++	if ( tr.fraction < 1.0f ) {
++		vec3_t point;
++
++		VectorMA( ps->origin, 24.0f, wish, point );
++		point[2] += ps->viewheight;
++		trap_S_StartSound( point, ENTITYNUM_WORLD, CHAN_AUTO, eta.cueBump );
++		eta.lastBump = cg.time;
++	}
++}
++
+ /*
+ =================
+ The frame
+@@ -879,7 +1105,8 @@ static void CG_AccessibilityPlayerFrame( void ) {
+ 	/* While the aim turns the view, where it points is the enemy; the
+ 	   compass would talk over the shots. */
+ 	if ( ETA_HudNarrator_UpdateFacing( ps->viewangles[YAW], cg.time, &facing ) && !eta.aiming ) {
+-		ETA_HudNarrator_SpeakFacing( facing );
++		/* Through Say, so it waits its turn behind a story line. */
++		CG_AccessibilitySay( va( "Facing %s", ETA_HudNarrator_FacingName( facing ) ) );
+ 	}
+ }
+ 
+@@ -890,6 +1117,8 @@ void CG_AccessibilityFrame( void ) {
+ 	CG_AccessibilityStoryFrame();
+ 	CG_AccessibilityPlayerFrame();
+ 	if ( !eta.dead ) {
++		CG_AccessibilityGoalFrame();
++		CG_AccessibilityBumpFrame();
+ 		CG_AccessibilityEnemiesFrame();
+ 		CG_AccessibilityAimFrame();
+ 	}
+@@ -942,14 +1171,19 @@ void CG_AccessibilityInit( void ) {
+ 
+ 	trap_Cvar_Register( NULL, "eta_enemyCue", "1", CVAR_ARCHIVE );
+ 	trap_Cvar_Register( NULL, "eta_storyVoice", "1", CVAR_ARCHIVE );
+-	/* Story state from the last level is not this one's. */
+-	trap_Cvar_Set( "eta_line", "" );
++	/* A saved game loaded is the same level coming back: its last line
++	   is not news. */
++	if ( CG_AccessibilityStoryLevel() ) {
++		trap_Cvar_VariableStringBuffer( "eta_line", eta.lastLine, sizeof( eta.lastLine ) );
++	}
+ 
+ 	eta.cueEnemy = trap_S_RegisterSound( "sound/accessibility/crosshair_enemy.wav" );
+ 	eta.cueOnTarget = trap_S_RegisterSound( "sound/accessibility/marker_beacon.wav" );
+ 	eta.cueObjective = trap_S_RegisterSound( "sound/accessibility/flag_capture.wav" );
+ 	eta.cueLowHealth = cgs.media.noAmmoSound;
+ 	eta.cueHit = trap_S_RegisterSound( "sound/accessibility/bump_object.wav" );
++	eta.cueBeacon = trap_S_RegisterSound( "sound/accessibility/marker_beacon.wav" );
++	eta.cueBump = trap_S_RegisterSound( "sound/accessibility/bump_wall.wav" );
+ 
+ 	CG_AccessibilitySay( "Level loaded" );
+ }
+diff --git a/SP/code/game/ai_cast_script.c b/SP/code/game/ai_cast_script.c
+index d468d1b..2e1e23e 100644
+--- a/SP/code/game/ai_cast_script.c
++++ b/SP/code/game/ai_cast_script.c
+@@ -401,7 +401,14 @@ void AICast_ScriptParse( cast_state_t *cs ) {
+ 	int eventNum;
+ 	int numEventItems;
+ 	cast_script_event_t *curEvent;
++#ifdef FEATURE_ACCESSIBILITY
++	/* [Accessibility]: a level's story lines are set with the cvar action,
++	   and a sentence is longer than a file path. The entity scripts in
++	   g_script.c already allow this much. */
++	char params[MAX_INFO_STRING];
++#else
+ 	char params[MAX_QPATH];
++#endif
+ 	cast_script_stack_action_t  *action;
+ 	int i;
+ 	int bracketLevel;
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 8f1b878..b965c93 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -2434,8 +2434,25 @@ static void ETA_NarrateMenuOpened( menuDef_t *menu ) {
+ 	if ( !Q_stricmp( menu->window.name, "pregame" ) ) {
+ 		static char briefing[2048];
+ 
++		char storyMap[MAX_QPATH], mapname[MAX_QPATH];
++
+ 		ETA_ScreenText( menu, briefing, sizeof( briefing ) );
+-		Q_strcat( briefing, sizeof( briefing ), ". Press Enter to begin" );
++		/* A level built for the mode has no page in this screen; its
++		   script gives the briefing instead. */
++		DC->getCVarString( "eta_storyMap", storyMap, sizeof( storyMap ) );
++		DC->getCVarString( "mapname", mapname, sizeof( mapname ) );
++		if ( !briefing[0] && storyMap[0] && !Q_stricmp( storyMap, mapname ) ) {
++			DC->getCVarString( "eta_briefing", briefing, sizeof( briefing ) );
++		}
++		{
++			size_t length = strlen( briefing );
++
++			/* A briefing ends in a full stop of its own. */
++			while ( length && ( briefing[length - 1] == '.' || briefing[length - 1] == ' ' ) ) {
++				briefing[--length] = '\0';
++			}
++		}
++		Q_strcat( briefing, sizeof( briefing ), briefing[0] ? ". Press Enter to begin" : "Press Enter to begin" );
+ 		ETA_ReadLong( briefing );
+ 		return;
+ 	}

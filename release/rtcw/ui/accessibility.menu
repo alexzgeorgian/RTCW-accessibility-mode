@@ -1,0 +1,202 @@
+#include "ui/menudef.h"
+
+// The Accessibility pages: the mode's own settings, as the ET mode keeps
+// them under ACCESSIBILITY in its Options. Reached by the ACCESSIBILITY
+// button the mode puts after OPTIONS in the main menu and among the paused
+// game's tabs (accessibility_tabs.menu), and laid over the screen where
+// the game's own Options pages are. Up and Down go through a page,
+// Enter changes a setting, Escape goes back. Each setting is a cvar the
+// cgame reads every frame, so a change takes effect at once, and is kept
+// in the config. The cvars and their defaults: cg_accessibility_settings.h.
+
+#define ETA_PAGE_RECT rect 100 125 443 340
+
+#define ETA_TITLE(TEXT) itemDef { \
+		text TEXT \
+		style 0 \
+		textstyle 6 \
+		rect 0 4 443 16 \
+		textalign ITEM_ALIGN_CENTER \
+		textalignx 221 \
+		textaligny 13 \
+		textscale .25 \
+		forecolor 1 1 1 1 \
+		visible 1 \
+		decoration \
+	}
+
+#define ETA_WINDOW itemDef { \
+		rect 0 2 443 300 \
+		style WINDOW_STYLE_FILLED \
+		border 1 \
+		bordercolor .5 .5 .5 .5 \
+		forecolor 1 1 1 1 \
+		backcolor 0 0 0 .6 \
+		visible 1 \
+		decoration \
+	}
+
+#define ETA_BUTTON(Y, TEXT, ACTION) itemDef { \
+		text TEXT \
+		type ITEM_TYPE_BUTTON \
+		style WINDOW_STYLE_FILLED \
+		rect 121 Y 200 16 \
+		textalign ITEM_ALIGN_CENTER \
+		textalignx 100 \
+		textaligny 12 \
+		textscale .23 \
+		backcolor 1 1 1 .07 \
+		forecolor 1 1 1 1 \
+		visible 1 \
+		action { play "sound/misc/kcaction.wav" ; ACTION } \
+	}
+
+#define ETA_YESNO(Y, TEXT, CVAR) itemDef { \
+		type ITEM_TYPE_YESNO \
+		text TEXT \
+		cvar CVAR \
+		rect 32 Y 379 14 \
+		textalign ITEM_ALIGN_RIGHT \
+		textalignx 250 \
+		textaligny 11 \
+		textscale .22 \
+		style WINDOW_STYLE_FILLED \
+		backcolor 1 1 1 .07 \
+		forecolor 1 1 1 1 \
+		visible 1 \
+	}
+
+#define ETA_VOLUME(Y, TEXT, CVAR) itemDef { \
+		type ITEM_TYPE_MULTI \
+		text TEXT \
+		cvar CVAR \
+		cvarFloatList { "Full" 100 "75 percent" 75 "50 percent" 50 "25 percent" 25 "Off" 0 } \
+		rect 32 Y 379 14 \
+		textalign ITEM_ALIGN_RIGHT \
+		textalignx 250 \
+		textaligny 11 \
+		textscale .22 \
+		style WINDOW_STYLE_FILLED \
+		backcolor 1 1 1 .07 \
+		forecolor 1 1 1 1 \
+		visible 1 \
+	}
+
+{
+
+// The first page: one button for each of the others.
+menuDef {
+	name "eta_accessibility"
+	visible 0
+	fullscreen 0
+	outOfBoundsClick
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { uiScript etaAccessibilityLeave }
+
+	ETA_WINDOW
+	ETA_TITLE("ACCESSIBILITY")
+	ETA_BUTTON(40, "WHAT YOU ARE TOLD", close eta_accessibility ; open eta_acc_told)
+	ETA_BUTTON(64, "SOUNDS", close eta_accessibility ; open eta_acc_sounds)
+	ETA_BUTTON(88, "VOLUMES", close eta_accessibility ; open eta_acc_volumes)
+	ETA_BUTTON(112, "MOVING AND AIMING", close eta_accessibility ; open eta_acc_moving)
+	ETA_BUTTON(144, "BACK", uiScript etaAccessibilityLeave)
+}
+
+// What you are told: what the mode says as you play, without a key.
+menuDef {
+	name "eta_acc_told"
+	visible 0
+	fullscreen 0
+	outOfBoundsClick
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { close eta_acc_told ; open eta_accessibility }
+
+	ETA_WINDOW
+	ETA_TITLE("WHAT YOU ARE TOLD")
+	ETA_YESNO(32, "Walls, doors, stairs and drops ahead", "eta_environmentCallouts")
+	ETA_YESNO(50, "Openings to the side as you walk", "eta_openingCallouts")
+	ETA_YESNO(68, "The kind of place you walk into", "eta_placeCallouts")
+	ETA_YESNO(86, "New place and its ways on", "eta_waysCallouts")
+	ETA_YESNO(104, "Enemies and friends near you", "eta_playerCallouts")
+	ETA_YESNO(122, "Things on the ground", "eta_groundCallouts")
+	ETA_YESNO(140, "Furniture as you pass it", "eta_furnitureCallouts")
+	ETA_YESNO(158, "Direction as you turn", "eta_facingCallouts")
+	ETA_BUTTON(186, "BACK", close eta_acc_told ; open eta_accessibility)
+}
+
+// Sounds: the mode's sounds, placed where things are.
+menuDef {
+	name "eta_acc_sounds"
+	visible 0
+	fullscreen 0
+	outOfBoundsClick
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { close eta_acc_sounds ; open eta_accessibility }
+
+	ETA_WINDOW
+	ETA_TITLE("SOUNDS")
+	ETA_YESNO(32, "Door sounds", "eta_doorCues")
+	ETA_YESNO(50, "Ladder sounds", "eta_ladderCues")
+	ETA_YESNO(68, "Pickup sounds", "eta_pickupCues")
+	ETA_YESNO(86, "Crosshair ticks", "eta_crosshairCues")
+	ETA_YESNO(104, "Enemy sounds", "eta_enemyCues")
+	ETA_YESNO(122, "Marker ping", "eta_markerCues")
+	ETA_YESNO(140, "Bump sounds", "eta_bumpCues")
+	ETA_BUTTON(168, "BACK", close eta_acc_sounds ; open eta_accessibility)
+}
+
+// Volumes: how loud each of the mode's sounds is.
+menuDef {
+	name "eta_acc_volumes"
+	visible 0
+	fullscreen 0
+	outOfBoundsClick
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { close eta_acc_volumes ; open eta_accessibility }
+
+	ETA_WINDOW
+	ETA_TITLE("VOLUMES")
+	ETA_VOLUME(32, "Door volume", "eta_doorVolume")
+	ETA_VOLUME(50, "Ladder volume", "eta_ladderVolume")
+	ETA_VOLUME(68, "Pickup volume", "eta_pickupVolume")
+	ETA_VOLUME(86, "Crosshair and enemy volume", "eta_crosshairVolume")
+	ETA_VOLUME(104, "Bump volume", "eta_bumpVolume")
+	ETA_VOLUME(122, "Marker volume", "eta_markerVolume")
+	ETA_BUTTON(150, "BACK", close eta_acc_volumes ; open eta_accessibility)
+}
+
+// Moving and aiming: the help with turning, walking and aiming.
+menuDef {
+	name "eta_acc_moving"
+	visible 0
+	fullscreen 0
+	outOfBoundsClick
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { close eta_acc_moving ; open eta_accessibility }
+
+	ETA_WINDOW
+	ETA_TITLE("MOVING AND AIMING")
+	ETA_YESNO(32, "Arrows turn by compass points", "eta_turnSteps")
+	ETA_YESNO(50, "Turned along curved stairs", "eta_stairKeeper")
+	ETA_YESNO(68, "Aim locks on to enemies by itself", "eta_autoLock")
+	ETA_YESNO(86, "Turned along the way as you walk", "eta_autoSteer")
+	ETA_YESNO(104, "T leads straight to secret areas", "eta_secretsLead")
+	ETA_BUTTON(132, "BACK", close eta_acc_moving ; open eta_accessibility)
+}
+
+}

@@ -1,0 +1,1441 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Accessibility mode <noreply@example.invalid>
+Date: Sun, 18 Oct 2026 09:35:23 +0000
+Subject: [PATCH] say the game
+
+---
+ SP/Makefile                      |   3 +
+ SP/code/cgame/cg_accessibility.c | 963 +++++++++++++++++++++++++++++++
+ SP/code/cgame/cg_consolecmds.c   |  10 +
+ SP/code/cgame/cg_draw.c          |   4 +
+ SP/code/cgame/cg_event.c         |   6 +
+ SP/code/cgame/cg_local.h         |  15 +
+ SP/code/cgame/cg_main.c          |   7 +
+ SP/code/cgame/cg_playerstate.c   |   4 +
+ SP/code/cgame/cg_view.c          |   4 +
+ SP/code/client/cl_keys.c         |  13 +
+ SP/code/ui/ui_main.c             |   6 +
+ SP/code/ui/ui_shared.c           | 176 +++++-
+ 12 files changed, 1208 insertions(+), 3 deletions(-)
+ create mode 100644 SP/code/cgame/cg_accessibility.c
+
+diff --git a/SP/Makefile b/SP/Makefile
+index 0268904..1313de1 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -2514,6 +2514,8 @@ endif
+ ETADIR=$(ETA_SOURCE_DIR)/src/accessibility
+ ETA_RELEASE_VERSION ?= dev
+ ETA_CFLAGS = -DFEATURE_ACCESSIBILITY -I$(ETADIR)
++# The engine has a few marked changes of its own: keys it would swallow.
++CLIENT_CFLAGS += -DFEATURE_ACCESSIBILITY
+ 
+ ETAOBJ = \
+   $(B)/eta/audio/audio_cue_system.o \
+@@ -2568,6 +2570,7 @@ endif
+ 
+ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/cgame/cg_main.o \
++  $(B)/$(BASEGAME)/cgame/cg_accessibility.o \
+   $(B)/$(BASEGAME)/cgame/bg_animation.o \
+   $(B)/$(BASEGAME)/cgame/bg_misc.o \
+   $(B)/$(BASEGAME)/cgame/bg_pmove.o \
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+new file mode 100644
+index 0000000..cb4df9b
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -0,0 +1,963 @@
++/*
++===========================================================================
++
++Return to Castle Wolfenstein single player: the accessibility mode.
++
++Built only with FEATURE_ACCESSIBILITY. What the game says while it is
++played, for a player who cannot see it: the weapon in hand and its
++ammunition, health, what was picked up, where a hit came from, the
++enemies in sight with where they are, and the story - the lines a level
++script hands over and its objective. The rest of the cgame calls in here
++from marked hooks; the words are the library's where it has them
++(src/accessibility), and the mod's own otherwise.
++
++Licensed with the rest of the iortcw single-player game code, GPL v3.
++
++===========================================================================
++*/
++
++#include "cg_local.h"
++
++#ifdef FEATURE_ACCESSIBILITY
++
++#include "core/accessibility_runtime.h"
++#include "hud/hud_narrator.h"
++#include "speech/speech_manager.h"
++#include "audio/audio_cue_system.h"
++
++/* The two AI teams that fight the player. The game keeps them in its own
++   ai_cast.h, which the cgame does not include. */
++#define ETA_AITEAM_NAZI     0
++#define ETA_AITEAM_MONSTER  2
++
++/* Game units per meter, as the mod says distances everywhere else: a
++   player is 72 units tall, about two meters. */
++#define ETA_UNITS_PER_METER 36.0f
++
++/* How far an enemy is still worth naming. Beyond this, in RTCW's long
++   outdoor levels, a soldier is a dot nobody could hit. */
++#define ETA_ENEMY_RANGE     2400.0f
++
++/* An enemy that has been out of sight this long is news again when it
++   comes back; shorter, and a soldier bobbing behind a crate would be
++   announced every time his head showed. */
++#define ETA_ENEMY_FORGET_MS 6000
++
++/* At most one sighting said in this time, the rest left to the enemies
++   key. A room of five soldiers is said as the first, then "and 4 more". */
++#define ETA_SIGHTING_GAP_MS 1200
++
++typedef struct {
++	int lastSeen;       /* cg.time it was last in sight, 0 never */
++	int announced;      /* cg.time it was last said */
++	int dead;
++} eta_enemy_t;
++
++typedef struct {
++	qboolean initialised;
++
++	int weapon;
++	int health;
++	int armor;
++	int ducked;
++	qboolean dead;
++	int clipAmmo;
++
++	int lastSighting;
++	int pendingSightings;
++
++	char lastLine[MAX_STRING_CHARS];
++	char lastObjective[MAX_STRING_CHARS];
++
++	/* aiming at the nearest enemy, with the keys a player would press */
++	qboolean aiming;
++	int aimTarget;
++	qboolean onTarget;
++
++	int lastEnemyCue;
++
++	sfxHandle_t cueEnemy;
++	sfxHandle_t cueOnTarget;
++	sfxHandle_t cueLowHealth;
++	sfxHandle_t cueObjective;
++	sfxHandle_t cueHit;
++} eta_game_t;
++
++static eta_game_t eta;
++static eta_enemy_t eta_enemies[MAX_GENTITIES];
++
++/*
++=================
++Speech
++=================
++*/
++
++/*
++ * Each line said replaces the one still being spoken - the SAPI backend
++ * purges before it speaks - so a story line is protected: until it has
++ * had time to be heard, what the game says on its own (an enemy coming
++ * into sight, the facing, health) waits or is dropped. What the player
++ * asks for with a key, and death, are always said at once.
++ */
++static int eta_storyUntil;
++
++static void CG_AccessibilitySay( const char *text ) {
++	if ( text && text[0] && cg.time >= eta_storyUntil ) {
++		ETA_Speech_Say( text );
++	}
++}
++
++static void CG_AccessibilitySayNow( const char *text ) {
++	if ( text && text[0] ) {
++		eta_storyUntil = 0;
++		ETA_Speech_Say( text );
++	}
++}
++
++static void CG_AccessibilitySayStory( const char *text ) {
++	if ( text && text[0] ) {
++		ETA_Speech_Say( text );
++		eta_storyUntil = cg.time + ETA_Speech_EstimateDurationMs( text );
++	}
++}
++
++static int CG_AccessibilityCvarInt( const char *name ) {
++	char value[16];
++
++	trap_Cvar_VariableStringBuffer( name, value, sizeof( value ) );
++	return atoi( value );
++}
++
++/*
++=================
++Words for things
++=================
++*/
++
++/* A weapon by the name the game gives its pickup. */
++static const char *CG_AccessibilityWeaponName( int weapon ) {
++	gitem_t *item;
++
++	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
++		return "no weapon";
++	}
++	item = BG_FindItemForWeapon( weapon );
++	if ( item && item->pickup_name && item->pickup_name[0] ) {
++		return item->pickup_name;
++	}
++	return "weapon";
++}
++
++/* The ammunition of the weapon in hand, as the HUD draws it: what is
++   loaded and what is left to load. */
++static void CG_AccessibilityAmmo( int weapon, int *loaded, int *reserve ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	*loaded = -1;
++	*reserve = -1;
++	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
++		return;
++	}
++	switch ( weapon ) {
++	case WP_KNIFE:
++		return;
++	default:
++		break;
++	}
++	/* RTCW keeps both in arrays of their own, under the same index. */
++	*loaded = ps->ammoclip[BG_FindClipForWeapon( weapon )];
++	*reserve = ps->ammo[BG_FindAmmoForWeapon( weapon )];
++}
++
++/* An enemy as the player would name him. */
++static const char *CG_AccessibilityEnemyName( const centity_t *cent ) {
++	switch ( cent->currentState.aiChar ) {
++	case AICHAR_SOLDIER:        return "Soldier";
++	case AICHAR_AMERICAN:       return "American";
++	case AICHAR_ZOMBIE:         return "Zombie";
++	case AICHAR_WARZOMBIE:      return "War zombie";
++	case AICHAR_VENOM:          return "Venom soldier";
++	case AICHAR_LOPER:          return "Loper";
++	case AICHAR_ELITEGUARD:     return "Elite guard";
++	case AICHAR_STIMSOLDIER1:
++	case AICHAR_STIMSOLDIER2:
++	case AICHAR_STIMSOLDIER3:   return "Super soldier";
++	case AICHAR_SUPERSOLDIER:   return "Super soldier";
++	case AICHAR_BLACKGUARD:     return "Black guard";
++	case AICHAR_PROTOSOLDIER:   return "Proto soldier";
++	case AICHAR_FROGMAN:        return "Frogman";
++	case AICHAR_HELGA:          return "Helga";
++	case AICHAR_HEINRICH:       return "Heinrich";
++	case AICHAR_PARTISAN:       return "Partisan";
++	case AICHAR_CIVILIAN:       return "Civilian";
++	default:                    return "Enemy";
++	}
++}
++
++/*
++ * Where a point is from the player, in the words the mod uses
++ * everywhere: "ahead", "ahead left", "left", "behind left" and so on,
++ * relative to where the player is facing, with the distance in meters.
++ */
++static const char *CG_AccessibilityDirection( const vec3_t point, int *meters ) {
++	static const char *sectors[8] = {
++		"ahead", "ahead left", "left", "behind left",
++		"behind", "behind right", "right", "ahead right"
++	};
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t delta;
++	float relative;
++	int sector;
++
++	VectorSubtract( point, ps->origin, delta );
++	if ( meters ) {
++		*meters = (int)( VectorLength( delta ) / ETA_UNITS_PER_METER + 0.5f );
++	}
++	relative = AngleNormalize360( vectoyaw( delta ) - ps->viewangles[YAW] );
++	sector = (int)( ( relative + 22.5f ) / 45.0f ) & 7;
++
++	return sectors[sector];
++}
++
++/* "above" or "below" when a thing is well off the player's level. */
++static const char *CG_AccessibilityHeight( const vec3_t point ) {
++	float dz = point[2] - cg.predictedPlayerState.origin[2];
++
++	if ( dz > 96.0f ) {
++		return ", above";
++	}
++	if ( dz < -96.0f ) {
++		return ", below";
++	}
++	return "";
++}
++
++/*
++=================
++Enemies
++=================
++*/
++
++static qboolean CG_AccessibilityIsEnemy( const centity_t *cent ) {
++	const entityState_t *s = &cent->currentState;
++
++	if ( !cent->currentValid || s->eType != ET_PLAYER ) {
++		return qfalse;
++	}
++	if ( s->number == cg.snap->ps.clientNum ) {
++		return qfalse;
++	}
++	if ( s->eFlags & EF_DEAD ) {
++		return qfalse;
++	}
++	return ( s->teamNum == ETA_AITEAM_NAZI || s->teamNum == ETA_AITEAM_MONSTER ) ? qtrue : qfalse;
++}
++
++/* The middle of an enemy's chest, which is where the aim goes. */
++static void CG_AccessibilityEnemyChest( const centity_t *cent, vec3_t chest ) {
++	VectorCopy( cent->lerpOrigin, chest );
++	chest[2] += ( cent->currentState.eFlags & EF_CROUCHING ) ? 12.0f : 32.0f;
++}
++
++/* Can the player see him: a clear line from the eyes to his chest. */
++static qboolean CG_AccessibilityInSight( const centity_t *cent ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t eye, chest;
++	trace_t tr;
++
++	VectorCopy( ps->origin, eye );
++	eye[2] += ps->viewheight;
++	CG_AccessibilityEnemyChest( cent, chest );
++
++	if ( Distance( eye, chest ) > ETA_ENEMY_RANGE ) {
++		return qfalse;
++	}
++	CG_Trace( &tr, eye, NULL, NULL, chest, ps->clientNum, MASK_SHOT );
++	return ( tr.fraction >= 1.0f || tr.entityNum == cent->currentState.number ) ? qtrue : qfalse;
++}
++
++/* The nearest enemy in sight, or -1. */
++static int CG_AccessibilityNearestEnemy( void ) {
++	int i, best = -1;
++	float bestDist = 0;
++
++	for ( i = 0; i < cg.snap->numEntities; i++ ) {
++		centity_t *cent = &cg_entities[cg.snap->entities[i].number];
++		float dist;
++
++		if ( !CG_AccessibilityIsEnemy( cent ) || !CG_AccessibilityInSight( cent ) ) {
++			continue;
++		}
++		dist = Distance( cent->lerpOrigin, cg.predictedPlayerState.origin );
++		if ( best < 0 || dist < bestDist ) {
++			best = cent->currentState.number;
++			bestDist = dist;
++		}
++	}
++	return best;
++}
++
++static void CG_AccessibilitySayEnemy( const centity_t *cent, const char *prefix ) {
++	int meters;
++	const char *where = CG_AccessibilityDirection( cent->lerpOrigin, &meters );
++
++	CG_AccessibilitySay( va( "%s%s, %s, %i %s%s", prefix, CG_AccessibilityEnemyName( cent ), where,
++							 meters, meters == 1 ? "meter" : "meters", CG_AccessibilityHeight( cent->lerpOrigin ) ) );
++}
++
++/*
++ * Enemies coming into sight, said once each, and a tick from the
++ * nearest one so its place can be heard. A sighted player sees a soldier
++ * step out; this is that moment, and the tick is where to point.
++ */
++static void CG_AccessibilityEnemiesFrame( void ) {
++	int i, nearest = -1;
++	float nearestDist = 0;
++
++	for ( i = 0; i < cg.snap->numEntities; i++ ) {
++		int num = cg.snap->entities[i].number;
++		centity_t *cent = &cg_entities[num];
++		eta_enemy_t *seen = &eta_enemies[num];
++		float dist;
++
++		/* One the player has seen, falling: the shot landed. */
++		if ( cent->currentState.eType == ET_PLAYER && ( cent->currentState.eFlags & EF_DEAD ) ) {
++			if ( seen->lastSeen && !seen->dead ) {
++				seen->dead = 1;
++				CG_AccessibilitySayNow( va( "%s down", CG_AccessibilityEnemyName( cent ) ) );
++			}
++			continue;
++		}
++		if ( seen->dead ) {
++			/* A slot reused, or a body raised: someone new. */
++			memset( seen, 0, sizeof( *seen ) );
++		}
++
++		if ( !CG_AccessibilityIsEnemy( cent ) ) {
++			continue;
++		}
++		if ( !CG_AccessibilityInSight( cent ) ) {
++			continue;
++		}
++
++		if ( !seen->lastSeen || cg.time - seen->lastSeen > ETA_ENEMY_FORGET_MS ) {
++			if ( cg.time - eta.lastSighting >= ETA_SIGHTING_GAP_MS ) {
++				CG_AccessibilitySayEnemy( cent, "" );
++				eta.lastSighting = cg.time;
++				seen->announced = cg.time;
++			} else {
++				eta.pendingSightings++;
++			}
++		}
++		seen->lastSeen = cg.time;
++
++		dist = Distance( cent->lerpOrigin, cg.predictedPlayerState.origin );
++		if ( nearest < 0 || dist < nearestDist ) {
++			nearest = num;
++			nearestDist = dist;
++		}
++	}
++
++	if ( eta.pendingSightings && cg.time - eta.lastSighting >= ETA_SIGHTING_GAP_MS ) {
++		CG_AccessibilitySay( va( "and %i more", eta.pendingSightings ) );
++		eta.pendingSightings = 0;
++		eta.lastSighting = cg.time;
++	}
++
++	/* The tick: faster the closer he is, from his own position, so the
++	   engine's 3D sound puts it where he stands. */
++	if ( nearest >= 0 && eta.cueEnemy && CG_AccessibilityCvarInt( "eta_enemyCue" ) ) {
++		int gap = 300 + (int)( nearestDist / 4.0f );
++
++		if ( gap > 1200 ) {
++			gap = 1200;
++		}
++		if ( cg.time - eta.lastEnemyCue >= gap ) {
++			vec3_t chest;
++
++			CG_AccessibilityEnemyChest( &cg_entities[nearest], chest );
++			trap_S_StartSound( chest, ENTITYNUM_WORLD, CHAN_AUTO, eta.cueEnemy );
++			eta.lastEnemyCue = cg.time;
++		}
++	}
++}
++
++/*
++=================
++Aim
++
++Nothing here can write the view angles: that is the client's, and this
++is the cgame. What it can do is what a player can - press the engine's
++own +left, +right, +lookup and +lookdown - and let go at the right
++moment. They are pressed under key numbers no keyboard has, so a
++player's own keys on the same buttons are never released by this, as
++the ET mode's turning does.
++=================
++*/
++
++#define ETA_KEY_LEFT    "998"
++#define ETA_KEY_RIGHT   "999"
++#define ETA_KEY_UP      "996"
++#define ETA_KEY_DOWN    "995"
++
++static int eta_aimYaw, eta_aimPitch;
++
++static void CG_AccessibilityAimKeys( int yaw, int pitch ) {
++	if ( yaw != eta_aimYaw ) {
++		if ( eta_aimYaw ) {
++			trap_SendConsoleCommand( va( "-%s %s\n", eta_aimYaw < 0 ? "left" : "right", eta_aimYaw < 0 ? ETA_KEY_LEFT : ETA_KEY_RIGHT ) );
++		}
++		if ( yaw ) {
++			trap_SendConsoleCommand( va( "+%s %s\n", yaw < 0 ? "left" : "right", yaw < 0 ? ETA_KEY_LEFT : ETA_KEY_RIGHT ) );
++		}
++		eta_aimYaw = yaw;
++	}
++	if ( pitch != eta_aimPitch ) {
++		if ( eta_aimPitch ) {
++			trap_SendConsoleCommand( va( "-%s %s\n", eta_aimPitch < 0 ? "lookup" : "lookdown", eta_aimPitch < 0 ? ETA_KEY_UP : ETA_KEY_DOWN ) );
++		}
++		if ( pitch ) {
++			trap_SendConsoleCommand( va( "+%s %s\n", pitch < 0 ? "lookup" : "lookdown", pitch < 0 ? ETA_KEY_UP : ETA_KEY_DOWN ) );
++		}
++		eta_aimPitch = pitch;
++	}
++}
++
++static void CG_AccessibilityAimStop( void ) {
++	CG_AccessibilityAimKeys( 0, 0 );
++	eta.aiming = qfalse;
++	eta.aimTarget = -1;
++	eta.onTarget = qfalse;
++}
++
++/*
++ * One frame of turning toward the target. Turning right lowers the yaw
++ * and looking down raises the pitch - the engine's own sense, in
++ * CL_AdjustAngles.
++ */
++static void CG_AccessibilityAimFrame( void ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++	centity_t *cent;
++	vec3_t eye, chest, delta, wanted;
++	float yawError, pitchError, deadzone;
++	int yaw = 0, pitch = 0;
++
++	if ( !eta.aiming ) {
++		return;
++	}
++
++	/* Keep the target while he is alive and in sight; then the next. */
++	if ( eta.aimTarget < 0 || !CG_AccessibilityIsEnemy( &cg_entities[eta.aimTarget] )
++		 || !CG_AccessibilityInSight( &cg_entities[eta.aimTarget] ) ) {
++		int next = CG_AccessibilityNearestEnemy();
++
++		if ( next < 0 ) {
++			CG_AccessibilityAimKeys( 0, 0 );
++			if ( eta.aimTarget >= 0 || eta.onTarget ) {
++				CG_AccessibilitySayNow( "No enemy in sight" );
++			}
++			eta.aimTarget = -1;
++			eta.onTarget = qfalse;
++			return;
++		}
++		eta.aimTarget = next;
++		eta.onTarget = qfalse;
++	}
++
++	cent = &cg_entities[eta.aimTarget];
++	VectorCopy( ps->origin, eye );
++	eye[2] += ps->viewheight;
++	CG_AccessibilityEnemyChest( cent, chest );
++	VectorSubtract( chest, eye, delta );
++	vectoangles( delta, wanted );
++
++	yawError = AngleSubtract( wanted[YAW], ps->viewangles[YAW] );
++	pitchError = AngleSubtract( wanted[PITCH], ps->viewangles[PITCH] );
++
++	/* Within a third of the target's width at that range is on him. */
++	deadzone = RAD2DEG( atan2( 6.0f, VectorLength( delta ) ) );
++	if ( deadzone < 1.0f ) {
++		deadzone = 1.0f;
++	}
++
++	if ( fabs( yawError ) > deadzone ) {
++		yaw = yawError > 0.0f ? -1 : 1;
++	}
++	if ( fabs( pitchError ) > deadzone ) {
++		pitch = pitchError > 0.0f ? 1 : -1;
++	}
++	CG_AccessibilityAimKeys( yaw, pitch );
++
++	if ( !yaw && !pitch && !eta.onTarget ) {
++		eta.onTarget = qtrue;
++		if ( eta.cueOnTarget ) {
++			trap_S_StartLocalSound( eta.cueOnTarget, CHAN_LOCAL_SOUND );
++		}
++	} else if ( ( yaw || pitch ) && eta.onTarget && ( fabs( yawError ) > deadzone * 3 || fabs( pitchError ) > deadzone * 3 ) ) {
++		eta.onTarget = qfalse;
++	}
++}
++
++static void CG_AccessibilityAimDown_f( void ) {
++	int target = CG_AccessibilityNearestEnemy();
++
++	if ( target < 0 ) {
++		CG_AccessibilitySayNow( "No enemy in sight" );
++		return;
++	}
++	eta.aiming = qtrue;
++	eta.aimTarget = target;
++	eta.onTarget = qfalse;
++	CG_AccessibilitySayEnemy( &cg_entities[target], "Aiming at " );
++}
++
++static void CG_AccessibilityAimUp_f( void ) {
++	CG_AccessibilityAimStop();
++}
++
++/*
++=================
++Keys
++=================
++*/
++
++static void CG_AccessibilityStatus_f( void ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int loaded, reserve;
++	char text[512];
++
++	if ( !cg.snap ) {
++		return;
++	}
++
++	Com_sprintf( text, sizeof( text ), "Health %i", ps->stats[STAT_HEALTH] > 0 ? ps->stats[STAT_HEALTH] : 0 );
++	if ( ps->stats[STAT_ARMOR] > 0 ) {
++		Q_strcat( text, sizeof( text ), va( ", armor %i", ps->stats[STAT_ARMOR] ) );
++	}
++	Q_strcat( text, sizeof( text ), va( ". %s", CG_AccessibilityWeaponName( ps->weapon ) ) );
++	CG_AccessibilityAmmo( ps->weapon, &loaded, &reserve );
++	if ( loaded >= 0 ) {
++		Q_strcat( text, sizeof( text ), va( ", %i loaded", loaded ) );
++		if ( reserve >= 0 ) {
++			Q_strcat( text, sizeof( text ), va( ", %i spare", reserve ) );
++		}
++	}
++	Q_strcat( text, sizeof( text ), va( ". Facing %s", ETA_HudNarrator_FacingName( ETA_HudNarrator_FacingFromYaw( ps->viewangles[YAW] ) ) ) );
++
++	CG_AccessibilitySayNow( text );
++}
++
++/* Every enemy in sight, nearest first, up to five. */
++static void CG_AccessibilityEnemies_f( void ) {
++	int order[MAX_GENTITIES];
++	float dist[MAX_GENTITIES];
++	int count = 0, i, j;
++
++	if ( !cg.snap ) {
++		return;
++	}
++
++	for ( i = 0; i < cg.snap->numEntities; i++ ) {
++		centity_t *cent = &cg_entities[cg.snap->entities[i].number];
++		float d;
++
++		if ( !CG_AccessibilityIsEnemy( cent ) || !CG_AccessibilityInSight( cent ) ) {
++			continue;
++		}
++		d = Distance( cent->lerpOrigin, cg.predictedPlayerState.origin );
++		for ( j = count; j > 0 && dist[j - 1] > d; j-- ) {
++			order[j] = order[j - 1];
++			dist[j] = dist[j - 1];
++		}
++		order[j] = cent->currentState.number;
++		dist[j] = d;
++		count++;
++	}
++
++	if ( !count ) {
++		CG_AccessibilitySayNow( "No enemies in sight" );
++		return;
++	}
++
++	eta_storyUntil = 0;
++	ETA_Speech_BeginReport();
++	CG_AccessibilitySay( va( "%i %s in sight", count, count == 1 ? "enemy" : "enemies" ) );
++	for ( i = 0; i < count && i < 5; i++ ) {
++		CG_AccessibilitySayEnemy( &cg_entities[order[i]], "" );
++	}
++	ETA_Speech_EndReport();
++}
++
++/* The objective the level's script last set, said again. */
++static void CG_AccessibilityObjective_f( void ) {
++	char objective[MAX_STRING_CHARS];
++
++	trap_Cvar_VariableStringBuffer( "eta_objective", objective, sizeof( objective ) );
++	if ( !objective[0] ) {
++		CG_AccessibilitySayNow( "No objective given. The notebook, on N, has this level's orders" );
++		return;
++	}
++	CG_AccessibilitySayNow( va( "Objective: %s", objective ) );
++}
++
++/* The last story line, again. */
++static void CG_AccessibilityStory_f( void ) {
++	if ( !eta.lastLine[0] ) {
++		CG_AccessibilitySayNow( "Nothing said yet" );
++		return;
++	}
++	CG_AccessibilitySayNow( eta.lastLine );
++}
++
++static void CG_AccessibilityRepeat_f( void ) {
++	/* With a menu up mid-level, the menu's own item is what to repeat;
++	   the ui answers under the other name. */
++	if ( trap_Key_GetCatcher() & KEYCATCH_UI ) {
++		trap_SendConsoleCommand( "accessibilityRepeatMenuItem\n" );
++		return;
++	}
++	ETA_Speech_RepeatLast();
++}
++
++static void CG_AccessibilityStop_f( void ) {
++	if ( trap_Key_GetCatcher() & KEYCATCH_UI ) {
++		trap_SendConsoleCommand( "accessibilityStopSpeechMenu\n" );
++		return;
++	}
++	eta_storyUntil = 0;
++	ETA_Speech_Stop();
++}
++
++/* For checking the enemy finder on a build machine: every character in
++   the snapshot, printed. */
++static void CG_AccessibilityDebug_f( void ) {
++	int i;
++
++	if ( !cg.snap ) {
++		return;
++	}
++	CG_Printf( "%i entities in snapshot\n", cg.snap->numEntities );
++	for ( i = 0; i < cg.snap->numEntities; i++ ) {
++		centity_t *cent = &cg_entities[cg.snap->entities[i].number];
++
++		if ( cent->currentState.eType != ET_PLAYER ) {
++			CG_Printf( "  %i: type %i\n", cent->currentState.number, cent->currentState.eType );
++			continue;
++		}
++		CG_Printf( "  %i: aiChar %i team %i flags %x valid %i sight %i dist %i\n", cent->currentState.number,
++				   cent->currentState.aiChar, cent->currentState.teamNum, cent->currentState.eFlags,
++				   cent->currentValid, CG_AccessibilityInSight( cent ),
++				   (int)Distance( cent->lerpOrigin, cg.predictedPlayerState.origin ) );
++	}
++}
++
++typedef struct {
++	char *cmd;
++	void ( *function )( void );
++} eta_command_t;
++
++static const eta_command_t eta_commands[] = {
++	{ "accessibilityRepeat",     CG_AccessibilityRepeat_f },
++	{ "accessibilityStopSpeech", CG_AccessibilityStop_f },
++	{ "accessibilityStatus",     CG_AccessibilityStatus_f },
++	{ "accessibilityEnemies",    CG_AccessibilityEnemies_f },
++	{ "accessibilityObjective",  CG_AccessibilityObjective_f },
++	{ "accessibilityStory",      CG_AccessibilityStory_f },
++	{ "accessibilityDebug",      CG_AccessibilityDebug_f },
++	{ "+accessibilityAim",       CG_AccessibilityAimDown_f },
++	{ "-accessibilityAim",       CG_AccessibilityAimUp_f },
++};
++
++qboolean CG_AccessibilityConsoleCommand( const char *cmd ) {
++	int i;
++
++	for ( i = 0; i < ARRAY_LEN( eta_commands ); i++ ) {
++		if ( !Q_stricmp( cmd, eta_commands[i].cmd ) ) {
++			eta_commands[i].function();
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++void CG_AccessibilityAddCommands( void ) {
++	int i;
++
++	for ( i = 0; i < ARRAY_LEN( eta_commands ); i++ ) {
++		trap_AddCommand( eta_commands[i].cmd );
++	}
++}
++
++/*
++=================
++Events from the rest of the cgame
++=================
++*/
++
++/* What was picked up, said by its name, with what it gave. */
++void CG_AccessibilityItemPickup( int itemNum ) {
++	gitem_t *item;
++
++	if ( itemNum <= 0 || itemNum >= bg_numItems ) {
++		return;
++	}
++	item = &bg_itemlist[itemNum];
++	if ( !item->pickup_name || !item->pickup_name[0] ) {
++		return;
++	}
++	CG_AccessibilitySay( va( "Picked up %s", item->pickup_name ) );
++}
++
++/* A hit: its side, by the cue the library plays for it. front and left
++   are the damage indicator's own, the direction the hit came from. */
++void CG_AccessibilityDamage( float front, float left ) {
++	int degrees = (int)RAD2DEG( atan2( -left, front ) );
++
++	if ( degrees < 0 ) {
++		degrees += 360;
++	}
++	ETA_AudioCueSystem_PlayDamageDirectionCue( degrees );
++}
++
++/* A center print is a message the level gives the player; it is said. */
++void CG_AccessibilityCenterPrint( const char *text ) {
++	char clean[MAX_STRING_CHARS];
++	char *c;
++
++	Q_strncpyz( clean, text, sizeof( clean ) );
++	for ( c = clean; *c; c++ ) {
++		if ( *c == '\n' ) {
++			*c = ' ';
++		}
++	}
++	Q_CleanStr( clean );
++	CG_AccessibilitySay( clean );
++}
++
++/* The notebook gained a page: new orders. */
++void CG_AccessibilityNotebookPage( void ) {
++	CG_AccessibilitySay( "New notebook entry. N opens the notebook" );
++}
++
++/*
++=================
++Story
++
++A level built for this mode tells its story through two cvars its
++scripts set with the "cvar" action: eta_line, a line to say, and
++eta_objective, the current objective. Each is said when it changes. A
++line may name a recorded voice too - "sound/... | the words" - which is
++played, with the words spoken only when eta_storyVoice is 0.
++=================
++*/
++
++static void CG_AccessibilityStoryFrame( void ) {
++	char line[MAX_STRING_CHARS];
++	char objective[MAX_STRING_CHARS];
++
++	trap_Cvar_VariableStringBuffer( "eta_line", line, sizeof( line ) );
++	if ( line[0] && strcmp( line, eta.lastLine ) ) {
++		char *bar = strchr( line, '|' );
++		const char *words = line;
++
++		Q_strncpyz( eta.lastLine, line, sizeof( eta.lastLine ) );
++		if ( bar ) {
++			char sound[MAX_QPATH];
++			int length = (int)( bar - line );
++
++			if ( length >= (int)sizeof( sound ) ) {
++				length = sizeof( sound ) - 1;
++			}
++			memcpy( sound, line, length );
++			sound[length] = '\0';
++			while ( length > 0 && sound[length - 1] == ' ' ) {
++				sound[--length] = '\0';
++			}
++			words = bar + 1;
++			while ( *words == ' ' ) {
++				words++;
++			}
++			Q_strncpyz( eta.lastLine, words, sizeof( eta.lastLine ) );
++			if ( sound[0] && CG_AccessibilityCvarInt( "eta_storyVoice" ) ) {
++				trap_S_StartLocalSound( trap_S_RegisterSound( sound ), CHAN_ANNOUNCER );
++				words = NULL;
++			}
++		}
++		if ( words ) {
++			CG_AccessibilitySayStory( words );
++		}
++	}
++
++	/* An objective set with a line waits for the line to be heard. */
++	if ( cg.time < eta_storyUntil ) {
++		return;
++	}
++	trap_Cvar_VariableStringBuffer( "eta_objective", objective, sizeof( objective ) );
++	if ( strcmp( objective, eta.lastObjective ) ) {
++		Q_strncpyz( eta.lastObjective, objective, sizeof( eta.lastObjective ) );
++		if ( objective[0] ) {
++			if ( eta.cueObjective ) {
++				trap_S_StartLocalSound( eta.cueObjective, CHAN_LOCAL_SOUND );
++			}
++			CG_AccessibilitySayStory( va( "New objective: %s", objective ) );
++		}
++	}
++}
++
++/*
++=================
++The frame
++=================
++*/
++
++static void CG_AccessibilityPlayerFrame( void ) {
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int health = ps->stats[STAT_HEALTH];
++	int ducked = ( ps->pm_flags & PMF_DUCKED ) ? 1 : 0;
++	qboolean dead = ( health <= 0 || ps->pm_type == PM_DEAD ) ? qtrue : qfalse;
++	ETA_Facing facing;
++
++	if ( !eta.initialised ) {
++		eta.weapon = ps->weapon;
++		eta.health = health;
++		eta.armor = ps->stats[STAT_ARMOR];
++		eta.ducked = ducked;
++		eta.dead = dead;
++		eta.initialised = qtrue;
++		return;
++	}
++
++	if ( dead != eta.dead ) {
++		eta.dead = dead;
++		if ( dead ) {
++			CG_AccessibilityAimStop();
++			CG_AccessibilitySayNow( "You died. Fire to load the last save" );
++			return;
++		}
++	}
++	if ( dead ) {
++		return;
++	}
++
++	if ( ps->weapon != eta.weapon ) {
++		int loaded, reserve;
++
++		eta.weapon = ps->weapon;
++		CG_AccessibilityAmmo( ps->weapon, &loaded, &reserve );
++		if ( loaded >= 0 ) {
++			CG_AccessibilitySay( va( "%s, %i%s", CG_AccessibilityWeaponName( ps->weapon ), loaded,
++									 reserve >= 0 ? va( ", %i spare", reserve ) : "" ) );
++		} else {
++			CG_AccessibilitySay( CG_AccessibilityWeaponName( ps->weapon ) );
++		}
++	}
++
++	/* Health: a pickup says what it gave; a loss is said at each quarter
++	   crossed, and under a quarter the library's low-health cue. */
++	if ( health > eta.health ) {
++		CG_AccessibilitySay( va( "Health %i", health ) );
++	} else if ( health < eta.health ) {
++		if ( health / 25 < eta.health / 25 ) {
++			CG_AccessibilitySay( va( "Health %i", health ) );
++		}
++		if ( health < 25 ) {
++			ETA_AudioCueSystem_PlayLowHealthCue();
++		}
++	}
++	eta.health = health;
++
++	if ( ps->stats[STAT_ARMOR] > eta.armor ) {
++		CG_AccessibilitySay( va( "Armor %i", ps->stats[STAT_ARMOR] ) );
++	}
++	eta.armor = ps->stats[STAT_ARMOR];
++
++	if ( ducked != eta.ducked ) {
++		eta.ducked = ducked;
++		ETA_HudNarrator_SpeakStance( ducked ? ETA_STANCE_CROUCHED : ETA_STANCE_STANDING );
++	}
++
++	/* While the aim turns the view, where it points is the enemy; the
++	   compass would talk over the shots. */
++	if ( ETA_HudNarrator_UpdateFacing( ps->viewangles[YAW], cg.time, &facing ) && !eta.aiming ) {
++		ETA_HudNarrator_SpeakFacing( facing );
++	}
++}
++
++void CG_AccessibilityFrame( void ) {
++	if ( !cg.snap || cg.cameraMode ) {
++		return;
++	}
++	CG_AccessibilityStoryFrame();
++	CG_AccessibilityPlayerFrame();
++	if ( !eta.dead ) {
++		CG_AccessibilityEnemiesFrame();
++		CG_AccessibilityAimFrame();
++	}
++}
++
++/*
++=================
++Start and end of a level
++=================
++*/
++
++/* The library's cues through the game's own sound: a hit from its side
++   is a hit sound panned there. */
++static void CG_AccessibilityCueBackend( ETA_AudioCueType type, int directionDegrees, int hasDirection, void *userData ) {
++	(void)userData;
++
++	switch ( type ) {
++	case ETA_AUDIO_CUE_LOW_HEALTH:
++		if ( eta.cueLowHealth ) {
++			trap_S_StartLocalSound( eta.cueLowHealth, CHAN_LOCAL_SOUND );
++		}
++		break;
++	case ETA_AUDIO_CUE_DAMAGE_DIRECTION:
++		if ( eta.cueHit && hasDirection ) {
++			vec3_t angles, forward, point;
++
++			/* 0 ahead and 90 right, where the engine's yaw grows to the left. */
++			VectorSet( angles, 0, cg.predictedPlayerState.viewangles[YAW] - directionDegrees, 0 );
++			AngleVectors( angles, forward, NULL, NULL );
++			VectorMA( cg.predictedPlayerState.origin, 64.0f, forward, point );
++			trap_S_StartSound( point, ENTITYNUM_WORLD, CHAN_AUTO, eta.cueHit );
++		}
++		break;
++	default:
++		break;
++	}
++}
++
++void CG_AccessibilityInit( void ) {
++	memset( &eta, 0, sizeof( eta ) );
++	eta_storyUntil = 0;
++	memset( eta_enemies, 0, sizeof( eta_enemies ) );
++	eta.aimTarget = -1;
++
++	ETA_AccessibilityRuntime_Init();
++	ETA_HudNarrator_Init();
++	ETA_HudNarrator_ResetFacing();
++	ETA_AudioCueSystem_Init();
++	ETA_AudioCueSystem_SetBackend( CG_AccessibilityCueBackend, NULL );
++
++	trap_Cvar_Register( NULL, "eta_enemyCue", "1", CVAR_ARCHIVE );
++	trap_Cvar_Register( NULL, "eta_storyVoice", "1", CVAR_ARCHIVE );
++	/* Story state from the last level is not this one's. */
++	trap_Cvar_Set( "eta_line", "" );
++
++	eta.cueEnemy = trap_S_RegisterSound( "sound/accessibility/crosshair_enemy.wav" );
++	eta.cueOnTarget = trap_S_RegisterSound( "sound/accessibility/marker_beacon.wav" );
++	eta.cueObjective = trap_S_RegisterSound( "sound/accessibility/flag_capture.wav" );
++	eta.cueLowHealth = cgs.media.noAmmoSound;
++	eta.cueHit = trap_S_RegisterSound( "sound/accessibility/bump_object.wav" );
++
++	CG_AccessibilitySay( "Level loaded" );
++}
++
++void CG_AccessibilityShutdown( void ) {
++	CG_AccessibilityAimStop();
++	ETA_AudioCueSystem_Shutdown();
++	ETA_AccessibilityRuntime_Shutdown();
++}
++
++#endif // FEATURE_ACCESSIBILITY
+diff --git a/SP/code/cgame/cg_consolecmds.c b/SP/code/cgame/cg_consolecmds.c
+index 7f940a9..c242a6a 100644
+--- a/SP/code/cgame/cg_consolecmds.c
++++ b/SP/code/cgame/cg_consolecmds.c
+@@ -439,6 +439,12 @@ qboolean CG_ConsoleCommand( void ) {
+ 
+ 	cmd = CG_Argv( 0 );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	if ( CG_AccessibilityConsoleCommand( cmd ) ) {
++		return qtrue;
++	}
++#endif
++
+ 	for ( i = 0 ; i < ARRAY_LEN( commands ) ; i++ ) {
+ 		if ( !Q_stricmp( cmd, commands[i].cmd ) ) {
+ 			commands[i].function();
+@@ -465,6 +471,10 @@ void CG_InitConsoleCommands( void ) {
+ 		trap_AddCommand( commands[i].cmd );
+ 	}
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityAddCommands();
++#endif
++
+ 	//
+ 	// the game server will interpret these commands, which will be automatically
+ 	// forwarded to the server after they are not recognized locally
+diff --git a/SP/code/cgame/cg_draw.c b/SP/code/cgame/cg_draw.c
+index 0801786..d1fd6e1 100644
+--- a/SP/code/cgame/cg_draw.c
++++ b/SP/code/cgame/cg_draw.c
+@@ -1964,6 +1964,10 @@ void CG_CenterPrint( const char *str, int y, int charWidth ) {
+ 		}
+ 		s++;
+ 	}
++
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityCenterPrint( cg.centerPrint );
++#endif
+ }
+ 
+ 
+diff --git a/SP/code/cgame/cg_event.c b/SP/code/cgame/cg_event.c
+index 3f33ee7..ab37f4d 100644
+--- a/SP/code/cgame/cg_event.c
++++ b/SP/code/cgame/cg_event.c
+@@ -1888,6 +1888,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
+ 			// show icon and name on status bar
+ 			if ( es->number == cg.snap->ps.clientNum ) {
+ 				CG_ItemPickup( index );
++#ifdef FEATURE_ACCESSIBILITY
++				CG_AccessibilityItemPickup( index );
++#endif
+ 			}
+ 
+ //----(SA)	draw the HUD items for a sec since this is a special item
+@@ -2281,6 +2284,9 @@ void CG_EntityEvent( centity_t *cent, vec3_t position ) {
+ 		havepages |= es->eventParm;
+ 		trap_Cvar_Set( "cg_notebookpages", va( "%d", havepages ) );  // store new current page name for the ui to pick up
+ 		trap_Cvar_Set( "cg_youGotMail", "1" );  //----(SA)	added
++#ifdef FEATURE_ACCESSIBILITY
++		CG_AccessibilityNotebookPage();
++#endif
+ 	}
+ 	break;
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index b3e3997..7526d3a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -1822,6 +1822,21 @@ void CG_ZoomUp_f( void );
+ 
+ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demoPlayback );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++//
++// cg_accessibility.c
++//
++void CG_AccessibilityInit( void );
++void CG_AccessibilityShutdown( void );
++void CG_AccessibilityFrame( void );
++qboolean CG_AccessibilityConsoleCommand( const char *cmd );
++void CG_AccessibilityAddCommands( void );
++void CG_AccessibilityItemPickup( int itemNum );
++void CG_AccessibilityDamage( float front, float left );
++void CG_AccessibilityCenterPrint( const char *text );
++void CG_AccessibilityNotebookPage( void );
++#endif
++
+ void CG_Concussive( centity_t *cent );
+ 
+ //
+diff --git a/SP/code/cgame/cg_main.c b/SP/code/cgame/cg_main.c
+index 13362af..213504a 100644
+--- a/SP/code/cgame/cg_main.c
++++ b/SP/code/cgame/cg_main.c
+@@ -2418,6 +2418,10 @@ void CG_Init( int serverMessageNum, int serverCommandSequence ) {
+ 	}
+ 	// jpw
+ 	// -NERVE - SMF
++
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityInit();
++#endif
+ }
+ 
+ /*
+@@ -2430,6 +2434,9 @@ Called before every level change or subsystem restart
+ void CG_Shutdown( void ) {
+ 	// some mods may need to do cleanup work here,
+ 	// like closing files or archiving session data
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityShutdown();
++#endif
+ }
+ 
+ void CG_S_AddLoopingSound( int entityNum, const vec3_t origin, const vec3_t velocity, sfxHandle_t sfx, int volume ) {
+diff --git a/SP/code/cgame/cg_playerstate.c b/SP/code/cgame/cg_playerstate.c
+index d60519b..1005530 100644
+--- a/SP/code/cgame/cg_playerstate.c
++++ b/SP/code/cgame/cg_playerstate.c
+@@ -190,6 +190,10 @@ void CG_DamageFeedback( int yawByte, int pitchByte, int damage ) {
+ 
+ 		cg.v_dmg_roll = kick * left;
+ 
++#ifdef FEATURE_ACCESSIBILITY
++		CG_AccessibilityDamage( front, left );
++#endif
++
+ 		cg.v_dmg_pitch = -kick * front;
+ 
+ 		if ( front <= 0.1 ) {
+diff --git a/SP/code/cgame/cg_view.c b/SP/code/cgame/cg_view.c
+index 02448b9..2740add 100644
+--- a/SP/code/cgame/cg_view.c
++++ b/SP/code/cgame/cg_view.c
+@@ -1633,6 +1633,10 @@ void CG_DrawActiveFrame( int serverTime, stereoFrame_t stereoView, qboolean demo
+ 	trap_SetUserCmdValue( cg.weaponSelect, cg.holdableSelect, cg.zoomSensitivity, cg.cld );
+ 
+ 	// actually issue the rendering calls
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityFrame();
++#endif
++
+ 	CG_DrawActive( stereoView );
+ 
+ 	DEBUGTIME
+diff --git a/SP/code/client/cl_keys.c b/SP/code/client/cl_keys.c
+index e6d458d..b4683a4 100644
+--- a/SP/code/client/cl_keys.c
++++ b/SP/code/client/cl_keys.c
+@@ -2334,9 +2334,22 @@ void CL_KeyDownEvent( int key, unsigned time )
+ 			// any key gets out of clipboard
+ 			key = K_ESCAPE;
+ 		} else if ( activeMenu == UIMENU_PREGAME ) {
++#ifdef FEATURE_ACCESSIBILITY
++			/* [Accessibility]: Enter and Space start the level too, and F6
++			   and F8 repeat and stop the briefing; a click on a button
++			   drawn only under the mouse was the one way in. */
++			if ( key != K_MOUSE1 && key != K_ENTER && key != K_KP_ENTER && key != K_SPACE
++				 && key != K_F6 && key != K_F8 ) {
++				return;
++			}
++			if ( key == K_F6 || key == K_F8 ) {
++				return; // their binding, above, has run
++			}
++#else
+ 			if ( key != K_MOUSE1 ) {
+ 				return; // eat all keys except mouse click
+ 			}
++#endif
+ 		} else {
+ 
+ 			// when in the notebook, check for the key bound to "notebook" and allow that as an escape key
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 2e947af..f01dd18 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -7083,6 +7083,12 @@ void UI_AccessibilityInstallBinds( void ) {
+ 	} binds[] = {
+ 		{ K_F6, "accessibilityRepeat",     1 },
+ 		{ K_F8, "accessibilityStopSpeech", 1 },
++		/* The game's own keys: free in RTCW's default.cfg. */
++		{ 'h',  "accessibilityStatus",     2 },
++		{ 't',  "+accessibilityAim",       2 },
++		{ 'y',  "accessibilityEnemies",    2 },
++		{ 'o',  "accessibilityObjective",  2 },
++		{ 'l',  "accessibilityStory",      2 },
+ 	};
+ 
+ 	vmCvar_t installed;
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 3bac203..8f1b878 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
+ #ifdef FEATURE_ACCESSIBILITY
+ #include "core/runtime_guard.h"
+ #include "menu/menu_narrator.h"
++#include "speech/speech_manager.h"
+ #endif
+ 
+ #define SCROLL_TIME_START                   500
+@@ -2285,16 +2286,166 @@ static void ETA_NarrateItemChange( itemDef_t *item, int listBefore ) {
+  * with the underscores gone. Without it, opening a page said nothing
+  * until an arrow key landed somewhere in it.
+  */
++/* Whether an item is on screen: visible, and shown by its cvar test.
++   The briefing screens hold every level's text and show one by mapname. */
++static qboolean ETA_ItemShown( itemDef_t *item ) {
++	if ( !( item->window.flags & WINDOW_VISIBLE ) ) {
++		return qfalse;
++	}
++	if ( item->cvarFlags & ( CVAR_SHOW | CVAR_HIDE ) && !Item_EnableShowViaCvar( item, CVAR_SHOW ) ) {
++		return qfalse;
++	}
++	return qtrue;
++}
++
++/* Every text a screen shows, in order, its spacing collapsed: a briefing
++   is laid out with runs of spaces that are only room on the page. */
++static void ETA_ScreenText( menuDef_t *menu, char *out, size_t size ) {
++	int i;
++
++	out[0] = '\0';
++	for ( i = 0; i < menu->itemCount; i++ ) {
++		itemDef_t *item = menu->items[i];
++		char text[1024];
++		char *r, *w;
++
++		if ( item->type != ITEM_TYPE_TEXT || !ETA_ItemShown( item ) || !item->text || !item->text[0] ) {
++			continue;
++		}
++		Q_strncpyz( text, DC->getTranslatedString ? DC->getTranslatedString( item->text ) : item->text, sizeof( text ) );
++		/* Line breaks first: cleaning the colour codes drops them, and
++		   the words either side would run together. */
++		for ( r = text; *r; r++ ) {
++			if ( *r == '\n' || *r == '\r' || *r == '\t' ) {
++				*r = ' ';
++			}
++		}
++		Q_CleanStr( text );
++		for ( r = w = text; *r; r++ ) {
++			if ( *r == ' ' && ( w == text || w[-1] == ' ' ) ) {
++				continue;
++			}
++			/* "site.." from the page's own punctuation. */
++			if ( *r == '.' && w > text && w[-1] == '.' ) {
++				continue;
++			}
++			*w++ = *r;
++		}
++		*w = '\0';
++		ETA_SpeakableLabel( text );
++		if ( !text[0] ) {
++			continue;
++		}
++		/* Screens draw some texts twice, offset, for a shadow or a
++		   second layout; said once. */
++		if ( strstr( out, text ) ) {
++			continue;
++		}
++		if ( out[0] ) {
++			Q_strcat( out, size, ". " );
++		}
++		Q_strcat( out, size, text );
++	}
++}
++
++/*
++ * A text longer than one spoken line - a briefing, a notebook page - read
++ * a piece at a time: the speech library takes a line of a few hundred
++ * characters, and each line replaces the one before it. Each piece ends
++ * at a sentence, and the next is said once the last has had time to be
++ * heard. Moving to a control stops the reading; F6 repeats the piece.
++ */
++#define ETA_READ_PIECE 240
++
++static char eta_reading[4096];
++static int eta_readingAt;
++static int eta_readingNext;
++
++static void ETA_ReadPiece( void ) {
++	char piece[ETA_READ_PIECE + 1];
++	int length = (int)strlen( eta_reading + eta_readingAt );
++	int cut = length;
++
++	if ( length <= 0 ) {
++		eta_reading[0] = '\0';
++		eta_readingAt = 0;
++		return;
++	}
++	if ( cut > ETA_READ_PIECE ) {
++		int i;
++
++		cut = ETA_READ_PIECE;
++		/* Back to the end of a sentence, or failing one a space. */
++		for ( i = ETA_READ_PIECE - 1; i > ETA_READ_PIECE / 3; i-- ) {
++			char c = eta_reading[eta_readingAt + i];
++
++			if ( ( c == '.' || c == '!' || c == '?' ) && eta_reading[eta_readingAt + i + 1] == ' ' ) {
++				cut = i + 1;
++				break;
++			}
++		}
++		if ( cut == ETA_READ_PIECE ) {
++			for ( i = ETA_READ_PIECE - 1; i > 0; i-- ) {
++				if ( eta_reading[eta_readingAt + i] == ' ' ) {
++					cut = i;
++					break;
++				}
++			}
++		}
++	}
++	memcpy( piece, eta_reading + eta_readingAt, cut );
++	piece[cut] = '\0';
++	eta_readingAt += cut;
++	while ( eta_reading[eta_readingAt] == ' ' ) {
++		eta_readingAt++;
++	}
++
++	ETA_MenuNarrator_OnConfirmDialogShown( piece );
++	eta_readingNext = DC->realTime + ETA_Speech_EstimateDurationMs( piece );
++}
++
++static void ETA_ReadLong( const char *text ) {
++	Q_strncpyz( eta_reading, text, sizeof( eta_reading ) );
++	eta_readingAt = 0;
++	ETA_ReadPiece();
++}
++
++static void ETA_ReadStop( void ) {
++	eta_reading[0] = '\0';
++	eta_readingAt = 0;
++}
++
++/* Each frame: the next piece, when its turn comes. */
++static void ETA_ReadFrame( void ) {
++	if ( eta_reading[0] && eta_reading[eta_readingAt] && DC->realTime >= eta_readingNext ) {
++		ETA_ReadPiece();
++	} else if ( eta_reading[0] && !eta_reading[eta_readingAt] ) {
++		ETA_ReadStop();
++	}
++}
++
+ static void ETA_NarrateMenuOpened( menuDef_t *menu ) {
+ 	char title[ETA_MAX_MENU_TEXT_LENGTH];
+ 	int i;
+ 
++	/* The screen before a level: its briefing, read whole, and the key
++	   that starts it - the screen's own button only appears under the
++	   mouse. */
++	if ( !Q_stricmp( menu->window.name, "pregame" ) ) {
++		static char briefing[2048];
++
++		ETA_ScreenText( menu, briefing, sizeof( briefing ) );
++		Q_strcat( briefing, sizeof( briefing ), ". Press Enter to begin" );
++		ETA_ReadLong( briefing );
++		return;
++	}
++
+ 	title[0] = '\0';
+ 	for ( i = 0; i < menu->itemCount; i++ ) {
+ 		itemDef_t *item = menu->items[i];
+ 
+ 		if ( item->type == ITEM_TYPE_TEXT && ( item->window.flags & WINDOW_DECORATION )
+-			 && ( item->window.flags & WINDOW_VISIBLE ) && item->text && item->text[0] ) {
++			 && ETA_ItemShown( item ) && item->text && item->text[0] ) {
+ 			Q_strncpyz( title, DC->getTranslatedString ? DC->getTranslatedString( item->text ) : item->text, sizeof( title ) );
+ 			Q_CleanStr( title );
+ 			ETA_SpeakableLabel( title );
+@@ -2330,7 +2481,8 @@ static void ETA_NarrateMenuOpened( menuDef_t *menu ) {
+ 	}
+ 
+ 	if ( title[0] ) {
+-		ETA_MenuNarrator_OnConfirmDialogShown( va( "%s menu", title ) );
++		/* A long heading is a sentence, not a name. */
++		ETA_MenuNarrator_OnConfirmDialogShown( strlen( title ) > 32 ? title : va( "%s menu", title ) );
+ 	}
+ }
+ 
+@@ -2349,7 +2501,7 @@ static void ETA_NarratePopup( menuDef_t *menu ) {
+ 		const char *itemText = NULL;
+ 		char cvarText[256];
+ 
+-		if ( item->type != ITEM_TYPE_TEXT || !( item->window.flags & WINDOW_VISIBLE ) ) {
++		if ( item->type != ITEM_TYPE_TEXT || !ETA_ItemShown( item ) ) {
+ 			continue;
+ 		}
+ 
+@@ -2434,6 +2586,7 @@ qboolean Item_SetFocus( itemDef_t *item, float x, float y ) {
+ 
+ #ifdef FEATURE_ACCESSIBILITY
+ 	if ( item->window.flags & WINDOW_HASFOCUS ) {
++		ETA_ReadStop();
+ 		ETA_MenuNarrator_OnFocusChanged( parent ? parent->window.name : NULL, ETA_MenuItem_FocusText( item ) );
+ 	}
+ #endif
+@@ -3774,6 +3927,20 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
+ 		return;
+ 	}
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	/* The briefing before a level starts it on Enter: its button is only
++	   drawn while the mouse is over it, so no key could reach it. */
++	if ( down && !Q_stricmp( menu->window.name, "pregame" )
++		 && ( key == K_ENTER || key == K_KP_ENTER || key == K_SPACE ) ) {
++		itemDef_t it;
++
++		memset( &it, 0, sizeof( it ) );
++		it.parent = menu;
++		Item_RunScript( &it, "uiScript playerstart" );
++		return;
++	}
++#endif
++
+ 	// see if the mouse is within the window bounds and if so is this a mouse click
+ 	if ( down && !( menu->window.flags & WINDOW_POPUP ) && !Rect_ContainsPoint( &menu->window.rect, DC->cursorx, DC->cursory ) ) {
+ 		static qboolean inHandleKey = qfalse;
+@@ -7156,6 +7323,9 @@ int Menu_Count( void ) {
+ 
+ void Menu_PaintAll( void ) {
+ 	int i;
++#ifdef FEATURE_ACCESSIBILITY
++	ETA_ReadFrame();
++#endif
+ 	if ( captureFunc ) {
+ 		captureFunc( captureData );
+ 	}

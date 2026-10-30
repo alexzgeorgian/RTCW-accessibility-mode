@@ -1,0 +1,171 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 96a1aaf7..b0b7683e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -771,6 +771,7 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ static struct
+ {
+ 	qboolean       held;
++	qboolean       byPlayer;    /* chosen with K or J, not by the way told */
+ 	int            at;          /* when it was chosen */
+ 	etaAimTarget_t target;
+ } eta_choose;
+@@ -833,9 +834,10 @@ static void ETA_ChooseStep(int step)
+ 		index = (index + step + count) % count;
+ 	}
+ 
+-	eta_choose.held   = qtrue;
+-	eta_choose.at     = cg.time;
+-	eta_choose.target = list[index];
++	eta_choose.held     = qtrue;
++	eta_choose.byPlayer = qtrue;
++	eta_choose.at       = cg.time;
++	eta_choose.target   = list[index];
+ 
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_AimSay(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point);
+@@ -875,26 +877,86 @@ static void ETA_StairsTurn(const etaAimTarget_t *target, const char *place)
+ 	ETA_AimStartSnap(target, place ? va("%s, %s", target->name, place) : target->name);
+ }
+ 
+-/* The chosen one, if there still is one: F's answer before anything
+-   else. qfalse when nothing is chosen, or it is gone. */
+-static qboolean ETA_ChooseTake(const etaAimTarget_t *list, int count, int *index)
++#define ETA_CHOOSE_STRAY 1000.0f   /* off the list, still turned to this near */
++
++/* Where the chosen thing is now, though it is off the list - out of
++   sight from where the player has walked to, round a door frame or a
++   corner: an entity where the game still has it, anything else where it
++   was. qfalse when it is gone, or too far to be the one meant. */
++static qboolean ETA_ChooseWhere(const etaAimTarget_t *target, vec3_t point)
++{
++	if (target->entityNum >= 0 && target->entityNum < MAX_GENTITIES)
++	{
++		const centity_t     *cent = &cg_entities[target->entityNum];
++		const entityState_t *es   = &cent->currentState;
++
++		if (!cent->currentValid || (es->eFlags & EF_NODRAW))
++		{
++			return qfalse;
++		}
++		VectorCopy(cent->lerpOrigin, point);
++		if (es->solid == SOLID_BMODEL && es->modelindex > 0 && es->modelindex < MAX_MODELS
++		    && es->eType != ET_ITEM)
++		{
++			VectorAdd(point, cgs.inlineModelMidpoints[es->modelindex], point);
++		}
++		else if (es->eType == ET_ITEM)
++		{
++			point[2] += 8.0f;
++		}
++	}
++	else
++	{
++		VectorCopy(target->point, point);
++	}
++
++	return (qboolean)(Distance(cg.predictedPlayerState.origin, point) <= ETA_CHOOSE_STRAY);
++}
++
++/* The chosen one: F's answer before anything else.
++   ETA_CHOOSE_NONE when nothing is chosen; ETA_CHOOSE_FOUND with its
++   place on the list; ETA_CHOOSE_DONE when F has been answered without
++   the list - turned to it out of sight, or told it is gone. Never the
++   nearest thing instead: the tester chose with K, pressed F, and was
++   turned to something else close by, because what they chose had gone
++   out of sight as they walked. */
++#define ETA_CHOOSE_NONE  0
++#define ETA_CHOOSE_FOUND 1
++#define ETA_CHOOSE_DONE  2
++
++static int ETA_ChooseTake(const etaAimTarget_t *list, int count, int *index)
+ {
++	vec3_t point;
++
+ 	if (!eta_choose.held || cg.time < eta_choose.at || cg.time - eta_choose.at >= ETA_CHOOSE_HOLD_MS)
+ 	{
+ 		eta_choose.held = qfalse;
+-		return qfalse;
++		return ETA_CHOOSE_NONE;
+ 	}
+ 
+ 	eta_choose.held = qfalse;
+ 	*index          = ETA_ChooseFind(list, count, &eta_choose.target);
+ 
+-	if (*index < 0)
++	if (*index >= 0)
+ 	{
+-		ETA_Speech_Say(va("%s is no longer close by", eta_choose.target.name));
+-		return qfalse;
++		return ETA_CHOOSE_FOUND;
+ 	}
+ 
+-	return qtrue;
++	if (ETA_ChooseWhere(&eta_choose.target, point))
++	{
++		etaAimTarget_t there = eta_choose.target;
++
++		VectorCopy(point, there.point);
++		there.meters = Distance(cg.predictedPlayerState.origin, point) * ETA_QU_TO_METERS;
++		ETA_AimStartSnap(&there, va("%s, out of sight from here", there.name));
++		eta_choose.held = qtrue;
++		eta_choose.at   = cg.time;
++		return ETA_CHOOSE_DONE;
++	}
++
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("%s is no longer close by. K chooses again", eta_choose.target.name));
++	return ETA_CHOOSE_DONE;
+ }
+ 
+ /* Whether use, pressed now, reaches a thing on the list: a thing on the
+@@ -1106,9 +1168,16 @@ void CG_AccessibilityActivateDown_f(void)
+ 	   reach. */
+ 	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && eta_choose.held)
+ 	{
++		int taken;
++
+ 		count = CG_AccessibilityUseTargets(list, ETA_AIM_MAX_TARGETS);
++		taken = ETA_ChooseTake(list, count, &index);
+ 
+-		if (ETA_ChooseTake(list, count, &index))
++		if (taken == ETA_CHOOSE_DONE)
++		{
++			return;
++		}
++		if (taken == ETA_CHOOSE_FOUND)
+ 		{
+ 			/* Turned to and said; used on arrival when in reach - but a
+ 			   ladder is climbed with F once there, and a locked door is
+@@ -1134,8 +1203,10 @@ void CG_AccessibilityActivateDown_f(void)
+ 				}
+ 
+ 				/* Kept until it is used: walked up to, F turns to it
+-				   again, not to whatever is nearest by then. */
+-				if (!list[index].ladder && !list[index].locked)
++				   again, not to whatever is nearest by then. A thing
++				   never pressed at - a breakable, a locked door - is
++				   kept too, so a second F stays on it. */
++				if (!list[index].ladder)
+ 				{
+ 					eta_choose.held   = qtrue;
+ 					eta_choose.at     = cg.time;
+@@ -2153,7 +2224,18 @@ static void ETA_WayCueSwitch(void)
+ 		}
+ 	}
+ 
++	/* The player's own choice is never taken over: it is said, and K
++	   finds the switch. */
++	if (eta_choose.held && eta_choose.byPlayer && cg.time >= eta_choose.at
++	    && cg.time - eta_choose.at < ETA_CHOOSE_HOLD_MS)
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_AimSay("This door opens with a switch. Switch", opener);
++		return;
++	}
++
+ 	/* Chosen, as K would choose it: F turns to it. */
++	eta_choose.byPlayer = qfalse;
+ 	memset(&eta_choose.target, 0, sizeof(eta_choose.target));
+ 	eta_choose.target.entityNum = -1;
+ 	VectorCopy(opener, eta_choose.target.point);

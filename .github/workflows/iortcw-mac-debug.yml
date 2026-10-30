@@ -1,0 +1,75 @@
+name: iortcw Mac debug
+
+# Two checks on a Mac, where the campaign stopped and Linux does not:
+#  - the animation scripts' weapon-name lookup, built alone with the
+#    game's own sources, Apple Silicon and Intel;
+#  - the real app, built as the download is, run straight into escape1
+#    from a test pack of the owner's own files kept on the private branch
+#    eta-debug-data (never published), with the game's log printed.
+# On a change to this workflow or the test, or by hand.
+on:
+  push:
+    paths:
+      - 'release/iortcw-debug/**'
+      - '.github/workflows/iortcw-mac-debug.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lookup:
+    name: Weapon names on the Mac
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Build and run the lookup test
+        working-directory: accessibility-mode
+        run: |
+          set -e
+          commit="$(sed -n 's/^commit=//p' integration/iortcw/base.txt)"
+          git clone --quiet https://github.com/iortcw/iortcw "$RUNNER_TEMP/iortcw"
+          git -C "$RUNNER_TEMP/iortcw" checkout --quiet "$commit"
+          for p in integration/iortcw/*.patch; do git -C "$RUNNER_TEMP/iortcw" apply "$PWD/$p"; done
+          S="$RUNNER_TEMP/iortcw/SP/code"
+          for arch in arm64 x86_64; do
+            echo "=== $arch -O3"
+            clang -arch $arch -O3 -DGAMEDLL -DQAGAME -DARCH_STRING="\"$arch\"" -I"$S/qcommon" -I"$S/game" \
+              -o "$RUNNER_TEMP/lookup-$arch" release/iortcw-debug/anim_lookup_test.c \
+              "$S/game/bg_animation.c" "$S/game/bg_misc.c" "$S/qcommon/q_shared.c" "$S/qcommon/q_math.c" -lm \
+              -Wno-everything
+            "$RUNNER_TEMP/lookup-$arch" | tail -12 || echo "::warning::$arch failed with $?"
+          done
+
+  objects:
+    name: The game module's own objects on the Mac
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: accessibility-mode
+
+      - name: Build the game module and link the test with its objects
+        working-directory: accessibility-mode
+        run: |
+          set -e
+          eta="$PWD"
+          commit="$(sed -n 's/^commit=//p' integration/iortcw/base.txt)"
+          git clone --quiet https://github.com/iortcw/iortcw "$RUNNER_TEMP/iortcw"
+          git -C "$RUNNER_TEMP/iortcw" checkout --quiet "$commit"
+          for p in integration/iortcw/*.patch; do git -C "$RUNNER_TEMP/iortcw" apply "$PWD/$p"; done
+          cd "$RUNNER_TEMP/iortcw/SP"
+          for arch in arm64 x86_64; do
+            if [ "$arch" = arm64 ]; then min=11.0; else min=10.13; fi
+            ARCH=$arch MACOSX_VERSION_MIN=$min make -j"$(sysctl -n hw.ncpu)" release BUILD_CLIENT=0 BUILD_SERVER=0 \
+              FEATURE_ACCESSIBILITY=1 ETA_SOURCE_DIR="$eta" > "$RUNNER_TEMP/make-$arch.log" 2>&1 || { tail -30 "$RUNNER_TEMP/make-$arch.log"; exit 1; }
+            B="build/release-darwin-$arch/main"
+            clang -arch $arch -O3 -mmacosx-version-min=$min -DGAMEDLL -DQAGAME -DARCH_STRING="\"$arch\"" \
+              -Icode/game -Icode/qcommon -c -o "$RUNNER_TEMP/got-$arch.o" "$eta/release/iortcw-debug/game_objects_test.c" -Wno-everything
+            clang -arch $arch -mmacosx-version-min=$min -o "$RUNNER_TEMP/got-$arch" "$RUNNER_TEMP/got-$arch.o" "$B"/game/*.o "$B"/qcommon/*.o -lm
+            echo "=== $arch"
+            "$RUNNER_TEMP/got-$arch" || echo "::warning::$arch: the lookups failed ($?)"
+          done

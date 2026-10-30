@@ -1,0 +1,729 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 72a27cf..e0a74a0 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -45,6 +45,7 @@ vmCvar_t eta_pickupCues;
+ vmCvar_t eta_bumpCues;
+ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
++vmCvar_t eta_walkGuide;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+ vmCvar_t eta_ladderVolume;
+@@ -73,6 +74,7 @@ static const struct {
+ 	{ &eta_bumpCues,            "eta_bumpCues",            "1" },
+ 	{ &eta_markerCues,          "eta_markerCues",          "1" },
+ 	{ &eta_autoLock,            "eta_autoLock",            "1" },
++	{ &eta_walkGuide,           "eta_walkGuide",           "1" },
+ 	{ &eta_doorVolume,          "eta_doorVolume",          "100" },
+ 	{ &eta_ladderVolume,        "eta_ladderVolume",        "100" },
+ 	{ &eta_crosshairVolume,     "eta_crosshairVolume",     "100" },
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index d3442af..44e8133 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1374,11 +1374,235 @@ static void ETA_UseLineEnd(const vec3_t eye, const vec3_t point, vec3_t end)
+ 	VectorMA(eye, Distance(eye, point), forward, end);
+ }
+ 
++/**
++ * @brief The walk guide: led along the way to the marker while walking.
++ *
++ * The tester, in the first mission's dungeon, heard where the walls and
++ * the openings were and still could not get out: knowing the way goes
++ * "ahead left" is not the same as keeping to it round three corners and
++ * through two doors, and they got lost between the walls. So with a
++ * marker set - O puts it on the way out - and the walk key held, the view
++ * is turned for them along the way, the way the ping goes, while they
++ * walk: the player keeps W down and is led there. A closed door on the
++ * way is opened with the use key as they reach it. Held against
++ * something the way did not expect, the way is looked for again.
++ *
++ * It only ever steers while the player walks forward, so stopping gives
++ * the view back; a turn by hand takes it back too, for ETA_AIM_MANUAL_MS,
++ * the way it does from the enemy lock; and the lock, F and a climb all
++ * come first. eta_walkGuide 0 turns it off.
++ */
++#define ETA_GUIDE_TOLERANCE  4.0f    /* degrees off the way that need no turn */
++#define ETA_GUIDE_STUCK_MS   1200    /* this long walking without getting anywhere: stuck */
++#define ETA_GUIDE_STUCK_MOVE 16.0f
++#define ETA_GUIDE_DOOR_MS    1500    /* between presses of use at a door */
++
++static struct
++{
++	qboolean active;      /* the guide holds the turn keys */
++	vec3_t   checkFrom;   /* where the player was at the last stuck check */
++	int      checkAt;
++	int      doorAt;      /* use last pressed at a door */
++	int      replanAt;
++	qboolean detour;      /* gone to the switch that opens the door ahead */
++	vec3_t   detourTo;
++	int      detourAt;
++	int      detourDoor;  /* the door's brush model */
++	int      detourDoneDoor;
++	int      detourDoneAt;
++	vec3_t   detourDoorAt;
++	float    detourBest;  /* the nearest the switch has been come */
++	int      detourBestAt;
++} eta_guide;
++
++/* How near the switch the use key reaches it from the eyes: a little
++   inside the game's own CH_ACTIVATE_DIST. */
++#define ETA_GUIDE_SWITCH_REACH 88.0f
++#define ETA_GUIDE_DETOUR_MS    15000
++
++static void ETA_GuideRelease(void)
++{
++	if (eta_guide.active)
++	{
++		ETA_AimKeys(0, 0);
++		ETA_TurnBoost(qfalse);
++		eta_guide.active = qfalse;
++	}
++	eta_guide.checkAt = 0;
++}
++
++static void ETA_GuideFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t           cmd;
++	vec3_t              target, delta, wanted;
++
++	if (!eta_walkGuide.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
++	    || eta_turn.step || eta_turn.held
++	    || (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS)
++	    || !CG_AccessibilityMarkerSteerPoint(target))
++	{
++		ETA_GuideRelease();
++		return;
++	}
++
++	/* Only while walking forward: stopping gives the view back. */
++	if (!trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || cmd.forwardmove <= 0)
++	{
++		ETA_GuideRelease();
++		return;
++	}
++
++	/* A door the way goes through that opens from a button or a lever
++	   elsewhere - the dungeon's gates open from a button on the wall
++	   beside them, and pressing use at the gate does nothing: the guide
++	   held the tester's view on the gate, pressing, and they never got
++	   through. So to the switch first, which is pressed, and then on. */
++	if (!eta_guide.detour)
++	{
++		vec3_t doorAt, opener;
++		int    door = CG_AccessibilityDoorAheadModel(doorAt);
++
++		if (door && CG_AccessibilityDoorOpener(door, doorAt, opener)
++		    && (door != eta_guide.detourDoneDoor || cg.time - eta_guide.detourDoneAt > 10000
++		        || cg.time < eta_guide.detourDoneAt))
++		{
++			eta_guide.detour       = qtrue;
++			eta_guide.detourAt     = cg.time;
++			eta_guide.detourDoor   = door;
++			eta_guide.detourBest   = 1.0e9f;
++			eta_guide.detourBestAt = cg.time;
++			VectorCopy(opener, eta_guide.detourTo);
++			VectorCopy(doorAt, eta_guide.detourDoorAt);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_AimSay("The door opens with a switch. Going to it", opener);
++		}
++	}
++
++	if (eta_guide.detour)
++	{
++		vec3_t eye;
++
++		VectorCopy(ps->origin, eye);
++		eye[2] += ps->viewheight;
++
++		if (Distance(eye, eta_guide.detourTo) < eta_guide.detourBest - 16.0f)
++		{
++			eta_guide.detourBest   = Distance(eye, eta_guide.detourTo);
++			eta_guide.detourBestAt = cg.time;
++		}
++
++		/* No nearer for a while: the switch is out of reach from this
++		   side - the dungeon has a door whose button is behind it. That
++		   door is no way through from here; the way is looked for round
++		   it. */
++		if (cg.time - eta_guide.detourAt > ETA_GUIDE_DETOUR_MS || cg.time < eta_guide.detourAt
++		    || cg.time - eta_guide.detourBestAt > 2000)
++		{
++			eta_guide.detour         = qfalse;
++			eta_guide.detourDoneDoor = eta_guide.detourDoor;
++			eta_guide.detourDoneAt   = cg.time;
++			CG_AccessibilityMarkerBlocked(eta_guide.detourDoorAt, 56.0f);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("Its switch is out of reach from this side. Finding another way");
++		}
++		else
++		{
++
++			if (Distance(eye, eta_guide.detourTo) <= ETA_GUIDE_SWITCH_REACH)
++			{
++				etaAimTarget_t sw;
++
++				/* There: turned to it, and use pressed on it, as F does. */
++				memset(&sw, 0, sizeof(sw));
++				sw.entityNum = -1;
++				VectorCopy(eta_guide.detourTo, sw.point);
++				Q_strncpyz(sw.name, "Switch", sizeof(sw.name));
++				eta_guide.detour         = qfalse;
++				eta_guide.detourDoneDoor = eta_guide.detourDoor;
++				eta_guide.detourDoneAt   = cg.time;
++				ETA_GuideRelease();
++				ETA_AimStartSnap(&sw, "Switch");
++				eta_use.pending = qtrue;
++				return;
++			}
++
++			VectorCopy(eta_guide.detourTo, target);
++		}
++	}
++
++	VectorSubtract(target, ps->origin, delta);
++	delta[2] = 0.0f;
++	if (VectorLength(delta) < 8.0f)
++	{
++		ETA_GuideRelease();
++		return;
++	}
++
++	wanted[YAW]   = vectoyaw(delta);
++	wanted[PITCH] = ps->viewangles[PITCH] > 30.0f || ps->viewangles[PITCH] < -30.0f ? 0.0f : ps->viewangles[PITCH];
++	wanted[ROLL]  = 0.0f;
++	ETA_AimSteerAngles(wanted, ETA_GUIDE_TOLERANCE);
++	eta_guide.active = qtrue;
++
++	/* A closed door the way goes through: opened as it is reached. */
++	if (!eta_guide.detour && CG_AccessibilityDoorAhead()
++	    && (cg.time - eta_guide.doorAt > ETA_GUIDE_DOOR_MS || cg.time < eta_guide.doorAt))
++	{
++		eta_guide.doorAt = cg.time;
++		ETA_UseKey(qtrue);
++		if (!eta_use.held)
++		{
++			eta_use.releaseAt = cg.time + 150;
++		}
++	}
++
++	/* Walking and getting nowhere: the way is looked for again - but
++	   not on the way to a switch, where walking up to a wall is the
++	   point. */
++	if (eta_guide.detour)
++	{
++		eta_guide.checkAt = 0;
++		return;
++	}
++	if (!eta_guide.checkAt || cg.time < eta_guide.checkAt)
++	{
++		eta_guide.checkAt = cg.time;
++		VectorCopy(ps->origin, eta_guide.checkFrom);
++	}
++	else if (cg.time - eta_guide.checkAt >= ETA_GUIDE_STUCK_MS)
++	{
++		if (Distance(ps->origin, eta_guide.checkFrom) < ETA_GUIDE_STUCK_MOVE)
++		{
++			vec3_t forward, ahead;
++
++			/* What stopped them, a step ahead, is kept clear of from
++			   now on, and the way looked for round it. */
++			AngleVectors(ps->viewangles, forward, NULL, NULL);
++			forward[2] = 0.0f;
++			VectorNormalize(forward);
++			VectorMA(ps->origin, 40.0f, forward, ahead);
++			CG_AccessibilityMarkerBlocked(ahead, 32.0f);
++
++			if (cg.time - eta_guide.replanAt > 5000 || cg.time < eta_guide.replanAt)
++			{
++				eta_guide.replanAt = cg.time;
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say("Something in the way. Finding a way round");
++			}
++		}
++		eta_guide.checkAt = cg.time;
++		VectorCopy(ps->origin, eta_guide.checkFrom);
++	}
++}
++
+ void CG_AccessibilityAimFrame(void)
+ {
+ 	/* A climb has the keys to itself. */
+ 	if (eta_climb.active)
+ 	{
++		eta_guide.active  = qfalse;
++		eta_guide.checkAt = 0;
+ 		ETA_ClimbFrame();
+ 		return;
+ 	}
+@@ -1399,10 +1623,15 @@ void CG_AccessibilityAimFrame(void)
+ 		}
+ 		if (eta_aim.mode == ETA_AIM_NONE)
+ 		{
++			ETA_GuideFrame();
+ 			return;
+ 		}
+ 	}
+ 
++	/* Something else has the turn keys now. */
++	eta_guide.active  = qfalse;
++	eta_guide.checkAt = 0;
++
+ 	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL || cg.time < eta_aim.started
+ 	    || cg.cameraMode)
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 427c7b4..3c5b18b 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -424,10 +424,68 @@ void CG_AccessibilityRouteAvoid(const float (*points)[3], int count)
+ 	}
+ }
+ 
++/**
++ * @brief Spots the walk guide found the player could not get past.
++ *
++ * The search tries each step with the player's own box, and still a low
++ * block in the first mission's dungeon - a stone pedestal with chains -
++ * let the way through, and the walk guide held the tester against it.
++ * Wherever the guide finds the player walking and getting nowhere, the
++ * spot just ahead is kept here, and the way is looked for round it. Kept
++ * until the map changes: what stood in the way still does.
++ */
++#define ETA_ROUTE_BLOCK_MAX    16
++
++static float eta_routeBlocked[ETA_ROUTE_BLOCK_MAX][4];   /* x, y, z, radius */
++static int   eta_routeBlockedCount, eta_routeBlockedNext;
++
++/* Whether a walk from one point to another goes over a blocked spot - a
++   walk that only takes the player further from one they are already at
++   is let through, the way out of it. */
++static qboolean ETA_RouteBlockedNear(const float from[3], const float to[3])
++{
++	float dx = to[0] - from[0], dy = to[1] - from[1];
++	float length2 = dx * dx + dy * dy;
++	int   i;
++
++	for (i = 0; i < eta_routeBlockedCount; i++)
++	{
++		const float *spot = eta_routeBlocked[i];
++		float       f     = length2 > 0.0f ? ((spot[0] - from[0]) * dx + (spot[1] - from[1]) * dy) / length2 : 0.0f;
++		float       ax, ay, closest, already;
++
++		if (fabs(from[2] - spot[2]) >= 64.0f && fabs(to[2] - spot[2]) >= 64.0f)
++		{
++			continue;
++		}
++
++		f       = f < 0.0f ? 0.0f : f > 1.0f ? 1.0f : f;
++		ax      = from[0] + dx * f - spot[0];
++		ay      = from[1] + dy * f - spot[1];
++		closest = sqrt(ax * ax + ay * ay);
++		already = sqrt((from[0] - spot[0]) * (from[0] - spot[0]) + (from[1] - spot[1]) * (from[1] - spot[1]));
++
++		if (closest < spot[3] && closest < already - 1.0f)
++		{
++			return qtrue;
++		}
++		if (length2 <= 0.0f && already < spot[3])
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static qboolean ETA_RouteAvoided(const float at[3])
+ {
+ 	int i;
+ 
++	if (ETA_RouteBlockedNear(at, at))
++	{
++		return qtrue;
++	}
++
+ 	if (eta_route.throughMines)
+ 	{
+ 		return qfalse;
+@@ -461,6 +519,11 @@ static qboolean ETA_RouteLineAvoided(const float from[3], const float to[3])
+ 	float length2 = dx * dx + dy * dy;
+ 	int   i;
+ 
++	if (ETA_RouteBlockedNear(from, to))
++	{
++		return qtrue;
++	}
++
+ 	if (eta_route.throughMines)
+ 	{
+ 		return qfalse;
+@@ -1669,6 +1732,51 @@ void CG_AccessibilityMarkerReset(void)
+ {
+ 	memset(&eta_marker, 0, sizeof(eta_marker));
+ 	ETA_RouteForget();
++	eta_routeBlockedCount = eta_routeBlockedNext = 0;
++}
++
++/**
++ * @brief Where the way to the marker goes from here, for the walk guide
++ * (cg_accessibility_keys.c): the point the ping is on. qfalse with no
++ * marker.
++ */
++qboolean CG_AccessibilityMarkerSteerPoint(vec3_t out)
++{
++	if (!eta_marker.active)
++	{
++		return qfalse;
++	}
++
++	ETA_MarkerTarget(out);
++	return qtrue;
++}
++
++/**
++ * @brief The way looked for again from here: the walk guide found the
++ * player held against something the way did not expect.
++ */
++void CG_AccessibilityMarkerReplan(void)
++{
++	if (eta_marker.active)
++	{
++		ETA_RoutePlan();
++	}
++}
++
++/**
++ * @brief A spot the player could not get past: kept clear of from now on,
++ * and the way looked for again round it.
++ */
++void CG_AccessibilityMarkerBlocked(const vec3_t at, float radius)
++{
++	VectorCopy(at, eta_routeBlocked[eta_routeBlockedNext]);
++	eta_routeBlocked[eta_routeBlockedNext][3] = radius;
++	eta_routeBlockedNext = (eta_routeBlockedNext + 1) % ETA_ROUTE_BLOCK_MAX;
++	if (eta_routeBlockedCount < ETA_ROUTE_BLOCK_MAX)
++	{
++		eta_routeBlockedCount++;
++	}
++	CG_AccessibilityMarkerReplan();
+ }
+ 
+ qboolean CG_AccessibilityMarkerActive(void)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index dddceb0..9599d51 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -286,20 +286,28 @@ static void ETA_DescribeSurface(const trace_t *trace, char *out, size_t outSize)
+ 
+ static const char *ETA_PropAt(const vec3_t point);
+ 
++static qboolean ETA_SeenAsEnemy(const entityState_t *es);
++static const char *ETA_CharacterKind(const entityState_t *es);
++
+ static void ETA_DescribeTraceHit(const trace_t *trace, char *out, size_t outSize)
+ {
+ 	int entityNum = trace->entityNum;
+ 
+ 	if (entityNum < MAX_CLIENTS)
+ 	{
+-		const clientInfo_t *ci = &cgs.clientinfo[entityNum];
+-
+-		Q_strncpyz(out, ci->infoValid && ci->name[0] ? ci->name : "Player", outSize);
++		const entityState_t *es = &cg_entities[entityNum].currentState;
+ 
+-		/* Which side they are on is the first thing that matters about a
+-		   person at the end of a scope. */
+-		Q_strcat(out, outSize,
+-		         ci->team == cgs.clientinfo[cg.clientNum].team ? ", teammate" : ", enemy");
++		/* The campaign's characters are the game's own, with no names or
++		   teams the way Enemy Territory's players have: what they are,
++		   and which side - the first thing that matters about a person
++		   at the end of a scope. The client's team field is the same for
++		   all of them, and called the guard beating the tester a
++		   teammate. */
++		Com_sprintf(out, outSize, "%s%s", ETA_SeenAsEnemy(es) ? "Enemy " : "", ETA_CharacterKind(es));
++		if (es->eFlags & EF_DEAD)
++		{
++			Q_strcat(out, outSize, ", dead");
++		}
+ 		return;
+ 	}
+ 
+@@ -2877,6 +2885,13 @@ static void ETA_NarrateObstacleAhead(void)
+ 		return;
+ 	}
+ 
++	/* A person in the way is said by the callouts for people, with where
++	   they are and how close; said here too, the two took turns. */
++	if (trace.entityNum < MAX_CLIENTS)
++	{
++		return;
++	}
++
+ 	ETA_DescribeTraceHit(&trace, description, sizeof(description));
+ 
+ 	if (!Q_stricmp(description, lastDescription)
+@@ -3548,6 +3563,12 @@ typedef struct
+ static eta_user_t eta_users[ETA_MAX_USERS];
+ static int        eta_userCount;
+ 
++/* What opens a door from somewhere else - a button on the wall beside a
++   gate, a lever across the room - by the door's brush model: the brush
++   model of the button, or of the invisible trigger wrapped round it,
++   which is what the player presses. 0 for a door opened by using it. */
++static int eta_doorOpener[MAX_MODELS];
++
+ /* What a cursor hint names, for a thing the player can use; NULL for
+    one that is not that - a thing to break or knife, water, a warning. */
+ static const char *ETA_HintUseName(const char *hint)
+@@ -3629,9 +3650,19 @@ static void ETA_ReadMapEntities(void)
+ 		char target[48];
+ 		char hint[32];
+ 	}        users[ETA_MAX_USERS];
+-	int      namedCount = 0, userCount = 0;
++	/* The doors, buttons and triggers by name and target, for the door
++	   openers. */
++	static struct
++	{
++		int  model;
++		char kind;          /* 'd' door, 'b' button, 'u' invisible trigger */
++		char targetname[48];
++		char target[48];
++	}        links[512];
++	int      namedCount = 0, userCount = 0, linkCount = 0;
+ 
+ 	memset(eta_buttonModel, 0, sizeof(eta_buttonModel));
++	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+ 	eta_userCount = 0;
+ 
+ 	for (i = 0; i < MAX_MODELS; i++)
+@@ -3701,6 +3732,18 @@ static void ETA_ReadMapEntities(void)
+ 			namedCount++;
+ 		}
+ 
++		if (model[0] == '*' && linkCount < (int)ARRAY_LEN(links)
++		    && (!Q_stricmp(classname, "func_door") || !Q_stricmp(classname, "func_door_rotating")
++		        || !Q_stricmp(classname, "func_button") || !Q_stricmp(classname, "func_invisible_user")))
++		{
++			links[linkCount].model = atoi(model + 1);
++			links[linkCount].kind  = !Q_stricmpn(classname, "func_door", 9) ? 'd'
++			                         : !Q_stricmp(classname, "func_button") ? 'b' : 'u';
++			Q_strncpyz(links[linkCount].targetname, targetname, sizeof(links[0].targetname));
++			Q_strncpyz(links[linkCount].target, target, sizeof(links[0].target));
++			linkCount++;
++		}
++
+ 		if (!Q_stricmp(classname, "func_button") && model[0] == '*')
+ 		{
+ 			int index = atoi(model + 1);
+@@ -3752,6 +3795,46 @@ static void ETA_ReadMapEntities(void)
+ 		}
+ 	}
+ 
++	/* What opens each door that has a name: a button aimed at it - or the
++	   invisible trigger aimed at that button, which is what is pressed -
++	   or an invisible trigger aimed at the door itself. Whether it stands
++	   apart from the door is weighed when it is asked for, once the
++	   models' places are known. */
++	for (i = 0; i < linkCount; i++)
++	{
++		int j, k, opener = 0;
++
++		if (links[i].kind != 'd' || !links[i].targetname[0] || links[i].model <= 0 || links[i].model >= MAX_MODELS)
++		{
++			continue;
++		}
++
++		for (j = 0; j < linkCount && !opener; j++)
++		{
++			if (links[j].kind == 'd' || Q_stricmp(links[j].target, links[i].targetname))
++			{
++				continue;
++			}
++			opener = links[j].model;
++			if (links[j].kind == 'b' && links[j].targetname[0])
++			{
++				for (k = 0; k < linkCount; k++)
++				{
++					if (links[k].kind == 'u' && !Q_stricmp(links[k].target, links[j].targetname))
++					{
++						opener = links[k].model;
++						break;
++					}
++				}
++			}
++		}
++
++		if (opener > 0 && opener < MAX_MODELS)
++		{
++			eta_doorOpener[links[i].model] = opener;
++		}
++	}
++
+ 	/* Each invisible trigger, named by its own hint if the map gave one
+ 	   it can use, or else by what it works. One with neither a target
+ 	   nor a hint does nothing the player can use. */
+@@ -4036,7 +4119,7 @@ void CG_AccessibilityWayOut(void)
+ 	VectorSubtract(best, ps->origin, delta);
+ 	meters = (int)(bestDistance * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. Follow the marker's sound", meters,
++	ETA_Speech_Say(va("Way out, %d meters, %s, %s%s%s. Hold W to be led there", meters,
+ 	                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 	                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+ 	                  height[0] ? ", " : "", height));
+@@ -4802,4 +4885,120 @@ qboolean CG_AccessibilityEnemyAimPoint(int entityNum, vec3_t out)
+ 	return ETA_EnemyAimable(&cg_entities[entityNum], eye, out);
+ }
+ 
++/**
++ * @brief A door right in front of the player, for the walk guide to open:
++ * a door the server sends, which the view's line meets, or one the map
++ * opens through an invisible trigger, standing just ahead. qfalse when
++ * there is none, or it is locked.
++ */
++/* Where a door stands: its brush's middle, round its origin for one
++   that swings. */
++static void ETA_DoorMiddle(int model, const vec3_t entityOrigin, vec3_t out)
++{
++	VectorAdd(entityOrigin, cgs.inlineModelMidpoints[model], out);
++}
++
++/**
++ * @brief The button or switch that opens a door from elsewhere, for the
++ * door with this brush model: qfalse when it is opened by using it - its
++ * opener wrapped round the door itself - or there is no other.
++ */
++qboolean CG_AccessibilityDoorOpener(int model, const vec3_t doorAt, vec3_t out)
++{
++	int opener;
++
++	if (model <= 0 || model >= MAX_MODELS || !(opener = eta_doorOpener[model]))
++	{
++		return qfalse;
++	}
++
++	VectorCopy(cgs.inlineModelMidpoints[opener], out);
++
++	return (qboolean)(Distance(out, doorAt) > 64.0f);
++}
++
++/**
++ * @brief The door the player is walking into, if it is one the server
++ * sends: its brush model and where it stands. 0 for none.
++ */
++int CG_AccessibilityDoorAheadModel(vec3_t doorAt)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              eye, forward, end;
++	trace_t             trace;
++	char                name[64];
++	const entityState_t *es;
++
++	ETA_AimEye(eye);
++	AngleVectors(ps->viewangles, forward, NULL, NULL);
++	forward[2] = 0.0f;
++	VectorNormalize(forward);
++	VectorMA(eye, 64.0f, forward, end);
++
++	CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_SOLID);
++
++	if (trace.fraction >= 1.0f || trace.entityNum < 0 || trace.entityNum >= ENTITYNUM_WORLD)
++	{
++		return 0;
++	}
++
++	es = &cg_entities[trace.entityNum].currentState;
++	if (es->eType != ET_MOVER || es->solid != SOLID_BMODEL || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
++	    || !CG_AccessibilityObjectName(es, name, sizeof(name)) || Q_stricmp(name, "door"))
++	{
++		return 0;
++	}
++
++	ETA_DoorMiddle(es->modelindex, cg_entities[trace.entityNum].lerpOrigin, doorAt);
++	return es->modelindex;
++}
++
++qboolean CG_AccessibilityDoorAhead(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              eye, forward, end, flat;
++	trace_t             trace;
++	int                 i;
++
++	ETA_AimEye(eye);
++	AngleVectors(ps->viewangles, forward, NULL, NULL);
++	VectorCopy(forward, flat);
++	flat[2] = 0.0f;
++	VectorNormalize(flat);
++	VectorMA(eye, 64.0f, flat, end);
++
++	CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_SOLID);
++
++	if (trace.fraction < 1.0f && trace.entityNum >= 0 && trace.entityNum < ENTITYNUM_WORLD)
++	{
++		const entityState_t *es = &cg_entities[trace.entityNum].currentState;
++		char                name[64];
++		qboolean            opens = qtrue;
++
++		if (es->eType == ET_MOVER && CG_AccessibilityObjectName(es, name, sizeof(name))
++		    && !Q_stricmp(name, "door"))
++		{
++			return (qboolean)!(CG_AccessibilityDoorModel(es->modelindex, &opens) && !opens);
++		}
++	}
++
++	for (i = 0; i < eta_userCount; i++)
++	{
++		vec3_t to;
++
++		if (Q_stricmp(eta_users[i].name, "Door"))
++		{
++			continue;
++		}
++		VectorSubtract(cgs.inlineModelMidpoints[eta_users[i].model], eye, to);
++		to[2] = 0.0f;
++		if (VectorLength(to) < 80.0f && DotProduct(to, flat) > 0.7f * VectorLength(to))
++		{
++			return qtrue;
++		}
++	}
++
++	return qfalse;
++}
++
+ #endif
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 4a27079..3734b13 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2227,6 +2227,9 @@ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, f
+ void CG_AccessibilityMarkerSet( const vec3_t origin, const char *name );
+ void CG_AccessibilityMarkerReset( void );
+ qboolean CG_AccessibilityMarkerActive( void );
++qboolean CG_AccessibilityMarkerSteerPoint( vec3_t out );
++void CG_AccessibilityMarkerReplan( void );
++void CG_AccessibilityMarkerBlocked( const vec3_t at, float radius );
+ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+ void CG_AccessibilityMarkerWhere( void );
+@@ -2286,6 +2289,9 @@ typedef struct {
+ int CG_AccessibilityUseTargets( etaAimTarget_t *list, int max );
+ int CG_AccessibilityEnemyTargets( etaAimTarget_t *list, int max );
+ qboolean CG_AccessibilityEnemyAimPoint( int entityNum, vec3_t out );
++qboolean CG_AccessibilityDoorAhead( void );
++int CG_AccessibilityDoorAheadModel( vec3_t doorAt );
++qboolean CG_AccessibilityDoorOpener( int model, const vec3_t doorAt, vec3_t out );
+ 
+ /* The mod's own looping sounds, shipped in its pk3. */
+ typedef enum {
+@@ -2323,6 +2329,7 @@ extern vmCvar_t eta_pickupCues;
+ extern vmCvar_t eta_bumpCues;
+ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
++extern vmCvar_t eta_walkGuide;
+ 
+ #ifndef MIN
+ #define MIN( a, b ) ( ( a ) < ( b ) ? ( a ) : ( b ) )

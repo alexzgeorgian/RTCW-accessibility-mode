@@ -1,0 +1,358 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index df50755..5c22f4c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1500,8 +1500,48 @@ static struct
+ 	vec3_t   detourDoorAt;
+ 	float    detourBest;  /* the nearest the switch has been come */
+ 	int      detourBestAt;
++	qboolean jumpHeld;    /* the jump key, pressed for the player */
++	int      jumpAt;
++	qboolean crouchHeld;  /* the crouch key, held for the player */
++	qboolean triedJump;   /* stuck, and a jump already tried */
++	vec3_t   areaFrom;    /* where the player was at the start of the longer stuck check */
++	int      areaAt;
+ } eta_guide;
+ 
++/* Rocking against a wall moves the player a little each way, enough that
++   the quick check never sees them stand still: over this long, staying
++   this close to one spot is stuck too. */
++#define ETA_GUIDE_AREA_MS     3000
++#define ETA_GUIDE_AREA_RADIUS 48.0f
++
++/* Key numbers no keyboard has, beside the others this module presses. */
++#define ETA_GUIDE_KEY_JUMP   "991"
++#define ETA_GUIDE_KEY_CROUCH "990"
++
++static void ETA_GuideJump(qboolean down)
++{
++	if (down == eta_guide.jumpHeld)
++	{
++		return;
++	}
++	trap_SendConsoleCommand(va("%smoveup " ETA_GUIDE_KEY_JUMP "\n", down ? "+" : "-"));
++	eta_guide.jumpHeld = down;
++	if (down)
++	{
++		eta_guide.jumpAt = cg.time;
++	}
++}
++
++static void ETA_GuideCrouch(qboolean down)
++{
++	if (down == eta_guide.crouchHeld)
++	{
++		return;
++	}
++	trap_SendConsoleCommand(va("%smovedown " ETA_GUIDE_KEY_CROUCH "\n", down ? "+" : "-"));
++	eta_guide.crouchHeld = down;
++}
++
+ /* How near the switch the use key reaches it from the eyes: a little
+    inside the game's own CH_ACTIVATE_DIST. */
+ #define ETA_GUIDE_SWITCH_REACH 88.0f
+@@ -1515,7 +1555,11 @@ static void ETA_GuideRelease(void)
+ 		ETA_TurnBoost(qfalse);
+ 		eta_guide.active = qfalse;
+ 	}
+-	eta_guide.checkAt = 0;
++	ETA_GuideJump(qfalse);
++	ETA_GuideCrouch(qfalse);
++	eta_guide.checkAt   = 0;
++	eta_guide.areaAt    = 0;
++	eta_guide.triedJump = qfalse;
+ }
+ 
+ static void ETA_GuideFrame(void)
+@@ -1540,6 +1584,22 @@ static void ETA_GuideFrame(void)
+ 		return;
+ 	}
+ 
++	/* The way goes up or down a ladder, and the player is at it: climbed,
++	   as F climbs it. "Ladder up, F climbs" was said, and the tester,
++	   being led, walked round and round at its foot. The guide takes up
++	   the way again at the top. */
++	if (CG_AccessibilityMarkerLadderNext())
++	{
++		etaLadder_t ladder;
++
++		if (CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.0f)
++		{
++			ETA_GuideRelease();
++			ETA_ClimbStart(&ladder);
++			return;
++		}
++	}
++
+ 	/* A door the way goes through that opens from a button or a lever
+ 	   elsewhere - the dungeon's gates open from a button on the wall
+ 	   beside them, and pressing use at the gate does nothing: the guide
+@@ -1620,18 +1680,40 @@ static void ETA_GuideFrame(void)
+ 
+ 	VectorSubtract(target, ps->origin, delta);
+ 	delta[2] = 0.0f;
++
++	/* Standing on the point itself there is nowhere to turn to - but the
++	   checks for being stuck below still run: a way whose next point
++	   will not move on from under the player is stuck too. */
+ 	if (VectorLength(delta) < 8.0f)
+ 	{
+-		ETA_GuideRelease();
+-		return;
++		ETA_AimKeys(0, 0);
++		ETA_TurnBoost(qfalse);
++	}
++	else
++	{
++		wanted[YAW]   = vectoyaw(delta);
++		wanted[PITCH] = ps->viewangles[PITCH] > 30.0f || ps->viewangles[PITCH] < -30.0f ? 0.0f : ps->viewangles[PITCH];
++		wanted[ROLL]  = 0.0f;
++		ETA_AimSteerAngles(wanted, ETA_GUIDE_TOLERANCE);
+ 	}
+-
+-	wanted[YAW]   = vectoyaw(delta);
+-	wanted[PITCH] = ps->viewangles[PITCH] > 30.0f || ps->viewangles[PITCH] < -30.0f ? 0.0f : ps->viewangles[PITCH];
+-	wanted[ROLL]  = 0.0f;
+-	ETA_AimSteerAngles(wanted, ETA_GUIDE_TOLERANCE);
+ 	eta_guide.active = qtrue;
+ 
++	/* The jumps and the low places on the way are taken for the player
++	   too: "Jump up, press space" was said, the tester did not know to
++	   press it while being led, and the guide walked them round and round
++	   below the ledge. A jump is a short press as the edge is reached;
++	   crouching is held for as long as the way goes under something. */
++	if (eta_guide.jumpHeld && (cg.time - eta_guide.jumpAt > 200 || cg.time < eta_guide.jumpAt))
++	{
++		ETA_GuideJump(qfalse);
++	}
++	else if (!eta_guide.jumpHeld && CG_AccessibilityMarkerJumpNow()
++	         && (cg.time - eta_guide.jumpAt > 1000 || cg.time < eta_guide.jumpAt))
++	{
++		ETA_GuideJump(qtrue);
++	}
++	ETA_GuideCrouch(CG_AccessibilityMarkerCrouchNow());
++
+ 	/* A closed door the way goes through: opened as it is reached. */
+ 	if (!eta_guide.detour && CG_AccessibilityDoorAhead()
+ 	    && (cg.time - eta_guide.doorAt > ETA_GUIDE_DOOR_MS || cg.time < eta_guide.doorAt))
+@@ -1650,8 +1732,29 @@ static void ETA_GuideFrame(void)
+ 	if (eta_guide.detour)
+ 	{
+ 		eta_guide.checkAt = 0;
++		eta_guide.areaAt  = 0;
+ 		return;
+ 	}
++
++	if (!eta_guide.areaAt || cg.time < eta_guide.areaAt)
++	{
++		eta_guide.areaAt = cg.time;
++		VectorCopy(ps->origin, eta_guide.areaFrom);
++	}
++	else if (Distance(ps->origin, eta_guide.areaFrom) > ETA_GUIDE_AREA_RADIUS)
++	{
++		eta_guide.areaAt = cg.time;
++		VectorCopy(ps->origin, eta_guide.areaFrom);
++	}
++	else if (cg.time - eta_guide.areaAt >= ETA_GUIDE_AREA_MS)
++	{
++		/* Taken as held still: the quick check below acts at once. */
++		eta_guide.areaAt = cg.time;
++		VectorCopy(ps->origin, eta_guide.checkFrom);
++		eta_guide.checkAt   = cg.time - ETA_GUIDE_STUCK_MS;
++		eta_guide.triedJump = qtrue;
++	}
++
+ 	if (!eta_guide.checkAt || cg.time < eta_guide.checkAt)
+ 	{
+ 		eta_guide.checkAt = cg.time;
+@@ -1659,10 +1762,21 @@ static void ETA_GuideFrame(void)
+ 	}
+ 	else if (cg.time - eta_guide.checkAt >= ETA_GUIDE_STUCK_MS)
+ 	{
+-		if (Distance(ps->origin, eta_guide.checkFrom) < ETA_GUIDE_STUCK_MOVE)
++		if (Distance(ps->origin, eta_guide.checkFrom) < ETA_GUIDE_STUCK_MOVE && !eta_guide.triedJump)
++		{
++			/* Held against something low: a jump first - a crate, a
++			   step a little too high - before going round it. */
++			eta_guide.triedJump = qtrue;
++			if (!eta_guide.jumpHeld)
++			{
++				ETA_GuideJump(qtrue);
++			}
++		}
++		else if (Distance(ps->origin, eta_guide.checkFrom) < ETA_GUIDE_STUCK_MOVE)
+ 		{
+ 			vec3_t forward, ahead;
+ 
++			eta_guide.triedJump = qfalse;
+ 			/* What stopped them, a step ahead, is kept clear of from
+ 			   now on, and the way looked for round it. */
+ 			AngleVectors(ps->viewangles, forward, NULL, NULL);
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 3c5b18b..dc4ba05 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -178,6 +178,10 @@ typedef struct
+ 	qboolean throughMines; /* this search may cross a mine: there was no way round */
+ 	vec3_t   stairsAt;    /* the foot of the stairs last told of */
+ 	qboolean saidStairs;
++	qboolean jumpNext;    /* the next place the way is not a walk is a jump */
++	qboolean ladderNext;  /* ... or a ladder */
++	vec3_t   jumpEdge;    /* where it is taken from */
++	vec3_t   jumpLanding;
+ } eta_route_t;
+ 
+ static eta_route_t eta_route;
+@@ -1166,13 +1170,18 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ 	}
+ 
+ 	/* Where along the way the player is: the nearest point, from where
+-	   they were last time onward. */
++	   they were last time onward - a point a floor above or below counted
++	   as far off as it would be to walk. On the dungeon's spiral stair a
++	   point of the next turn up, straight overhead, was the nearest, and
++	   the way was taken to be a whole turn on from where the player
++	   stood: the walk guide circled the foot of the stair for a minute. */
+ 	for (i = eta_route.along; i < count; i++)
+ 	{
+ 		float distance;
+ 
+ 		ETA_PathFinder_Point(i, point);
+-		distance = Distance(here, point);
++		distance = sqrtf((here[0] - point[0]) * (here[0] - point[0]) + (here[1] - point[1]) * (here[1] - point[1]))
++		           + 3.0f * fabsf(here[2] - point[2]);
+ 
+ 		if (distance < nearestDistance)
+ 		{
+@@ -1208,20 +1217,55 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ 		}
+ 	}
+ 
++	eta_route.jumpNext   = (qboolean)(special < count && special >= 1
++	                                   && ETA_PathFinder_PointKind(special) == ETA_PATH_JUMP);
++	eta_route.ladderNext = (qboolean)(special < count && special >= 1
++	                                   && (ETA_PathFinder_PointKind(special) == ETA_PATH_LADDER_UP
++	                                       || ETA_PathFinder_PointKind(special) == ETA_PATH_LADDER_DOWN));
++	if (eta_route.jumpNext)
++	{
++		ETA_PathFinder_Point(special - 1, eta_route.jumpEdge);
++		ETA_PathFinder_Point(special, eta_route.jumpLanding);
++	}
++
+ 	ETA_RouteSayJump(special, count, here);
+ 	ETA_RouteSayStairs(nearest, special, here);
+ 	ETA_RouteSayCrouch(nearest, count, here);
+ 
+-	/* The furthest point a few steps on that can be walked to straight. */
++	/* The furthest point a few steps on that can be walked to straight -
++	   and is not a short cut the way itself does not take: a point the
++	   way reaches only round a turn of a spiral stair, or round a corner,
++	   lies much nearer in a straight line than along the way, and a line
++	   that looks clear to it goes up the stairwell or through the turn. */
+ 	best = nearest;
+-	for (i = MIN(MIN(count - 1, special - 1), nearest + ETA_ROUTE_LOOKAHEAD); i > nearest; i--)
+ 	{
+-		ETA_PathFinder_Point(i, point);
++		float  along[ETA_ROUTE_LOOKAHEAD + 1];
++		vec3_t prev, next;
++		int    last = MIN(MIN(count - 1, special - 1), nearest + ETA_ROUTE_LOOKAHEAD);
+ 
+-		if (ETA_RouteClear(here, point))
++		along[0] = 0.0f;
++		ETA_PathFinder_Point(nearest, prev);
++		for (i = nearest + 1; i <= last; i++)
+ 		{
+-			best = i;
+-			break;
++			ETA_PathFinder_Point(i, next);
++			along[i - nearest] = along[i - nearest - 1] + Distance(prev, next);
++			VectorCopy(next, prev);
++		}
++
++		for (i = last; i > nearest; i--)
++		{
++			ETA_PathFinder_Point(i, point);
++
++			if (along[i - nearest] > 64.0f && Distance(here, point) < 0.7f * along[i - nearest])
++			{
++				continue;
++			}
++
++			if (ETA_RouteClear(here, point))
++			{
++				best = i;
++				break;
++			}
+ 		}
+ 	}
+ 
+@@ -1751,6 +1795,55 @@ qboolean CG_AccessibilityMarkerSteerPoint(vec3_t out)
+ 	return qtrue;
+ }
+ 
++/**
++ * @brief Whether the way needs a jump just ahead, for the walk guide to
++ * take: the player is at its edge, and the landing is ahead of them.
++ */
++qboolean CG_AccessibilityMarkerJumpNow(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              toEdge, toLanding, forward;
++
++	if (!eta_marker.active || !eta_route.jumpNext)
++	{
++		return qfalse;
++	}
++
++	VectorSubtract(eta_route.jumpEdge, ps->origin, toEdge);
++	toEdge[2] = 0.0f;
++	if (VectorLength(toEdge) > 40.0f)
++	{
++		return qfalse;
++	}
++
++	VectorSubtract(eta_route.jumpLanding, ps->origin, toLanding);
++	toLanding[2] = 0.0f;
++	VectorNormalize(toLanding);
++	AngleVectors(ps->viewangles, forward, NULL, NULL);
++	forward[2] = 0.0f;
++	VectorNormalize(forward);
++
++	return (qboolean)(DotProduct(forward, toLanding) > 0.7f);
++}
++
++/**
++ * @brief Whether the way goes up or down a ladder next, for the walk
++ * guide to climb it once the player is at it.
++ */
++qboolean CG_AccessibilityMarkerLadderNext(void)
++{
++	return (qboolean)(eta_marker.active && eta_route.ladderNext);
++}
++
++/**
++ * @brief Whether the way goes under something low here, for the walk
++ * guide to crouch: told to crouch and not yet to stand.
++ */
++qboolean CG_AccessibilityMarkerCrouchNow(void)
++{
++	return (qboolean)(eta_marker.active && eta_route.crouched);
++}
++
+ /**
+  * @brief The way looked for again from here: the walk guide found the
+  * player held against something the way did not expect.
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 9fd6bb6..8f09a3c 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2229,6 +2229,9 @@ void CG_AccessibilityMarkerReset( void );
+ qboolean CG_AccessibilityMarkerActive( void );
+ qboolean CG_AccessibilityMarkerSteerPoint( vec3_t out );
+ void CG_AccessibilityMarkerReplan( void );
++qboolean CG_AccessibilityMarkerJumpNow( void );
++qboolean CG_AccessibilityMarkerCrouchNow( void );
++qboolean CG_AccessibilityMarkerLadderNext( void );
+ void CG_AccessibilityMarkerBlocked( const vec3_t at, float radius );
+ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );

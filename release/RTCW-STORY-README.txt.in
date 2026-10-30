@@ -1,0 +1,85 @@
+Wolf's Lair: The End of Terror - test build @VERSION@
+
+A story game made from Alexandru Georgian's novel, played on Return to
+Castle Wolfenstein with a screen reader and the keyboard. It speaks
+through NVDA when NVDA is running, and through the Windows voice
+otherwise. This test build has the first mission: the prologue, The
+Silent Shock.
+
+You need Return to Castle Wolfenstein's own files. They are not in this
+download.
+
+
+INSTALL
+
+1. Unzip this anywhere. It makes one folder.
+2. Open Return to Castle Wolfenstein's own folder, then its Main folder.
+   Copy these five files into the "main" folder of this download:
+   pak0.pk3, sp_pak1.pk3, sp_pak2.pk3, sp_pak3.pk3, sp_pak4.pk3.
+   The game will not start without sp_pak4.pk3. It may report a few
+   menu errors in its console as it starts; they do no harm.
+3. Run "Play the prologue". Windows may warn that the program is not
+   recognised: choose More info, then Run anyway.
+
+"Play Return to Castle Wolfenstein" starts the original game instead,
+with the same speech.
+
+
+STARTING
+
+The mission screen reads the briefing. Press Enter to begin; if nothing
+happens, press Enter once more, as the level finishes loading.
+
+
+THE KEYS THE MODE ADDS
+
+  H         health, armor, weapon, ammunition, and which way you face
+  O         the objective, and the way to it: "the generator, ahead
+            right, 12 meters"
+  T (hold)  turn onto the nearest enemy in sight and stay on him;
+            a tone says you are on target. Fire as usual.
+  Y         every enemy in sight, nearest first
+  L         the last line of the story, again
+  F6        repeat the last thing said
+  F8        stop speaking
+
+The keys are added only if they are free in your configuration.
+
+
+THE GAME'S OWN KEYS
+
+  Up and Down arrows, or W and S   walk forward and back
+  Left and Right arrows            turn
+  A and D                          step sideways
+  Ctrl                             fire
+  R                                reload
+  F                                use: doors, switches, the generator
+  Space                            jump
+  C                                crouch
+  1 to 8                           weapons
+  Escape                           the game menu
+
+
+WHAT YOU HEAR
+
+  A soft tone, every second and a bit, from the place you need to go
+  next. Walk toward it.
+  A quick tick from the nearest enemy in sight, faster the closer he is.
+  A thud when you walk into a wall, from the side you hit.
+  The story, as it happens. L says the last line again.
+
+
+THE PROLOGUE
+
+Revus, in the Andromeda galaxy. You break into the Great Temple of the
+Ah'Zur: bring down its shield at the generator, take the Tettoran
+supercolony from the sanctum past the great hall, and reach your ship on
+the landing pad to the east. The sentinels of the Twelfth Legion wake
+when the shield falls.
+
+
+This is a test. Tell us what is hard to follow, what is said too often
+or not at all, and where you got lost.
+
+The engine is iortcw, under the GNU GPL (iortcw-COPYING.txt). The NVDA
+controller client is NV Access's, under the LGPL (nvda/LICENSE.txt).

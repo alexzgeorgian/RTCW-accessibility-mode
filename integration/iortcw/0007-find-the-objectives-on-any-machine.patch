@@ -1,0 +1,225 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 013b730..489da7e 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -40,6 +40,7 @@ static struct {
+ 	char map[MAX_QPATH];
+ 	int numObjectiveTexts;
+ 	char objectiveText[ETA_MAX_OBJECTIVES][256];
++	char objectivesWhy[256];
+ } eta;
+ 
+ static void CG_AccessibilitySay( const char *text ) {
+@@ -154,36 +155,103 @@ static const char *CG_AccessibilityHintName( int hint ) {
+  * beside the map's name; each objective is a paragraph under the
+  * heading, and its check box is the cvar g_objective1, 2 and on.
+  */
++/* Compared letter by letter here, not with the shared helpers, so the
++   one place the objectives hang on is plain to read. */
++static qboolean CG_AccessibilitySameName( const char *a, const char *b ) {
++	int ca, cb;
++
++	if ( !a || !b ) {
++		return qfalse;
++	}
++	do {
++		ca = (unsigned char)*a++;
++		cb = (unsigned char)*b++;
++		if ( ca >= 'A' && ca <= 'Z' ) {
++			ca += 'a' - 'A';
++		}
++		if ( cb >= 'A' && cb <= 'Z' ) {
++			cb += 'a' - 'A';
++		}
++		if ( ca != cb ) {
++			return qfalse;
++		}
++	} while ( ca );
++	return qtrue;
++}
++
++/* Each campaign map's objectives page, as ui/briefing.menu names it, for
++   when the menu cannot be read or does not name the map. */
++static const char *etaObjectivePages[][2] = {
++	{ "escape1", "m1_l1" }, { "escape2", "m1_l2" }, { "tram", "m1_l3" },
++	{ "village1", "m2_l4" }, { "crypt1", "m2_l5" }, { "crypt2", "m2_l6" },
++	{ "church", "m2_l7" }, { "boss1", "m2_l8" }, { "forest", "m3_l9" },
++	{ "rocket", "m3_l10" }, { "baseout", "m3_l11" }, { "assault", "m3_l12" },
++	{ "sfm", "m4_l13" }, { "factory", "m4_l14" }, { "trainyard", "m4_l15" },
++	{ "swf", "m4_l16" }, { "norway", "m5_l17" }, { "xlabs", "m5_l18" },
++	{ "boss2", "m5_l19" }, { "dam", "m6_l20" }, { "village2", "m6_l21" },
++	{ "chateau", "m6_l22" }, { "dark", "m6_l23" }, { "dig", "m7_l24" },
++	{ "castle", "m7_l25" }, { "end", "m7_l26" },
++};
++
++/* The map's own name: the server's, else the mapname cvar, without a
++   maps/ folder or .bsp ending. */
++static void CG_AccessibilityMapName( void ) {
++	char *p;
++
++	Q_strncpyz( eta.map, Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "mapname" ), sizeof( eta.map ) );
++	if ( !eta.map[0] ) {
++		trap_Cvar_VariableStringBuffer( "mapname", eta.map, sizeof( eta.map ) );
++	}
++	p = strrchr( eta.map, '/' );
++	if ( p ) {
++		memmove( eta.map, p + 1, strlen( p + 1 ) + 1 );
++	}
++	p = strrchr( eta.map, '.' );
++	if ( p && CG_AccessibilitySameName( p, ".bsp" ) ) {
++		*p = '\0';
++	}
++}
++
++/*
++ * The mission's objectives, in the words of its notebook. The briefing
++ * page draws them from a text file per map, named in ui/briefing.menu
++ * beside the map's name; each objective is a paragraph under the
++ * heading, and its check box is the cvar g_objective1, 2 and on. When
++ * none are found, eta.objectivesWhy says what was looked for.
++ */
+ static void CG_AccessibilityLoadObjectives( void ) {
+ 	static char menu[65536];
+ 	char file[MAX_QPATH];
+ 	char page[4096];
++	char firstMap[MAX_QPATH];
+ 	fileHandle_t f;
+-	int len;
++	int len, menuLen, pageLen, mapPages = 0;
+ 	char *p, *token;
+ 	char itemMap[MAX_QPATH], itemFile[MAX_QPATH];
+ 	int depth = 0;
++	int i;
+ 
+ 	eta.numObjectiveTexts = 0;
+-	file[0] = '\0';
+-
+-	len = trap_FS_FOpenFile( "ui/briefing.menu", &f, FS_READ );
+-	if ( !f ) {
+-		return;
++	eta.objectivesWhy[0] = '\0';
++	file[0] = firstMap[0] = '\0';
++	CG_AccessibilityMapName();
++
++	menuLen = trap_FS_FOpenFile( "ui/briefing.menu", &f, FS_READ );
++	if ( f && menuLen > 0 && menuLen < (int)sizeof( menu ) ) {
++		trap_FS_Read( menu, menuLen, f );
++		menu[menuLen] = '\0';
++	} else {
++		menu[0] = '\0';
+ 	}
+-	if ( len <= 0 || len >= (int)sizeof( menu ) ) {
++	if ( f ) {
+ 		trap_FS_FCloseFile( f );
+-		return;
+ 	}
+-	trap_FS_Read( menu, len, f );
+-	menu[len] = '\0';
+-	trap_FS_FCloseFile( f );
+ 
+ 	/* Each itemDef that shows for this map and reads a file ending in
+ 	   _p1a.txt is the objectives page. */
+ 	p = menu;
+ 	itemMap[0] = itemFile[0] = '\0';
+-	while ( !file[0] ) {
++	while ( menu[0] && !file[0] ) {
+ 		token = COM_Parse( &p );
+ 		if ( !token[0] ) {
+ 			break;
+@@ -193,8 +261,14 @@ static void CG_AccessibilityLoadObjectives( void ) {
+ 			continue;
+ 		}
+ 		if ( !Q_stricmp( token, "}" ) ) {
+-			if ( depth == 3 && !Q_stricmp( itemMap, eta.map ) && strstr( itemFile, "_p1" ) ) {
+-				Q_strncpyz( file, itemFile, sizeof( file ) );
++			if ( depth == 3 && itemMap[0] && strstr( itemFile, "_p1" ) ) {
++				mapPages++;
++				if ( !firstMap[0] ) {
++					Q_strncpyz( firstMap, itemMap, sizeof( firstMap ) );
++				}
++				if ( CG_AccessibilitySameName( itemMap, eta.map ) ) {
++					Q_strncpyz( file, itemFile, sizeof( file ) );
++				}
+ 			}
+ 			if ( depth == 3 ) {
+ 				itemMap[0] = itemFile[0] = '\0';
+@@ -221,17 +295,33 @@ static void CG_AccessibilityLoadObjectives( void ) {
+ 	}
+ 
+ 	if ( !file[0] ) {
+-		return;
++		for ( i = 0; i < (int)ARRAY_LEN( etaObjectivePages ); i++ ) {
++			if ( CG_AccessibilitySameName( etaObjectivePages[i][0], eta.map ) ) {
++				Com_sprintf( file, sizeof( file ), "text/EnglishUSA/%s_br_p1a.txt", etaObjectivePages[i][1] );
++				break;
++			}
++		}
+ 	}
+ 
+-	len = trap_FS_FOpenFile( file, &f, FS_READ );
+-	if ( !f ) {
++	if ( !file[0] ) {
++		Com_sprintf( eta.objectivesWhy, sizeof( eta.objectivesWhy ),
++					 "The map is named %s, %i letters. The briefing menu is %i bytes, with %i map pages, the first for %s, and none for this map.",
++					 eta.map[0] ? eta.map : "nothing", (int)strlen( eta.map ), menuLen, mapPages,
++					 firstMap[0] ? firstMap : "nothing" );
+ 		return;
+ 	}
+-	if ( len <= 0 || len >= (int)sizeof( page ) ) {
+-		trap_FS_FCloseFile( f );
++
++	pageLen = trap_FS_FOpenFile( file, &f, FS_READ );
++	if ( !f || pageLen <= 0 || pageLen >= (int)sizeof( page ) ) {
++		if ( f ) {
++			trap_FS_FCloseFile( f );
++		}
++		Com_sprintf( eta.objectivesWhy, sizeof( eta.objectivesWhy ),
++					 "The map is %s. Its objectives file, %s, could not be read: %i bytes.",
++					 eta.map, file, pageLen );
+ 		return;
+ 	}
++	len = pageLen;
+ 	trap_FS_Read( page, len, f );
+ 	page[len] = '\0';
+ 	trap_FS_FCloseFile( f );
+@@ -282,6 +372,11 @@ static void CG_AccessibilityLoadObjectives( void ) {
+ 			eta.numObjectiveTexts++;
+ 		}
+ 	}
++	if ( !eta.numObjectiveTexts ) {
++		Com_sprintf( eta.objectivesWhy, sizeof( eta.objectivesWhy ),
++					 "The map is %s. Its objectives file, %s, is %i bytes, with no objectives in it.",
++					 eta.map, file, pageLen );
++	}
+ }
+ 
+ static int CG_AccessibilityObjectiveBits( void ) {
+@@ -297,7 +392,11 @@ static int CG_AccessibilityObjectiveBits( void ) {
+ 	return bits;
+ }
+ 
++/* Looked for again when asked, in case the map was not known yet. */
+ static int CG_AccessibilityObjectiveCount( void ) {
++	if ( !eta.numObjectiveTexts ) {
++		CG_AccessibilityLoadObjectives();
++	}
+ 	return eta.numObjectiveTexts;
+ }
+ 
+@@ -307,7 +406,7 @@ static void CG_AccessibilityObjectives_f( void ) {
+ 	char text[2048];
+ 
+ 	if ( !count ) {
+-		CG_AccessibilitySay( "No objectives for this map" );
++		ETA_Speech_SayLong( va( "No objectives found. %s", eta.objectivesWhy ) );
+ 		return;
+ 	}
+ 
+@@ -480,7 +579,6 @@ void CG_AccessibilityFrame( void ) {
+ 
+ 	if ( !eta.started ) {
+ 		eta.started = qtrue;
+-		Q_strncpyz( eta.map, Info_ValueForKey( CG_ConfigString( CS_SERVERINFO ), "mapname" ), sizeof( eta.map ) );
+ 		CG_AccessibilityLoadObjectives();
+ 		eta.objectives = CG_AccessibilityObjectiveBits();
+ 		eta.weapon = ps->weapon;

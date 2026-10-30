@@ -1,0 +1,78 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 7d09f57..013b730 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -572,6 +572,18 @@ void CG_AccessibilityFrame( void ) {
+ 		eta.objectives = bits;
+ 	}
+ 
++	/* A problem the game passed over rather than stopping for, said once:
++	   what it could not find, for the tester to pass on. */
++	{
++		char problem[512];
++
++		trap_Cvar_VariableStringBuffer( "eta_problem", problem, sizeof( problem ) );
++		if ( problem[0] ) {
++			ETA_Speech_SayLong( va( "Problem: %s", problem ) );
++			trap_Cvar_Set( "eta_problem", "" );
++		}
++	}
++
+ 	trap_Cvar_VariableStringBuffer( "cg_youGotMail", value, sizeof( value ) );
+ 	mail = atoi( value );
+ 	if ( mail != eta.mail ) {
+diff --git a/SP/code/game/ai_cast_script.c b/SP/code/game/ai_cast_script.c
+index d468d1b..32e0403 100644
+--- a/SP/code/game/ai_cast_script.c
++++ b/SP/code/game/ai_cast_script.c
+@@ -549,8 +549,24 @@ void AICast_ScriptParse( cast_state_t *cs ) {
+ 
+ 						if ( !Q_stricmp( action->actionString, "giveweapon" ) ) { // register weapon for client pre-loading
+ 							gitem_t *weap = BG_FindItem2( token );    // (SA) FIXME: rats, need to fix this for weapon names with spaces: 'mauser rifle'
++#ifdef FEATURE_ACCESSIBILITY
++							/* [Accessibility]: an item not found is passed over
++							   and reported, not a fatal "RegisterItem: NULL": on a
++							   tester's Mac escape1 stopped here as it started,
++							   with the same files Linux plays. The cgame says the
++							   report as the mission begins. */
++							if ( !weap ) {
++								G_Printf( S_COLOR_YELLOW "WARNING: giveweapon: no item called '%s' (%i letters), %i items known\n",
++										  token, (int)strlen( token ), bg_numItems );
++								trap_Cvar_Set( "eta_problem", va( "a character is given %s, %i letters, which the game cannot find among its %i items",
++																   token, (int)strlen( token ), bg_numItems ) );
++							} else {
++								RegisterItem( weap );
++							}
++#else
+ //							if(weap)
+ 							RegisterItem( weap );   // don't be nice, just do it.  if it can't find it, you'll bomb out to the error menu
++#endif
+ 						}
+ //----(SA)	end
+ 					}
+diff --git a/SP/code/game/bg_animation.c b/SP/code/game/bg_animation.c
+index 90b4361..613d3f4 100644
+--- a/SP/code/game/bg_animation.c
++++ b/SP/code/game/bg_animation.c
+@@ -800,6 +800,11 @@ BG_ParseConditionBits
+ =================
+ */
+ #define RESULT_SIZE 2
++#ifdef FEATURE_ACCESSIBILITY
++// [Accessibility]: both modules that build this file, the game and the cgame, have it
++void trap_Cvar_Set( const char *var_name, const char *value );
++#endif
++
+ void BG_ParseConditionBits( char **text_pp, animStringItem_t *stringTable, int condIndex, int result[RESULT_SIZE] ) {
+ 	qboolean endFlag = qfalse;
+ 	int indexFound;
+@@ -893,6 +898,9 @@ void BG_ParseConditionBits( char **text_pp, animStringItem_t *stringTable, int c
+ 					if ( indexFound < 0 ) {
+ 						Com_Printf( S_COLOR_YELLOW "WARNING: BG_ParseConditionBits: unknown '%s' passed over: (%s, line %i)\n",
+ 									currentString, globalFilename ? globalFilename : "?", COM_GetCurrentParseLine() + 1 );
++						trap_Cvar_Set( "eta_problem", va( "the animation script %s, line %i, names %s, %i letters, which the game does not know",
++														   globalFilename ? globalFilename : "?", COM_GetCurrentParseLine() + 1,
++														   currentString, (int)strlen( currentString ) ) );
+ 						tempBits[0] = tempBits[1] = 0;
+ 					} else {
+ 						// convert the index into a bitflag
