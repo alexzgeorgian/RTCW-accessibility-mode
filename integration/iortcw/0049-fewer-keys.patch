@@ -1,0 +1,391 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 52cf08d9..f26c6df7 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -617,13 +617,14 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i done", done, count ) );
+ 	}
+ 
+-	/* Where the player is, and how far the exploring has got, as V
+-	   says it. */
++	/* Where the player is and which way they face - H's, before H went
++	   to keep the keys few - and how far the exploring has got. */
+ 	{
+ 		char progress[160];
+ 
+ 		CG_AccessibilityPlaceText( progress, sizeof( progress ) );
+-		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
++		Q_strcat( text, sizeof( text ), va( ". %s, facing %s", progress,
++											ETA_HudNarrator_FacingName( ETA_HudNarrator_FacingFromYaw( cg.predictedPlayerState.viewangles[YAW] ) ) ) );
+ 		CG_AccessibilityExploreProgress( progress, sizeof( progress ) );
+ 		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+ 		CG_AccessibilityThingsProgress( progress, sizeof( progress ) );
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index e67db593..58cc003e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1028,7 +1028,7 @@ static int ETA_ChooseTake(const etaAimTarget_t *list, int count, int *index)
+ 	}
+ 
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_Speech_Say(va("%s is no longer close by. K chooses again", eta_choose.target.name));
++	ETA_Speech_Say(va("%s is no longer close by. F turns you to the nearest", eta_choose.target.name));
+ 	return ETA_CHOOSE_DONE;
+ }
+ 
+@@ -1443,7 +1443,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 	if (list[index].meters > ETA_F_CLOSE_METERS)
+ 	{
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say("Nothing close. K finds things further off");
++		ETA_Speech_Say("Nothing close. T finds things further off");
+ 		ETA_UseKey(qtrue);
+ 		return;
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index d1c9224c..4ea96a5c 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -435,8 +435,8 @@ void CG_AccessibilityThingsNext(void)
+ 	{
+ 		ETA_Speech_Say(hidden ? va("Everything else has been taken or used. %d secret %s still to find", hidden,
+ 		                           hidden == 1 ? "area" : "areas")
+-		               : eta_things.count ? "Everything found has been taken or used. V finds new ways"
+-		               : "Nothing found yet to take or use. V finds new ways");
++		               : eta_things.count ? "Everything found has been taken or used. L finds new ways"
++		               : "Nothing found yet to take or use. L finds new ways");
+ 		eta_things.target = -1;
+ 		return;
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 466e4bfb..65a2a355 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1376,7 +1376,7 @@ static void ETA_WaysSayAll(void)
+ 		ETA_WayText(&eta_ways.ways[i], line, sizeof(line));
+ 		ETA_Speech_Say(line);
+ 	}
+-	ETA_Speech_Say("L and semicolon go through them");
++	ETA_Speech_Say("L goes through them");
+ 	ETA_Speech_EndReport();
+ }
+ 
+@@ -1518,6 +1518,74 @@ void CG_AccessibilityExploreProgress(char *out, size_t size)
+ 	ETA_ExploreProgress(out, size);
+ }
+ 
++/* For L, which says it first in a new place, as F3 did: "3 ways on: 2
++   doors, 1 doorway". The look L asked for is the one it describes. */
++void CG_AccessibilityWaysSummaryText(char *out, size_t size)
++{
++	ETA_WaysSummary(out, size);
++}
++
++static float ETA_FrontierFar(const vec3_t from, const vec3_t to);
++
++/*
++ * For L, after the ways on from here: the nearest way found anywhere in
++ * the level and never tried, as V led to before the keys were made few -
++ * one not among the ways on from here. qfalse with none.
++ */
++qboolean CG_AccessibilityNewWayNearest(vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 i, j, best = -1, meters;
++	float               bestFar = 0.0f;
++	vec3_t              delta;
++
++	for (i = 0; i < eta_frontier.count; i++)
++	{
++		const eta_frontier_t *way = &eta_frontier.ways[i];
++		float                far;
++
++		if (way->tried)
++		{
++			continue;
++		}
++		for (j = 0; j < eta_ways.wayCount; j++)
++		{
++			if (ETA_FrontierNear(way->feature, eta_ways.ways[j].feature, ETA_FRONTIER_SAME))
++			{
++				break;
++			}
++		}
++		if (j < eta_ways.wayCount)
++		{
++			continue;   /* one of the ways on from here: said with them */
++		}
++		far = ETA_FrontierFar(ps->origin, way->feature);
++		if (best < 0 || far < bestFar)
++		{
++			best    = i;
++			bestFar = far;
++		}
++	}
++	if (best < 0)
++	{
++		return qfalse;
++	}
++
++	VectorCopy(eta_frontier.ways[best].lead, lead);
++	Com_sprintf(name, nameSize, "the new %s", eta_wayWords[eta_frontier.ways[best].kind]);
++	if (nameSize > 8)
++	{
++		name[8] = (char)tolower((unsigned char)name[8]);
++	}
++	VectorSubtract(eta_frontier.ways[best].feature, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	meters = meters < 1 ? 1 : meters;
++	Com_sprintf(text, textSize, "Nearest way not yet tried: %s, %s, %d %s", eta_wayWords[eta_frontier.ways[best].kind],
++	            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(eta_frontier.ways[best].feature)), meters,
++	            meters == 1 ? "meter" : "meters");
++	return qtrue;
++}
++
+ /* How far a way is, for choosing the nearest: a floor up or down counts
+    double, as it does for the way out. */
+ static float ETA_FrontierFar(const vec3_t from, const vec3_t to)
+@@ -1672,7 +1740,7 @@ static void ETA_FrontierFrame(void)
+ 				eta_frontier.target = -1;
+ 				ETA_ExploreProgress(progress, sizeof(progress));
+ 				ETA_Speech_BeginReport();
+-				ETA_Speech_Say(va("New way reached. %s. V leads to the next", progress));
++				ETA_Speech_Say(va("New way reached. %s. L finds the next", progress));
+ 				ETA_Speech_EndReport();
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 8cae87b3..e6f7e7bd 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4346,7 +4346,7 @@ static void ETA_NarrateStuckDetection(playerState_t *ps, playerState_t *ops)
+ 		   already knows. Same report the objectives key gives, so a player
+ 		   who is wedged or lost hears the way out rather than a label for
+ 		   their predicament. */
+-		ETA_Speech_Say("You may be stuck. F3 says what is around you");
++		ETA_Speech_Say("You may be stuck. L says the ways on from here");
+ 	}
+ }
+ 
+@@ -4692,8 +4692,10 @@ static void ETA_DestinationStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              point, delta, exitPoint = { 0.0f, 0.0f, 0.0f };
+-	char                height[64], name[64], text[128];
+-	int                 i, model = 0, meters, ways, stamp, choices, waypoint;
++	char                height[64], name[64], text[128], newName[64], newText[128], summary[256];
++	int                 i, model = 0, meters, ways, stamp, choices, waypoint, newWay;
++	vec3_t              newLead;
++	qboolean            fresh = qfalse;
+ 	float               bestDistance = 0.0f;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -4714,7 +4716,8 @@ static void ETA_DestinationStep(int step)
+ 	}
+ 
+ 	ways    = CG_AccessibilityWaysList(&stamp);
+-	choices = ways + (model ? 1 : 0) + eta_waypointCount;
++	newWay  = CG_AccessibilityNewWayNearest(newLead, newName, sizeof(newName), newText, sizeof(newText)) ? 1 : 0;
++	choices = ways + newWay + (model ? 1 : 0) + eta_waypointCount;
+ 	if (!choices)
+ 	{
+ 		ETA_Speech_Say("Nowhere to go found yet. P marks where you stand");
+@@ -4724,14 +4727,21 @@ static void ETA_DestinationStep(int step)
+ 	{
+ 		eta_destinationStamp = stamp;
+ 		eta_destination      = -1;
++		fresh                = qtrue;
+ 	}
+ 	eta_destination = eta_destination < 0 ? ( step > 0 ? 0 : choices - 1 )
+ 	                  : ( eta_destination + step + choices ) % choices;
+ 
+-	/* A way on. */
++	/* A way on - the first in a new place said after how many there are
++	   of each, as F3 said them before the keys were made few. */
+ 	if (eta_destination < ways && CG_AccessibilityWayAt(eta_destination, point, name, sizeof(name), text, sizeof(text)))
+ 	{
+-		ETA_Speech_Say(va("%s. O leads there", text));
++		summary[0] = '\0';
++		if (fresh && eta_destination == 0)
++		{
++			CG_AccessibilityWaysSummaryText(summary, sizeof(summary));
++		}
++		ETA_Speech_Say(va("%s%s%s. O leads there", summary, summary[0] ? ". " : "", text));
+ 		VectorCopy(point, eta_chosenPoint);
+ 		Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+ 		eta_chosenSet = qtrue;
+@@ -4739,7 +4749,19 @@ static void ETA_DestinationStep(int step)
+ 		return;
+ 	}
+ 
+-	waypoint = eta_destination - ways - (model ? 1 : 0);   /* 0-based, or -1 for the way out */
++	/* The nearest way never tried, anywhere: V's, before the keys were
++	   made few. */
++	if (newWay && eta_destination == ways)
++	{
++		ETA_Speech_Say(va("%s. O leads there", newText));
++		VectorCopy(newLead, eta_chosenPoint);
++		Q_strncpyz(eta_chosenName, newName, sizeof(eta_chosenName));
++		eta_chosenSet = qtrue;
++		eta_chosenAt  = cg.time;
++		return;
++	}
++
++	waypoint = eta_destination - ways - newWay - (model ? 1 : 0);   /* 0-based, or -1 for the way out */
+ 	if (waypoint < 0)
+ 	{
+ 		VectorCopy(exitPoint, point);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index aeea888d..14da3088 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2261,6 +2261,8 @@ void CG_AccessibilityWaysFrame( void );
+ void CG_AccessibilityWaysReset( void );
+ void CG_AccessibilityExplore( void );
+ void CG_AccessibilityExploreProgress( char *out, size_t size );
++void CG_AccessibilityWaysSummaryText( char *out, size_t size );
++qboolean CG_AccessibilityNewWayNearest( vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ int CG_AccessibilityPlaceAt( const vec3_t at );
+ void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 4e494d1a..80d4f069 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8336,7 +8336,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index ) {
+  * a key deliberately unbound does not come back - while keys added by a
+  * later version are still offered.
+  *
+- * F1, F2, F3, F6, F7, F8, H, M, O, Insert, I, J, K, L, P, U, Y and Backspace are free in
++ * F1, F2, F6, F7, F8, M, O, Insert, L, P, T, U and Backspace are free in
+  * the stock default.cfg, which binds F4, F5, F9 and F11. The arrows are taken over
+  * only from the game's own turning, which they keep, and F and Enter only
+  * from the game's own use, which they still do.
+@@ -8356,7 +8356,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* Getting around. F3 is free in the stock config. The arrows
+ 		   still turn as the game's +left and +right do while held; a tap
+ 		   turns to the next compass point and says it. */
+-		{ K_F3,         "accessibilitySurroundings", 2, NULL },
+ 		{ 'o',          "accessibilityWayOut",       2, NULL },
+ 		{ K_LEFTARROW,  "+accessibilityTurnLeft",    2, "+left" },
+ 		{ K_RIGHTARROW, "+accessibilityTurnRight",   2, "+right" },
+@@ -8367,28 +8366,15 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'f',          "+accessibilityActivate",    3, "+activate" },
+ 		{ K_ENTER,      "+accessibilityActivate",    3, "+activate" },
+ 		{ K_INS,        "+accessibilityAimLock",     3, NULL },
+-		/* Choosing from a list, the way 1428: Shadows over Silesia does:
+-		   K and J step through the things to use, for F to turn to; I
+-		   and U through the enemies in sight, for Insert to lock on to.
+-		   All four are free in the stock config. */
+-		{ 'k',          "accessibilityUseNext",      4, NULL },
+-		{ 'j',          "accessibilityUsePrev",      4, NULL },
+-		{ 'i',          "accessibilityEnemyNext",    4, NULL },
+-		{ 'u',          "accessibilityEnemyPrev",    4, NULL },
+ 		/* Waypoints, as 1428 has them: P marks where the player stands,
+ 		   L steps through the way out and the waypoints to go to. Both
+ 		   free in the stock config. */
+ 		{ 'p',          "accessibilityWaypointPlace", 5, NULL },
+ 		{ 'l',          "accessibilityWaypointNext",  5, NULL },
+-		/* Which way the player faces, and what is ahead: H, free in the
+-		   stock config. */
+-		{ 'h',          "accessibilityFacing",        6, NULL },
+ 		/* A laptop has no Insert: U locks on to an enemy and U again lets
+-		   go, as F is for things; I and Y step through the enemies. Y is
+-		   free in the stock config, and U is taken over only from the
+-		   enemy step it had. */
++		   go, as F is for things. U is taken over only from the enemy step
++		   it once had. */
+ 		{ 'u',          "accessibilityEnemyLock",     7, "accessibilityEnemyPrev" },
+-		{ 'y',          "accessibilityEnemyPrev",     7, NULL },
+ 		/* The enemy callouts off and on, without the console: M, free in
+ 		   the stock config. */
+ 		{ 'm',          "accessibilityEnemyCallouts", 8, NULL },
+@@ -8398,21 +8384,39 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* G back on the kick, where the tenth generation let go of it on
+ 		   a misheard report: only where it is still empty. */
+ 		{ 'g',          "+kick",                      11, NULL },
+-		/* Back through the places L goes through - the ways on, the way
+-		   out, the waypoints - on the key beside it, free in the stock
+-		   config. */
+-		{ ';',          "accessibilityWaypointPrev",  12, NULL },
+-		/* Explore: to the nearest way never tried, anywhere in the level.
+-		   V is free in the stock config. */
+-		{ 'v',          "accessibilityExplore",       13, NULL },
+ 		/* To the nearest thing left to take, press or break, anywhere in
+ 		   the level. T is free in the stock config. */
+ 		{ 't',          "accessibilityThingsNext",    14, NULL },
+ 	};
+ 
++	/*
++	 * The keys given up when the keys were made few: the tester, with
++	 * fifteen keys for getting around, still got lost. F3's ways on and
++	 * V's nearest new way are on L now, H's facing on F1; K and J's
++	 * things are T's and F's, I and Y's enemies U's, and semicolon's
++	 * step back through L's list is L going round. Each is let go of
++	 * once, and only while it is still on the mode's own command - a key
++	 * the player put something else on is theirs. The commands are still
++	 * there, for a player who binds them.
++	 */
++	static const struct {
++		int key;
++		const char  *command;
++	} retired[] = {
++		{ K_F3, "accessibilitySurroundings" },
++		{ 'v',  "accessibilityExplore" },
++		{ ';',  "accessibilityWaypointPrev" },
++		{ 'k',  "accessibilityUseNext" },
++		{ 'j',  "accessibilityUsePrev" },
++		{ 'i',  "accessibilityEnemyNext" },
++		{ 'y',  "accessibilityEnemyPrev" },
++		{ 'h',  "accessibilityFacing" },
++	};
++	const int retiredAt = 15;
++
+ 	vmCvar_t installed;
+ 	int i;
+-	int newest = 0;
++	int newest = retiredAt;
+ 
+ 	trap_Cvar_Register( &installed, "eta_bindsInstalled", "0", CVAR_ARCHIVE );
+ 
+@@ -8436,6 +8440,18 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		}
+ 	}
+ 
++	if ( installed.integer < retiredAt ) {
++		for ( i = 0; i < (int)( sizeof( retired ) / sizeof( retired[0] ) ); i++ ) {
++			char current[MAX_STRING_CHARS];
++
++			current[0] = '\0';
++			trap_Key_GetBindingBuf( retired[i].key, current, sizeof( current ) );
++			if ( !Q_stricmp( current, retired[i].command ) ) {
++				trap_Key_SetBinding( retired[i].key, "" );
++			}
++		}
++	}
++
+ 	if ( newest > installed.integer ) {
+ 		trap_Cvar_Set( "eta_bindsInstalled", va( "%i", newest ) );
+ 	}
+@@ -8443,8 +8459,7 @@ void UI_AccessibilityInstallBinds( void ) {
+ 	/* U was the step back through the enemies before it was the lock,
+ 	   and the tester, pressing it to be turned to an enemy, heard only
+ 	   where the enemy was: the key had kept its old command. Wherever U
+-	   is still on that, it is moved on to the lock, every time - and
+-	   the step goes to Y where Y is free. */
++	   is still on that, it is moved on to the lock, every time. */
+ 	{
+ 		char current[MAX_STRING_CHARS];
+ 
+@@ -8452,11 +8467,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		trap_Key_GetBindingBuf( 'u', current, sizeof( current ) );
+ 		if ( !Q_stricmp( current, "accessibilityEnemyPrev" ) ) {
+ 			trap_Key_SetBinding( 'u', "accessibilityEnemyLock" );
+-			current[0] = '\0';
+-			trap_Key_GetBindingBuf( 'y', current, sizeof( current ) );
+-			if ( !current[0] ) {
+-				trap_Key_SetBinding( 'y', "accessibilityEnemyPrev" );
+-			}
+ 		}
+ 	}
+ 

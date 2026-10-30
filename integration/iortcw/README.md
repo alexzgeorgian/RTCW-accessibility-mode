@@ -1079,3 +1079,33 @@ outer wall halfway down; now one went all the way to the floor at its
 foot, and two left it by the radio room's doorway on the way. The tower
 stair and the round stair walked up as before. The edge guard stopped
 no walk down either stair; it has not yet been tried at a real drop.
+
+## 0049: fewer keys
+
+The tester, with some fifteen keys for getting around, still got lost,
+and asked for fewer, merged. Getting around now takes O (go on), L
+(choose where to go), T (things), F (use), U (fight) and F1 (where you
+are). What the others did is folded in:
+
+- F3's ways on are L's: the first L in a new place says how many of each
+  kind there are, then the first way (CG_AccessibilityWaysSummaryText).
+- V's nearest way never tried, anywhere in the level, is on L's list
+  after the ways on from here and before the way out, unless it is one of
+  them (CG_AccessibilityNewWayNearest): "Nearest way not yet tried: Door,
+  behind left, 30 meters. O leads there".
+- Semicolon's step back is L going round.
+- H's facing is at the end of F1's place: "In place 3, by the switch, of
+  5 found, facing west".
+- K and J's things to use are T's further off and F's close by; I and
+  Y's enemies are U's nearest.
+
+The retired keys (bind generation 15) are let go of once, and only where
+each is still on the mode's own command; the commands stay, for a player
+who binds them. The spoken hints that named them now name L, T or F.
+
+Checked in the first level: from the start of the room before the end,
+L said "3 ways on: 1 open way, 1 locked door, 1 doorway. Open way
+behind, new", then the doorway, the locked door, "Nearest way not yet
+tried: Doorway, behind, 107 meters", and the way out; F1 ended its place
+with "facing west"; and a config with generation 14 had F3, V, K, J, I,
+Y and H let go of, and kept L, O, T and U.
