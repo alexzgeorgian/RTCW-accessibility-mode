@@ -1035,3 +1035,47 @@ Checked in the first mission: from the room with the end lever, T lists
 the lever's wall as "Secret area, behind a door a switch opens", and is
 said near as the room is come to; with the setting off, T goes from the
 switch to the button, past the secret.
+
+## 0048: down the round stair, and stopped at the edge
+
+The tester, going down a turning stair, still fell. The round stair by
+the radio room in the first level showed why: walked straight, a round
+stair carries the player out to its outer wall; the stair keeper turned
+them only once the way ahead was shut, so they slid down along that
+wall, and halfway down the gap between the wall and the steps caught
+them - stuck in it, in the air, falling. Four changes to the keeper
+(cg_accessibility_keys.c):
+
+- The way on is tried a little slimmer than the player (6 units each
+  side, not 2) and a hair above the feet: sliding along the curved wall
+  the player's own box was already a fraction inside it, and every way
+  tried from there began "in the wall", so the keeper never turned.
+- It is tried first as a body 12 units wider each side, so the turn
+  comes before the wall rather than at it, and as the player's own
+  width only where the wide body fits nowhere.
+- A wall close beside the player - found by a thin post at waist to
+  chest height, square to each side and half way to ahead, so the treads
+  stepping up beside the player on a round stair are not taken for one -
+  is steered away from, up to 30 degrees, whether or not the way ahead
+  is open, and nothing is said for it.
+- On stairs is felt sooner: a step's worth up or down over 300 ms, not
+  700; and held against a wall with W down, the steps going on to one
+  side or the other count as stairs (the top landing of the round stair
+  meets its wall two steps down). Held still against a wall on stairs,
+  the keeper stays on.
+
+And the edge guard (ETA_EdgeGuardFrame, eta_edgeGuard, "Stopped at the
+edge of a drop" in Moving and aiming): walking forward on the ground,
+the way ahead is tried as the keeper tries it, and where nothing is
+underfoot within the distance the player needs to stop, and the drop
+there would hurt (the drop warning's own fall-damage height) - or, on
+stairs, is more than a few risers - the walk key is let go: "Edge. Drop
+4 meters. W again goes over". W again there goes over. Never with jump
+held, nor into water.
+
+Checked on the round stair by the radio room, walking down from its top
+with W alone, three times: before, each walk was caught against its
+outer wall halfway down; now one went all the way to the floor at its
+foot, and two left it by the radio room's doorway on the way. The tower
+stair and the round stair walked up as before. The edge guard stopped
+no walk down either stair; it has not yet been tried at a real drop.

@@ -196,7 +196,8 @@ menuDef {
 	ETA_YESNO(68, "Aim locks on to enemies by itself", "eta_autoLock")
 	ETA_YESNO(86, "Turned along the way as you walk", "eta_autoSteer")
 	ETA_YESNO(104, "T leads straight to secret areas", "eta_secretsLead")
-	ETA_BUTTON(132, "BACK", close eta_acc_moving ; open eta_accessibility)
+	ETA_YESNO(122, "Stopped at the edge of a drop", "eta_edgeGuard")
+	ETA_BUTTON(150, "BACK", close eta_acc_moving ; open eta_accessibility)
 }
 
 }

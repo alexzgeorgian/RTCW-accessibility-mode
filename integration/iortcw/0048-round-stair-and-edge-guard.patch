@@ -1,0 +1,487 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 7d74f4fc..52cf08d9 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -47,6 +47,7 @@ vmCvar_t eta_markerCues;
+ vmCvar_t eta_autoLock;
+ vmCvar_t eta_autoSteer;
+ vmCvar_t eta_stairKeeper;
++vmCvar_t eta_edgeGuard;
+ vmCvar_t eta_waysCallouts;
+ vmCvar_t eta_enemyCues;
+ vmCvar_t eta_secretsLead;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9abc93f8..e67db593 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2082,11 +2082,12 @@ static void ETA_GuideFrame(void)
+ #define ETA_STAIRS_KEEP_WIDEST   110     /* degrees either side tried: past a square corner */
+ #define ETA_STAIRS_KEEP_EVERY    100     /* ms between looks */
+ #define ETA_STAIRS_KEEP_RISE     14.0f   /* this much up or down... */
+-#define ETA_STAIRS_KEEP_OVER     700     /* ...over this long, walking: on stairs */
++#define ETA_STAIRS_KEEP_OVER     300     /* ...over this long, walking: on stairs */
+ #define ETA_STAIRS_KEEP_HOLD     1500    /* and still on them this long after */
+ #define ETA_STAIRS_KEEP_SAMPLES  12
+ #define ETA_STAIRS_KEEP_SAY_MS   2500    /* a bend said no oftener */
+ #define ETA_STAIRS_KEEP_LANDING  600     /* this long with no step: off the steps */
++#define ETA_STAIRS_KEEP_STUCK_MS 300     /* held against a wall this long: steps either side? */
+ 
+ static struct
+ {
+@@ -2102,25 +2103,33 @@ static struct
+ 	float    yaw;       /* turning to this */
+ 	int      side;      /* the way the flight last bent: -1 left, 1 right */
+ 	int      saidAt;    /* "Stairs bend left" last said */
++	int      stuckAt;   /* walking into something since, or 0 */
+ } eta_stairKeep;
+ 
+ /* How far along a yaw the player walks, a stride at a time as the game
+    steps them, before a wall or an edge; and how far up or down that is. */
+-static float ETA_StairsKeepProbe(float yaw, float *rise, qboolean *edge)
++static float ETA_StairsKeepProbeWide(float yaw, float wider, float *rise, qboolean *edge)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              mins, maxs, at, dir;
+ 	float               walked = 0.0f, rad = DEG2RAD(yaw);
+ 	int                 s;
+ 
++	/* A little slimmer than the player: sliding along the curved wall of
++	   the round stair by the radio room, the player's own box was a hair
++	   inside it, and every way tried from there began "in the wall". */
+ 	VectorCopy(ps->mins, mins);
+ 	VectorCopy(ps->maxs, maxs);
+-	mins[0] += 2.0f;
+-	mins[1] += 2.0f;
+-	maxs[0] -= 2.0f;
+-	maxs[1] -= 2.0f;
++	mins[0] += 6.0f - wider;
++	mins[1] += 6.0f - wider;
++	maxs[0] -= 6.0f - wider;
++	maxs[1] -= 6.0f - wider;
+ 	VectorSet(dir, cosf(rad), sinf(rad), 0.0f);
+ 	VectorCopy(ps->origin, at);
++	/* A hair above the feet: the box set down where the player stands
++	   met the step under them - on the round stair by the radio room,
++	   every way round was "solid" and the keeper never turned. */
++	at[2] += 1.0f;
+ 	*edge = qfalse;
+ 
+ 	for (s = 0; s < ETA_STAIRS_KEEP_STRIDES; s++)
+@@ -2161,17 +2170,84 @@ static float ETA_StairsKeepProbe(float yaw, float *rise, qboolean *edge)
+ 	return walked;
+ }
+ 
++static float ETA_StairsKeepProbe(float yaw, float *rise, qboolean *edge)
++{
++	return ETA_StairsKeepProbeWide(yaw, 0.0f, rise, edge);
++}
++
++/* Which side a wall of the flight is close on, walking along a yaw: -1
++   the left, 1 the right, 0 neither, or both. Walking down the round
++   stair by the radio room the tester slid along its outer wall, and
++   halfway down that wall and the steps closed on the player: stuck, in
++   the air, and dropping. The keeper keeps them off it. */
++#define ETA_STAIRS_KEEP_WALL_NEAR 12.0f   /* closer than this: steered off */
++#define ETA_STAIRS_KEEP_WALL_LOOK 64.0f
++#define ETA_STAIRS_KEEP_WALL_TURN 12.0f   /* degrees away, at a time */
++
++static int ETA_StairsKeepWallSide(float yaw)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              mins, maxs, at, side, end;
++	float               near[2];
++	int                 k;
++
++	/* A thin upright post, waist to chest high, at the player's middle:
++	   walls, and not the treads beside the player, which on a round stair
++	   step up within a body's width. How far it goes, less the player's
++	   own half width, is how far their side is from the wall. */
++	VectorSet(mins, -4.0f, -4.0f, 0.0f);
++	VectorSet(maxs, 4.0f, 4.0f, 32.0f);
++	VectorCopy(ps->origin, at);
++
++	/* Square to each side, and half way between that and ahead: the
++	   outer wall of a round stair is met ahead of the player, not beside. */
++	near[0] = near[1] = ETA_STAIRS_KEEP_WALL_LOOK;
++	for (k = 0; k < 4; k++)
++	{
++		trace_t trace;
++		float   turn = (k & 1) ? 45.0f : 90.0f;
++		float   rad  = DEG2RAD(yaw + (k < 2 ? turn : -turn));
++		float   got;
++
++		VectorSet(side, cosf(rad), sinf(rad), 0.0f);
++		VectorMA(at, ETA_STAIRS_KEEP_WALL_LOOK, side, end);
++		CG_Trace(&trace, at, mins, maxs, end, ps->clientNum, MASK_PLAYERSOLID);
++		got = trace.startsolid ? 0.0f : trace.fraction * ETA_STAIRS_KEEP_WALL_LOOK - (ps->maxs[0] - 4.0f);
++		if (got < near[k < 2 ? 0 : 1])
++		{
++			near[k < 2 ? 0 : 1] = got;
++		}
++	}
++
++	if (near[0] < ETA_STAIRS_KEEP_WALL_NEAR && near[1] > near[0] + 4.0f)
++	{
++		return -1;
++	}
++	if (near[1] < ETA_STAIRS_KEEP_WALL_NEAR && near[0] > near[1] + 4.0f)
++	{
++		return 1;
++	}
++	return 0;
++}
++
++/* The way on is tried as a body this much wider each side than the
++   player's: on a round stair, walked straight, the way carries the player
++   out to its wall, and tried as the player's own width it was found shut
++   only once they were against it - and, on the round stair by the radio
++   room, caught between the wall and the steps. */
++#define ETA_STAIRS_KEEP_WIDER 12.0f
++
+ /* Whether a yaw keeps the player on the flight: no wall, no edge, and
+    not back the way they came. Once a moment has gone with no step - a
+    landing, the foot, the top - only toward more steps up (or down)
+    within the probe's three metres: across a landing to the next flight,
+    but not along the flat floor beyond the foot or the top, which is the
+    player's to steer. */
+-static qboolean ETA_StairsKeepOpen(float yaw)
++static qboolean ETA_StairsKeepOpenAs(float yaw, float wider)
+ {
+ 	float    rise, along;
+ 	qboolean edge;
+-	float    walked = ETA_StairsKeepProbe(yaw, &rise, &edge);
++	float    walked = ETA_StairsKeepProbeWide(yaw, wider, &rise, &edge);
+ 
+ 	along = rise * (float)eta_stairKeep.sense;
+ 	if (edge || walked < ETA_STAIRS_KEEP_CLEAR || along <= -4.0f)
+@@ -2182,6 +2258,18 @@ static qboolean ETA_StairsKeepOpen(float yaw)
+ 	                  || along >= 8.0f);
+ }
+ 
++/* Wide where the wide body fits, the player's own width where it does
++   not: up against a wall already, the wide body fits nowhere. */
++static qboolean ETA_StairsKeepOpen(float yaw)
++{
++	return ETA_StairsKeepOpenAs(yaw, 0.0f);
++}
++
++static qboolean ETA_StairsKeepOpenWide(float yaw)
++{
++	return ETA_StairsKeepOpenAs(yaw, ETA_STAIRS_KEEP_WIDER);
++}
++
+ static void ETA_StairsKeepRelease(void)
+ {
+ 	if (eta_stairKeep.active)
+@@ -2258,6 +2346,67 @@ static void ETA_StairsKeepFrame(void)
+ 				eta_stairKeep.until = cg.time + ETA_STAIRS_KEEP_HOLD;
+ 			}
+ 		}
++
++		/* Held against the wall of a turning stair, walking and getting
++		   nowhere, the player is still on it: on the round stair by the
++		   radio room the tester walked into its outer wall, the moment
++		   on the steps ran out, and the keeper let go of them there. */
++		if (cg.time < eta_stairKeep.until && ps->groundEntityNum != ENTITYNUM_NONE
++		    && ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1] < 40.0f * 40.0f)
++		{
++			usercmd_t held;
++
++			if (trap_GetUserCmd(trap_GetCurrentCmdNumber(), &held) && held.forwardmove > 0)
++			{
++				eta_stairKeep.until = cg.time + ETA_STAIRS_KEEP_HOLD;
++			}
++		}
++	}
++
++	/* Walked into the wall of a turning stair before the steps were felt
++	   underfoot - from its top landing, two steps and the wall: steps
++	   going on to one side or the other are stairs, and the player is on
++	   them, the way they last went if both. */
++	if (eta_stairKeeper.integer && CG_AccessibilityOnStairs() == 0 && ps->groundEntityNum != ENTITYNUM_NONE
++	    && !eta_turn.step && !eta_turn.held
++	    && ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1] < 40.0f * 40.0f
++	    && trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) && cmd.forwardmove > 0 && !cmd.rightmove)
++	{
++		if (!eta_stairKeep.stuckAt || cg.time < eta_stairKeep.stuckAt)
++		{
++			eta_stairKeep.stuckAt = cg.time;
++		}
++		else if (cg.time - eta_stairKeep.stuckAt >= ETA_STAIRS_KEEP_STUCK_MS)
++		{
++			int off, k, sense = 0;
++
++			eta_stairKeep.stuckAt = cg.time;
++			for (off = 20; off <= ETA_STAIRS_KEEP_WIDEST && !sense; off += 10)
++			{
++				for (k = -1; k <= 1 && !sense; k += 2)
++				{
++					float    rise, walked;
++					qboolean edge;
++
++					walked = ETA_StairsKeepProbe(ps->viewangles[YAW] + (float)(k * off), &rise, &edge);
++					if (!edge && walked >= ETA_STAIRS_KEEP_CLEAR && fabsf(rise) >= ETA_STAIRS_KEEP_STEPUP - 2.0f
++					    && (!eta_stairKeep.sense || rise * (float)eta_stairKeep.sense > 0.0f))
++					{
++						sense = rise > 0.0f ? 1 : -1;
++					}
++				}
++			}
++			if (sense)
++			{
++				eta_stairKeep.sense  = sense;
++				eta_stairKeep.until  = cg.time + ETA_STAIRS_KEEP_HOLD;
++				eta_stairKeep.stepAt = cg.time;
++			}
++		}
++	}
++	else
++	{
++		eta_stairKeep.stuckAt = 0;
+ 	}
+ 
+ 	if (!eta_stairKeeper.integer || CG_AccessibilityOnStairs() == 0
+@@ -2283,49 +2432,79 @@ static void ETA_StairsKeepFrame(void)
+ 
+ 		eta_stairKeep.lookAt = cg.time;
+ 
+-		if (ETA_StairsKeepOpen(yaw))
+-		{
+-			ETA_StairsKeepRelease();
+-			return;
+-		}
++		/* Kept off a wall close beside the player, whether or not the
++		   way ahead is open: the left one by turning right (a lower yaw),
++		   the right one by turning left, as little as keeps on the steps. */
++		int wall = ETA_StairsKeepWallSide(yaw);
+ 
+-		/* The least turn that keeps on the steps; the way the flight
+-		   bent last first, as a turning stair keeps on bending one way. */
+-		for (off = 10; off <= ETA_STAIRS_KEEP_WIDEST && !found; off += 10)
++		for (off = 10; wall && !found && off <= 3 * ETA_STAIRS_KEEP_WALL_TURN; off += 10)
+ 		{
+-			int first = eta_stairKeep.side ? eta_stairKeep.side : -1, k;
++			float clear = yaw + (float)(wall * off);
+ 
+-			for (k = 0; k < 2 && !found; k++)
++			if (ETA_StairsKeepOpen(clear))
+ 			{
+-				int side = k ? -first : first;
+-
+-				/* Left is a higher yaw. */
+-				if (ETA_StairsKeepOpen(yaw - (float)(side * off)))
+-				{
+-					found              = side;
+-					eta_stairKeep.yaw  = AngleNormalize360(yaw - (float)(side * off));
+-					eta_stairKeep.side = side;
+-				}
++				found                 = -wall;
++				eta_stairKeep.yaw     = AngleNormalize360(clear);
++				eta_stairKeep.turning = qtrue;
+ 			}
+ 		}
+ 
+-		if (!found)
++		if (found)
++		{
++			/* Steered off the wall: nothing said, it is not a bend. */
++		}
++		else if (ETA_StairsKeepOpenWide(yaw))
+ 		{
+-			/* The top, the foot, or a wall: the player's again. */
+ 			ETA_StairsKeepRelease();
+ 			return;
+ 		}
+-
+-		/* Said at each bend: the turns of a tower stair are a way to count
+-		   how high the player has come. */
+-		if (!eta_stairKeep.turning
+-		    && (cg.time - eta_stairKeep.saidAt > ETA_STAIRS_KEEP_SAY_MS || cg.time < eta_stairKeep.saidAt))
++		else
+ 		{
+-			eta_stairKeep.saidAt = cg.time;
+-			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(found < 0 ? "Stairs bend left" : "Stairs bend right");
++			/* The least turn that keeps on the steps; the way the flight
++			   bent last first, as a turning stair keeps on bending one way.
++			   With room to spare first, then as the player's own width. */
++			int wide;
++
++			for (wide = 1; wide >= 0 && !found; wide--)
++			{
++				for (off = 10; off <= ETA_STAIRS_KEEP_WIDEST && !found; off += 10)
++				{
++					int first = eta_stairKeep.side ? eta_stairKeep.side : -1, k;
++
++					for (k = 0; k < 2 && !found; k++)
++					{
++						int   side = k ? -first : first;
++						float turn = yaw - (float)(side * off);
++
++						/* Left is a higher yaw. */
++						if (wide ? ETA_StairsKeepOpenWide(turn) : ETA_StairsKeepOpen(turn))
++						{
++							found              = side;
++							eta_stairKeep.yaw  = AngleNormalize360(turn);
++							eta_stairKeep.side = side;
++						}
++					}
++				}
++			}
++
++			if (!found)
++			{
++				/* The top, the foot, or a wall: the player's again. */
++				ETA_StairsKeepRelease();
++				return;
++			}
++
++			/* Said at each bend: the turns of a tower stair are a way to count
++			   how high the player has come. */
++			if (!eta_stairKeep.turning
++			    && (cg.time - eta_stairKeep.saidAt > ETA_STAIRS_KEEP_SAY_MS || cg.time < eta_stairKeep.saidAt))
++			{
++				eta_stairKeep.saidAt = cg.time;
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(found < 0 ? "Stairs bend left" : "Stairs bend right");
++			}
++			eta_stairKeep.turning = qtrue;
+ 		}
+-		eta_stairKeep.turning = qtrue;
+ 	}
+ 
+ 	if (eta_stairKeep.turning)
+@@ -2341,6 +2520,100 @@ static void ETA_StairsKeepFrame(void)
+ 	}
+ }
+ 
++/**
++ * @brief The edge guard: stopped at the edge of a drop, not over it.
++ *
++ * The tester, walking down a stair that turns, still went off its open
++ * side: the stair keeper turns the view along the steps, but it turns
++ * as the player walks, and at a run the turn came too late. A sighted
++ * player sees the edge and stops. So, walking forward on the ground,
++ * the way ahead is tried as the game would walk it (ETA_StairsKeepProbe,
++ * a stride at a time, stepping down each riser); where nothing is
++ * underfoot within the distance the player needs to stop, and the drop
++ * there is a real one - off stairs, enough to hurt, as the drop warning
++ * reckons it; on stairs, a fall to the floor below - the walk key is let
++ * go: "Edge. Drop 4 meters. W again goes over". W pressed again there
++ * goes over: the player's own choice. Never with jump held, nor into
++ * water. eta_edgeGuard 0 turns it off.
++ */
++#define ETA_EDGE_STAIRS_DROP 64.0f    /* on stairs: more than a few risers */
++#define ETA_EDGE_STOP_MARGIN 32.0f    /* and this much more than it takes to stop */
++#define ETA_EDGE_STOP_TIME   0.25f    /* seconds to stop, from running */
++#define ETA_EDGE_AGAIN_MS    4000     /* W again within this, here: over */
++#define ETA_EDGE_AGAIN_NEAR  64.0f
++#define ETA_EDGE_SAY_MS      2000
++#define ETA_FALL_DELTA_HURT  38.75f   /* the game's own: a fall that hurts */
++
++static struct
++{
++	int    stoppedAt;
++	vec3_t stoppedFrom;
++	int    saidAt;
++} eta_edge;
++
++static void ETA_EdgeGuardFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t           cmd;
++	trace_t             trace;
++	vec3_t              dir, lip, bottom;
++	float               speed, yaw, rise, walked, drop, hurt, deep;
++	qboolean            edge;
++
++	if (!eta_edgeGuard.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
++	    || ps->groundEntityNum == ENTITYNUM_NONE || (ps->pm_flags & PMF_LADDER) || CG_AccessibilityClimbing()
++	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || cmd.forwardmove <= 0 || cmd.upmove > 0)
++	{
++		return;
++	}
++
++	/* Stopped here a moment ago, and W pressed again: over, on purpose. */
++	if (eta_edge.stoppedAt && cg.time >= eta_edge.stoppedAt && cg.time - eta_edge.stoppedAt < ETA_EDGE_AGAIN_MS
++	    && Distance(ps->origin, eta_edge.stoppedFrom) < ETA_EDGE_AGAIN_NEAR)
++	{
++		return;
++	}
++
++	speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++	yaw   = speed > 40.0f ? vectoyaw(ps->velocity) : ps->viewangles[YAW];
++	walked = ETA_StairsKeepProbe(yaw, &rise, &edge);
++	if (!edge || walked > speed * ETA_EDGE_STOP_TIME + ETA_EDGE_STOP_MARGIN)
++	{
++		return;
++	}
++
++	/* How far down it goes, from just past the lip. */
++	VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++	VectorMA(ps->origin, walked + ETA_STAIRS_KEEP_STEP + 16.0f, dir, lip);
++	lip[2] = ps->origin[2] + rise;
++	hurt   = ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_HURT, (float)ps->gravity);
++	deep   = hurt * 4.0f + 128.0f;
++	VectorCopy(lip, bottom);
++	bottom[2] -= deep;
++	CG_Trace(&trace, lip, NULL, NULL, bottom, ps->clientNum, MASK_PLAYERSOLID | MASK_WATER);
++	drop = trace.fraction >= 1.0f ? deep : lip[2] - trace.endpos[2];
++	if (drop < (CG_AccessibilityOnStairs() ? ETA_EDGE_STAIRS_DROP : hurt)
++	    || (trace.fraction < 1.0f && (trace.contents & MASK_WATER)))
++	{
++		return;
++	}
++
++	/* The walk key let go - every key on it, as typed at the console. */
++	trap_SendConsoleCommand("-forward\n");
++	eta_edge.stoppedAt = cg.time;
++	VectorCopy(ps->origin, eta_edge.stoppedFrom);
++	if (cg.time - eta_edge.saidAt >= ETA_EDGE_SAY_MS || cg.time < eta_edge.saidAt)
++	{
++		int meters = (int)(drop * ETA_QU_TO_METERS + 0.5f);
++
++		eta_edge.saidAt = cg.time;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(trace.fraction >= 1.0f ? "Edge. A long drop. W again goes over"
++		               : va("Edge. Drop %d %s. W again goes over", meters < 1 ? 1 : meters,
++		                    meters == 1 ? "meter" : "meters"));
++	}
++}
++
+ /**
+  * @brief The way, told while the player walks it.
+  *
+@@ -2985,6 +3258,8 @@ void CG_AccessibilityAimFrame(void)
+ 		ETA_UseKey(qfalse);
+ 	}
+ 
++	ETA_EdgeGuardFrame();
++
+ 	if (eta_aim.mode == ETA_AIM_NONE)
+ 	{
+ 		if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
+diff --git a/SP/code/cgame/cg_accessibility_settings.h b/SP/code/cgame/cg_accessibility_settings.h
+index cf1a0d3b..afcf4829 100644
+--- a/SP/code/cgame/cg_accessibility_settings.h
++++ b/SP/code/cgame/cg_accessibility_settings.h
+@@ -26,6 +26,7 @@ ETA_SETTING( eta_markerCues,          "1" )
+ ETA_SETTING( eta_autoLock,            "1" )
+ ETA_SETTING( eta_autoSteer,           "0" )
+ ETA_SETTING( eta_stairKeeper,         "1" )
++ETA_SETTING( eta_edgeGuard,           "1" )
+ ETA_SETTING( eta_waysCallouts,        "1" )
+ ETA_SETTING( eta_enemyCues,           "1" )
+ ETA_SETTING( eta_secretsLead,         "1" )
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3f990f51..aeea888d 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2377,6 +2377,7 @@ extern vmCvar_t eta_markerCues;
+ extern vmCvar_t eta_autoLock;
+ extern vmCvar_t eta_autoSteer;
+ extern vmCvar_t eta_stairKeeper;
++extern vmCvar_t eta_edgeGuard;
+ extern vmCvar_t eta_waysCallouts;
+ extern vmCvar_t eta_enemyCues;
+ extern vmCvar_t eta_secretsLead;

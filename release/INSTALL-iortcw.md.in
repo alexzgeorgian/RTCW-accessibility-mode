@@ -207,10 +207,18 @@ them. Stairs that turn - round a tower, or at a landing - are where a
 sighted player turns with the mouse. Here, the game does that for you
 while you hold W on them: when the next steps go off to one side, you
 are turned to follow them, and you hear "Stairs bend left" or "Stairs
-bend right" at each bend. It never turns you off an open side. It only
-turns you on stairs, and lets go at the top and at the bottom; turning
-with the arrows, or stepping sideways, is always yours. To turn it off:
-"Turned along curved stairs", in the Accessibility menu.
+bend right" at each bend. It never turns you off an open side, and on a
+round stair it keeps you a little off the outer wall, where the gap
+between the wall and the steps could catch you. It only turns you on
+stairs, and lets go at the top and at the bottom; turning with the
+arrows, or stepping sideways, is always yours. To turn it off: "Turned
+along curved stairs", in the Accessibility menu.
+
+Walking toward the edge of a real drop - one that would hurt, or off the
+side of a stair to the floor below - you are stopped at the edge: "Edge.
+Drop 4 meters. W again goes over". Press W again there to go over on
+purpose. A jump, or a drop into water, is never stopped. To turn it off:
+"Stopped at the edge of a drop", in the Accessibility menu.
 
 ### Getting around
 
@@ -283,9 +291,10 @@ of settings, Up and Down to go through them and Enter to change one:
   or off.
 - **Moving and aiming**: the arrows turning by compass points, being
   turned along curved stairs, the aim locking on to enemies by itself,
-  being turned along the way as you walk, and whether T leads you
+  being turned along the way as you walk, whether T leads you
   straight to secret areas ("T leads straight to secret areas"; with it
-  off, you only hear "A secret area is near" as you come close).
+  off, you only hear "A secret area is near" as you come close), and
+  being stopped at the edge of a drop.
 
 A change takes effect at once, even in the middle of a mission, and is
 kept for next time. Escape goes back a page, and from the first page
