@@ -1369,3 +1369,13 @@ the lists. The alarm box (ET_ALARMBOX) was on neither.
 
 Checked in the first level by the alarm box off the start's corridor:
 F said "Alarm box, ahead, 1 meter" and did not press it.
+
+## 0063: the builds in the campaign's own repository
+
+The test builds move from the Enemy Territory mode's releases page to
+this repository's own, which is public for it: the Mac game's updater
+reads rtcw-update.txt from this repository's rtcw-updates release
+(UI_UPDATE_MANIFEST_URL), and the workflow publishes there. Builds from
+before the move read the file on the old page, which the workflow keeps
+updating to name the newest build here; the campaign's builds are taken
+off the old page.

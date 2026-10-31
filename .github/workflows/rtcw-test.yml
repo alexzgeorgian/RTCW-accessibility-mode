@@ -42,7 +42,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  PUBLIC_RELEASES: alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-releases
+  # The builds are published here, in the campaign's own repository.
+  PUBLIC_RELEASES: ${{ github.repository }}
+  # Where they were published before, with the Enemy Territory mode's
+  # downloads. Builds from then read which build is the newest from the
+  # rtcw-update.txt there, so it is kept pointing at the newest build
+  # here; the campaign's builds themselves are taken away from there.
+  OLD_RELEASES: alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-releases
   # The builds went up to rtcw-test-54 in the Enemy Territory repository,
   # where this began. The Mac game's updater offers a build only when its
   # number is higher than its own, so the numbers here go on from there:
@@ -202,6 +208,19 @@ jobs:
                  --notes "Holds rtcw-update.txt, which names the newest RTCW campaign test build for the Mac game's own updater (F12 in the menus)." \
                  --prerelease
           gh release upload rtcw-updates rtcw-update.txt --repo "$PUBLIC_RELEASES" --clobber
+
+          # The same file where builds from before the move look for it,
+          # naming the build here, so F12 there moves them on to it.
+          gh release view rtcw-updates --repo "$OLD_RELEASES" >/dev/null 2>&1 \
+            && gh release upload rtcw-updates rtcw-update.txt --repo "$OLD_RELEASES" --clobber
+
+          # The campaign's builds are no longer listed there.
+          for old in $(gh release list --repo "$OLD_RELEASES" --limit 200 \
+                         --json tagName,isPrerelease \
+                         --jq '.[] | select(.isPrerelease) | .tagName | select(startswith("rtcw-test-"))'); do
+            gh release delete "$old" --repo "$OLD_RELEASES" --cleanup-tag --yes
+            echo "moved off the old releases page: $old"
+          done
 
           # Only the newest RTCW test build is listed.
           for old in $(gh release list --repo "$PUBLIC_RELEASES" --limit 200 \

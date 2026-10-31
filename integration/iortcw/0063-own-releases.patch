@@ -1,0 +1,15 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 276937f4..0c92f7a6 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8565,7 +8565,9 @@ static qboolean UI_AccessibilityKey( int key ) {
+ #include "platform/macos/macos_update.h"
+ #include "update/update_check.h"
+ 
+-#define UI_UPDATE_MANIFEST_URL ETA_UPDATE_RELEASES_URL "/download/rtcw-updates/rtcw-update.txt"
++/* The campaign's builds are published in its own repository, apart from
++   the Enemy Territory mode's downloads. */
++#define UI_UPDATE_MANIFEST_URL "https://github.com/alexzgeorgian/RTCW-accessibility-mode/releases/download/rtcw-updates/rtcw-update.txt"
+ #define UI_UPDATE_PREFIX       "rtcw-test-"
+ 
+ enum {
