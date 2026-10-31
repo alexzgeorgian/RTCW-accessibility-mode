@@ -1310,3 +1310,19 @@ by the engine's own sort, and skipped): the mission went on, and
 "Problem: a character's script uses weapon_realknife, which this game
 does not have. A file in the main folder that is not the original
 game's is the likely cause" was said.
+
+## 0059: F10 moves those files aside
+
+The tester did not know which files were the remake's. The files 0056
+names are kept, and F10 in the menus moves each into a folder "not the
+original game" inside the main folder it is in - the home one or the
+game's own - with rename(), so it can be put back by hand. The engine
+reads only the pk3s directly in main, so they are no longer loaded once
+the game starts again. Only the files the game itself found are moved;
+one that cannot be moved is named, to be moved by hand.
+
+Checked with an x_test.pk3 in the home main folder: "F10 moves it into
+a folder of its own"; F10: "Moved x_test.pk3 into the folder not the
+original game, inside the main folder. Quit the game and open it again
+to have the original game"; the file was in main/not the original game,
+and the next start said nothing.

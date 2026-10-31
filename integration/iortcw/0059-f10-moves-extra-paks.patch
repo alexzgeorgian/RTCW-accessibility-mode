@@ -1,0 +1,161 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 121ffc6b..c131ae0a 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -39,6 +39,14 @@ If you have questions concerning this license or the applicable additional terms
+ */
+ 
+ #include "ui_local.h"
++#ifdef FEATURE_ACCESSIBILITY
++#include <stdio.h>
++#ifdef _WIN32
++#include <direct.h>
++#else
++#include <sys/stat.h>
++#endif
++#endif
+ 
+ uiInfo_t uiInfo;
+ 
+@@ -183,6 +191,7 @@ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+ static qboolean UI_AccessibilityKey( int key );
+ static void UI_AccessibilityUpdateFrame( int realtime );
+ static void UI_AccessibilityExtraPaksFrame( int realtime );
++static qboolean UI_AccessibilityExtraPaksKey( int key );
+ static qboolean UI_AccessibilityUpdateKey( int key );
+ #endif
+ void _UI_Shutdown( void );
+@@ -8501,7 +8510,7 @@ static qboolean UI_AccessibilityKey( int key ) {
+ 		return qfalse;
+ 	}
+ 
+-	if ( UI_AccessibilityUpdateKey( key ) ) {
++	if ( UI_AccessibilityUpdateKey( key ) || UI_AccessibilityExtraPaksKey( key ) ) {
+ 		return qtrue;
+ 	}
+ 
+@@ -8714,14 +8723,24 @@ static qboolean UI_AccessibilityUpdateKey( int key ) {
+ #endif
+ 
+ /*
+- * Game files that are not the game's own, said once in the menus. The
+- * tester heard the weapons reload, the footsteps and the menu as another
+- * version of the game has them - a pk3 from a remake, left in the main
+- * folder, whose sounds and menus win over the original's - and could not
+- * look through the folder to find it. The game's own campaign files, the
+- * multiplayer ones beside them and the mode's own are passed over;
+- * anything else is named, with where to move it from.
++ * Game files that are not the game's own, said once in the menus, and
++ * moved aside with F10. The tester heard the weapons reload, the
++ * footsteps and the menu as another version of the game has them - a
++ * pk3 from a remake, left in the main folder, whose sounds, menus and
++ * level scripts win over the original's - and did not know which files
++ * were the remake's, nor could look through the folder for them. The
++ * game's own campaign files, the multiplayer ones beside them (which the
++ * campaign never loads) and the mode's own are passed over; anything
++ * else is named, and F10 moves it into a folder of its own inside the
++ * main folder, where the game does not look, so it can be put back by
++ * hand. Only a file the game itself found is ever moved.
+  */
++#define UI_EXTRA_PAKS_MAX    16
++#define UI_EXTRA_PAKS_FOLDER "not the original game"
++
++static char uiExtraPaks[UI_EXTRA_PAKS_MAX][MAX_QPATH];
++static int  uiExtraPakCount;
++
+ static void UI_AccessibilityExtraPaksFrame( int realtime ) {
+ 	static qboolean said;
+ 	static const char *const own[] = {
+@@ -8750,23 +8769,83 @@ static void UI_AccessibilityExtraPaksFrame( int realtime ) {
+ 			continue;
+ 		}
+ 		Q_strcat( extra, sizeof( extra ), va( "%s%s", found ? ", " : "", base ) );
++		if ( uiExtraPakCount < UI_EXTRA_PAKS_MAX ) {
++			Q_strncpyz( uiExtraPaks[uiExtraPakCount++], base, sizeof( uiExtraPaks[0] ) );
++		}
+ 		found++;
+ 	}
+ 	if ( !found ) {
+ 		return;
+ 	}
+-#ifdef __APPLE__
+ 	ETA_Speech_SayLong( va( "Your game's main folder has %s that %s not the original game's: %s. %s can change the game's "
+-							"sounds, music and menus. To have the original game, move %s out of the main folder: in "
+-							"your home folder, Library, Application Support, RTCW, main, or the main folder beside "
+-							"the game", found == 1 ? "a file" : "files", found == 1 ? "is" : "are", extra,
+-							found == 1 ? "It" : "They", found == 1 ? "it" : "them" ) );
++							"sounds, music, menus and levels. F10 moves %s into a folder of %s own, set aside, so you "
++							"have the original game", found == 1 ? "a file" : "files", found == 1 ? "is" : "are", extra,
++							found == 1 ? "It" : "They", found == 1 ? "it" : "them", found == 1 ? "its" : "their" ) );
++}
++
++/* Whether a file is there to be read. */
++static qboolean UI_AccessibilityFileThere( const char *path ) {
++	FILE *f = fopen( path, "rb" );
++
++	if ( !f ) {
++		return qfalse;
++	}
++	fclose( f );
++	return qtrue;
++}
++
++static qboolean UI_AccessibilityExtraPaksKey( int key ) {
++	static const char *const bases[] = { "fs_homepath", "fs_basepath" };
++	char moved[512], failed[512];
++	int  i, b, movedCount = 0, failedCount = 0;
++
++	if ( key != K_F10 || !uiExtraPakCount ) {
++		return qfalse;
++	}
++
++	moved[0] = failed[0] = '\0';
++	for ( i = 0; i < uiExtraPakCount; i++ ) {
++		qboolean done = qfalse, there = qfalse;
++
++		for ( b = 0; b < (int)ARRAY_LEN( bases ) && !done; b++ ) {
++			char base[MAX_OSPATH], from[MAX_OSPATH], folder[MAX_OSPATH], to[MAX_OSPATH];
++
++			trap_Cvar_VariableStringBuffer( bases[b], base, sizeof( base ) );
++			if ( !base[0] ) {
++				continue;
++			}
++			Com_sprintf( from, sizeof( from ), "%s/%s/%s", base, BASEGAME, uiExtraPaks[i] );
++			if ( !UI_AccessibilityFileThere( from ) ) {
++				continue;
++			}
++			there = qtrue;
++			Com_sprintf( folder, sizeof( folder ), "%s/%s/%s", base, BASEGAME, UI_EXTRA_PAKS_FOLDER );
++			Com_sprintf( to, sizeof( to ), "%s/%s", folder, uiExtraPaks[i] );
++#ifdef _WIN32
++			_mkdir( folder );
+ #else
+-	ETA_Speech_SayLong( va( "Your game's main folder has %s that %s not the original game's: %s. %s can change the game's "
+-							"sounds, music and menus. To have the original game, move %s out of the main folder beside "
+-							"the game", found == 1 ? "a file" : "files", found == 1 ? "is" : "are", extra,
+-							found == 1 ? "It" : "They", found == 1 ? "it" : "them" ) );
++			mkdir( folder, 0755 );
+ #endif
++			done = (qboolean)( !UI_AccessibilityFileThere( to ) && rename( from, to ) == 0 );
++		}
++		if ( done ) {
++			Q_strcat( moved, sizeof( moved ), va( "%s%s", movedCount++ ? ", " : "", uiExtraPaks[i] ) );
++		} else if ( there ) {
++			Q_strcat( failed, sizeof( failed ), va( "%s%s", failedCount++ ? ", " : "", uiExtraPaks[i] ) );
++		}
++	}
++	uiExtraPakCount = 0;
++
++	if ( movedCount ) {
++		ETA_Speech_SayLong( va( "Moved %s into the folder %s, inside the main folder. Quit the game and open it again to "
++								"have the original game.%s%s", moved, UI_EXTRA_PAKS_FOLDER,
++								failedCount ? " Could not move: " : "", failed ) );
++	} else if ( failedCount ) {
++		ETA_Speech_SayLong( va( "Could not move %s. Move it out of the main folder by hand, with the game closed", failed ) );
++	} else {
++		ETA_Speech_Say( "Nothing to move: those files were not found" );
++	}
++	return qtrue;
+ }
+ 
+ /* The accessibility commands the ui answers, by name; qtrue if it did. */
