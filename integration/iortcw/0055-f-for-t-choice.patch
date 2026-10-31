@@ -1,0 +1,115 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5d64fd2e..f3105146 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1298,16 +1298,46 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
+-	/* Led to a thing with T and O, and come to it: F turns to that
+-	   thing, not to whatever F was last kept on. The tester, choosing a
+-	   switch with T and walking there with O, pressed F and was turned
+-	   to the thing F had been on before. */
++	/* A thing chosen with T or Y: F turns to that thing, not to
++	   whatever F was last kept on or is nearest. The tester, choosing a
++	   switch with T, pressed F and was turned to something else. Further
++	   off than F reaches, F leads there as O does, and turns the player
++	   toward the way; close by, F turns to the thing itself. */
+ 	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
+ 	{
+-		vec3_t marker;
+-		char   ledName[64];
++		vec3_t   marker, eyeAt;
++		char     ledName[64];
++		qboolean pending;
+ 
+-		if (CG_AccessibilityLedTo(marker, ledName, sizeof(ledName)))
++		VectorCopy(cg.predictedPlayerState.origin, eyeAt);
++		eyeAt[2] += cg.predictedPlayerState.viewheight;
++		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending)
++		    && Distance(eyeAt, marker) * ETA_QU_TO_METERS > ETA_F_CLOSE_METERS)
++		{
++			vec3_t      markerAt;
++			const char *markerName;
++
++			/* Led there before, and the marker gone since: led again. */
++			if (!pending && !CG_AccessibilityMarkerInfo(markerAt, &markerName))
++			{
++				char again[64];
++
++				Q_strncpyz(again, ledName, sizeof(again));
++				CG_AccessibilityChoose(marker, again);
++				CG_AccessibilityChosenIsThing();
++				pending = qtrue;
++			}
++			if (pending)
++			{
++				CG_AccessibilityWayOut();
++			}
++			else
++			{
++				CG_AccessibilityFaceTheWay();
++			}
++			return;
++		}
++		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending))
+ 		{
+ 			int   j, best = -1;
+ 			float bestFar = ETA_F_LED_NEAR;
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 87eac621..05fb73cb 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -641,6 +641,7 @@ void CG_AccessibilityThingsFrame(void)
+ 			int  counts[ETA_THING_KINDS], left, area = CG_AccessibilityAreaHere(), all;
+ 
+ 			eta_things.target = -1;
++			CG_AccessibilityLedClear();
+ 			ETA_ThingsCount(-1, counts, &all);
+ 			ETA_ThingsCount(area, counts, &left);
+ 			ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index d6a04a0a..57a87e9f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4449,6 +4449,27 @@ qboolean CG_AccessibilityLedTo(vec3_t out, char *name, size_t nameSize)
+ 	return qtrue;
+ }
+ 
++/* For F: the thing chosen with T or Y - not yet gone to with O
++   (pending), or the one O last led to. */
++qboolean CG_AccessibilityThingChoice(vec3_t out, char *name, size_t nameSize, qboolean *pending)
++{
++	if (eta_chosenSet && eta_chosenThing)
++	{
++		VectorCopy(eta_chosenPoint, out);
++		Q_strncpyz(name, eta_chosenName, nameSize);
++		*pending = qtrue;
++		return qtrue;
++	}
++	*pending = qfalse;
++	return CG_AccessibilityLedTo(out, name, nameSize);
++}
++
++/* The thing O led to is done: F no longer turns to it. */
++void CG_AccessibilityLedClear(void)
++{
++	eta_ledSet = qfalse;
++}
++
+ /* Backspace: the choice let go of, with the marker. */
+ void CG_AccessibilityChosenClear(void)
+ {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 78cadd2c..0216deec 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2276,6 +2276,8 @@ void CG_AccessibilityChosenClear( void );
+ void CG_AccessibilityUseChoiceClear( void );
+ qboolean CG_AccessibilityLedTo( vec3_t out, char *name, size_t nameSize );
+ void CG_AccessibilityChosenIsThing( void );
++qboolean CG_AccessibilityThingChoice( vec3_t out, char *name, size_t nameSize, qboolean *pending );
++void CG_AccessibilityLedClear( void );
+ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );
+ void CG_AccessibilityThingsProgress( char *out, size_t size );

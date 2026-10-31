@@ -1237,3 +1237,18 @@ on the button, then T to the button for a door and O; F had turned to
 the door, and now said "Button for a door, ahead left, 3 meters. A step
 closer, and F uses it"; a step on, F used it: "Done. T chooses the
 next".
+
+## 0055: F for what T chose, straight away
+
+0054 had F turn to T's choice only once O had led there. The tester
+chose with T and pressed F straight away, and F still turned to the
+nearest thing. Now a thing chosen with T or Y, not yet gone to, or the
+one O last led to (CG_AccessibilityThingChoice), is F's: further off
+than F's 4 meters, F leads there as O does (CG_AccessibilityWayOut takes
+the choice) or, once led, turns toward the way again - led again if the
+marker has gone; close by, F turns to it and uses it, as in 0054. When
+the thing is done, F lets go of it (CG_AccessibilityLedClear).
+
+Checked in the first level: T to a switch 54 meters off, then F: "Facing
+the way. 5 meters, then right. Switch, 54 meters"; by the buttons, T to
+the button 2 meters off and F: "Button, right, 2 meters", then "Done".
