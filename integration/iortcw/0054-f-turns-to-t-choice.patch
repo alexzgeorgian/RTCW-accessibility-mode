@@ -1,0 +1,214 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 58cc003e..5d64fd2e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -828,6 +828,10 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+  */
+ #define ETA_CHOOSE_HOLD_MS 30000
+ 
++/* Something new chosen with T, Y, X, L or K: what F was kept on is let
++   go of, so F does not turn back to it (cg_accessibility_world.c). */
++void CG_AccessibilityUseChoiceClear(void);
++
+ static struct
+ {
+ 	qboolean       held;
+@@ -836,6 +840,11 @@ static struct
+ 	etaAimTarget_t target;
+ } eta_choose;
+ 
++void CG_AccessibilityUseChoiceClear(void)
++{
++	eta_choose.held = qfalse;
++}
++
+ /* Where a target is on the list now: by its entity, or for a ladder,
+    which has none, by where it stands. -1 when it is gone. */
+ static int ETA_ChooseFind(const etaAimTarget_t *list, int count, const etaAimTarget_t *want)
+@@ -1202,6 +1211,7 @@ static void ETA_FollowFrame(void)
+  */
+ /* How near the nearest thing must be for F alone to turn to it. */
+ #define ETA_F_CLOSE_METERS 4.0f
++#define ETA_F_LED_NEAR     40.0f   /* a thing to use this near where O led: the one led to */
+ 
+ /* Whether the game's icon under the crosshair is something use does
+    something with. */
+@@ -1288,6 +1298,77 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* Led to a thing with T and O, and come to it: F turns to that
++	   thing, not to whatever F was last kept on. The tester, choosing a
++	   switch with T and walking there with O, pressed F and was turned
++	   to the thing F had been on before. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
++	{
++		vec3_t marker;
++		char   ledName[64];
++
++		if (CG_AccessibilityLedTo(marker, ledName, sizeof(ledName)))
++		{
++			int   j, best = -1;
++			float bestFar = ETA_F_LED_NEAR;
++
++			count = CG_AccessibilityUseTargets(list, ETA_AIM_MAX_TARGETS);
++			for (j = 0; j < count; j++)
++			{
++				float far = Distance(list[j].point, marker);
++
++				if (!list[j].stairs && list[j].meters <= ETA_F_CLOSE_METERS && far < bestFar)
++				{
++					best    = j;
++					bestFar = far;
++				}
++			}
++			if (best >= 0)
++			{
++				eta_choose.held     = qtrue;
++				eta_choose.byPlayer = qfalse;
++				eta_choose.at       = cg.time;
++				eta_choose.target   = list[best];
++			}
++			else
++			{
++				/* Not among the things F finds round about - a switch
++				   the map hides in an invisible trigger, which T knows
++				   from the map: aimed at where it is, and used there. */
++				etaAimTarget_t led;
++				vec3_t         eye;
++				trace_t        trace;
++
++				VectorCopy(cg.predictedPlayerState.origin, eye);
++				eye[2] += cg.predictedPlayerState.viewheight;
++				memset(&led, 0, sizeof(led));
++				led.entityNum = -1;
++				VectorCopy(marker, led.point);
++				led.meters = Distance(eye, marker) * ETA_QU_TO_METERS;
++				Q_strncpyz(led.name, ledName, sizeof(led.name));
++				led.name[0] = (char)toupper((unsigned char)led.name[0]);
++				CG_Trace(&trace, eye, NULL, NULL, marker, cg.predictedPlayerState.clientNum, MASK_SOLID);
++				if (led.meters <= ETA_F_CLOSE_METERS && (trace.fraction >= 0.95f || trace.entityNum != ENTITYNUM_WORLD))
++				{
++					eta_aim.cycleAt = cg.time;
++					if (led.meters <= ETA_USE_REACH_METERS)
++					{
++						ETA_AimStartSnap(&led, led.name);
++						eta_use.pending = qtrue;
++					}
++					else
++					{
++						/* Not kept facing as F keeps a thing it sees: a
++						   trigger in a wall is never in sight. */
++						ETA_AimStartSnap(&led, led.name);
++						ETA_Speech_Say("A step closer, and F uses it");
++					}
++					return;
++				}
++			}
++		}
++	}
++
+ 	/* Something chosen with the bracket keys comes before anything
+ 	   else - before what the crosshair is on, and before a ladder in
+ 	   reach. */
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 76351899..87eac621 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -526,6 +526,7 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(name, thing->name, sizeof(name));
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+ 	CG_AccessibilityChoose(thing->point, name);
++	CG_AccessibilityChosenIsThing();
+ }
+ 
+ void CG_AccessibilityThingsNext(void)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 640b5494..d6a04a0a 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4420,10 +4420,40 @@ static int      eta_chosenAt;
+ static vec3_t   eta_chosenPoint;
+ static char     eta_chosenName[64];
+ 
++/* Where O last led to something chosen, for F: the marker goes when it
++   is reached, and F, pressed there, turns to the thing led to. */
++static qboolean eta_ledSet;
++static int      eta_ledAt;
++static vec3_t   eta_ledPoint;
++
++#define ETA_LED_MS 120000
++
++/* A thing T or Y chose: F turns to it there. Not a door X chose, whose
++   point is in the room beyond. */
++static qboolean eta_chosenThing, eta_ledThing;
++static char     eta_ledName[64];
++
++void CG_AccessibilityChosenIsThing(void)
++{
++	eta_chosenThing = qtrue;
++}
++
++qboolean CG_AccessibilityLedTo(vec3_t out, char *name, size_t nameSize)
++{
++	if (!eta_ledSet || !eta_ledThing || cg.time < eta_ledAt || cg.time - eta_ledAt >= ETA_LED_MS)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_ledPoint, out);
++	Q_strncpyz(name, eta_ledName, nameSize);
++	return qtrue;
++}
++
+ /* Backspace: the choice let go of, with the marker. */
+ void CG_AccessibilityChosenClear(void)
+ {
+ 	eta_chosenSet = qfalse;
++	eta_ledSet    = qfalse;
+ }
+ 
+ /* Where O last led: the marker is O's own while it is still there. The
+@@ -4477,6 +4507,11 @@ void CG_AccessibilityWayOut(void)
+ 	if (eta_chosenSet)
+ 	{
+ 		eta_chosenSet = qfalse;
++		eta_ledSet    = qtrue;
++		eta_ledThing  = eta_chosenThing;
++		eta_ledAt     = cg.time;
++		VectorCopy(eta_chosenPoint, eta_ledPoint);
++		Q_strncpyz(eta_ledName, eta_chosenName, sizeof(eta_ledName));
+ 		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
+ 		CG_AccessibilityFaceTheWay();
+ 		return;
+@@ -4730,6 +4765,8 @@ static void ETA_DestinationStep(int step)
+ 		return;
+ 	}
+ 	ETA_WorldRead();
++	eta_chosenThing = qfalse;
++	CG_AccessibilityUseChoiceClear();
+ 
+ 	for (i = 0; i < eta_exitCount; i++)
+ 	{
+@@ -4931,6 +4968,8 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+    for O. */
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
++	eta_chosenThing = qfalse;
++	CG_AccessibilityUseChoiceClear();
+ 	VectorCopy(point, eta_chosenPoint);
+ 	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+ 	eta_chosenSet = qtrue;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c5f99ced..78cadd2c 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2273,6 +2273,9 @@ void CG_AccessibilityPlaceText( char *out, size_t size );
+ void CG_AccessibilityThingsNext( void );
+ void CG_AccessibilityThingsPrev( void );
+ void CG_AccessibilityChosenClear( void );
++void CG_AccessibilityUseChoiceClear( void );
++qboolean CG_AccessibilityLedTo( vec3_t out, char *name, size_t nameSize );
++void CG_AccessibilityChosenIsThing( void );
+ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );
+ void CG_AccessibilityThingsProgress( char *out, size_t size );

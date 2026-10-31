@@ -1213,3 +1213,27 @@ fresh.
 Checked in the first level: through the door from the start's area,
 then the level started again: X said "2 doors out, 1 to a new area" and
 "door back to area 2", and F1 "In area 1, of 2 explored".
+
+## 0054: F turns to what T chose
+
+The tester chose a switch with T, went there with O, and pressed F: F
+turned them to the thing it had last been kept on, or to whatever was
+nearest. F knew nothing of T's choice. Now:
+
+- a new choice with T, Y, X, L or K lets go of what F was kept on
+  (CG_AccessibilityUseChoiceClear);
+- where O last led to a thing T or Y chose, for two minutes, F turns to
+  the thing F finds within 40 units of it, within 4 meters
+  (CG_AccessibilityLedTo); a door X chose is not a thing, its point
+  being in the room beyond;
+- and where F finds nothing there - a switch the map hides in an
+  invisible trigger, which T knows from the map but F's look round does
+  not - F aims at the point itself: used at once within reach, or turned
+  to with "A step closer, and F uses it".
+
+Checked in the first level, between a button and the button for a door
+3.5 meters apart, with a door that opens with a switch beside them: F
+on the button, then T to the button for a door and O; F had turned to
+the door, and now said "Button for a door, ahead left, 3 meters. A step
+closer, and F uses it"; a step on, F used it: "Done. T chooses the
+next".
