@@ -1270,3 +1270,21 @@ game's main folder has a file that is not the original game's:
 z_realrtcw_test.pk3. It can change the game's sounds, music and menus.
 To have the original game, move it out of the main folder beside the
 game"; without it, nothing is said.
+
+## 0057: F never falls back to the nearest while a thing is chosen
+
+The tester, with a thing chosen with T close by, pressed F and was
+turned to the stairs beside them. Three ways F still let go of the
+choice:
+
+- the thing close by but not in sight - F's trace to a switch set in a
+  wall hit the wall - fell through to the nearest thing. A trace that
+  ends within 40 units of the thing now counts as in sight, and one that
+  does not leads there as O does (CG_AccessibilityWayOut), never to the
+  nearest;
+- "Just used" stopped F straight after something else had been pressed
+  nearby, though a new thing had been chosen since (ETA_UseThingChosen).
+
+Checked in the first level: F on the button, T to the button for a
+door, F: "Button for a door, ahead left, 3 meters. A step closer, and F
+uses it"; a step on, F: "Done".

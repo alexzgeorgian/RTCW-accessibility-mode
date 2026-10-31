@@ -1,0 +1,68 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f3105146..9728fdb6 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1246,6 +1246,17 @@ static qboolean ETA_HintUsable(int hint)
+ 	}
+ }
+ 
++/* Whether a thing chosen with T or Y, not the one just used, is F's. */
++static qboolean ETA_UseThingChosen(void)
++{
++	vec3_t   at;
++	char     name[64];
++	qboolean pending;
++
++	return (qboolean)(CG_AccessibilityThingChoice(at, name, sizeof(name), &pending)
++	                  && !(eta_use.usedAt && Distance(at, eta_use.usedPoint) < ETA_F_LED_NEAR));
++}
++
+ void CG_AccessibilityActivateDown_f(void)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -1290,7 +1301,8 @@ void CG_AccessibilityActivateDown_f(void)
+ 		if (!doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
+ 		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
+ 		    && Distance(cg.predictedPlayerState.origin, eta_use.usedFrom) < ETA_USE_AGAIN_NEAR
+-		    && (!(eta_choose.held && eta_choose.byPlayer) || ETA_UseJustUsed(&eta_choose.target)))
++		    && (!(eta_choose.held && eta_choose.byPlayer) || ETA_UseJustUsed(&eta_choose.target))
++		    && !ETA_UseThingChosen())
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			ETA_Speech_Say("Just used. F twice quickly uses it again");
+@@ -1378,7 +1390,11 @@ void CG_AccessibilityActivateDown_f(void)
+ 				Q_strncpyz(led.name, ledName, sizeof(led.name));
+ 				led.name[0] = (char)toupper((unsigned char)led.name[0]);
+ 				CG_Trace(&trace, eye, NULL, NULL, marker, cg.predictedPlayerState.clientNum, MASK_SOLID);
+-				if (led.meters <= ETA_F_CLOSE_METERS && (trace.fraction >= 0.95f || trace.entityNum != ENTITYNUM_WORLD))
++				/* In sight: nothing between, or what is hit is where it
++				   is - the wall a switch is set in. */
++				if (led.meters <= ETA_F_CLOSE_METERS
++				    && (trace.fraction >= 0.95f || trace.entityNum != ENTITYNUM_WORLD
++				        || Distance(trace.endpos, marker) < ETA_F_LED_NEAR))
+ 				{
+ 					eta_aim.cycleAt = cg.time;
+ 					if (led.meters <= ETA_USE_REACH_METERS)
+@@ -1395,6 +1411,22 @@ void CG_AccessibilityActivateDown_f(void)
+ 					}
+ 					return;
+ 				}
++
++				/* Close, but not in sight from here - round a corner, up
++				   the stairs: turned toward the way there, never to the
++				   nearest thing instead. The tester, with a thing chosen
++				   close by, was turned to the stairs beside them. */
++				if (pending)
++				{
++					CG_AccessibilityWayOut();
++				}
++				else
++				{
++					CG_AccessibilityChoose(marker, ledName);
++					CG_AccessibilityChosenIsThing();
++					CG_AccessibilityWayOut();
++				}
++				return;
+ 			}
+ 		}
+ 	}
