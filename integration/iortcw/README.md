@@ -1288,3 +1288,25 @@ choice:
 Checked in the first level: F on the button, T to the button for a
 door, F: "Button for a door, ahead left, 3 meters. A step closer, and F
 uses it"; a step on, F: "Done".
+
+## 0058: a script's unknown weapon passed over, not the end of the mission
+
+The tester heard "Problem: a character is given ..., 12 letters, which
+the game cannot find" through the first level, and at its way out was
+put out of the game. The level's scripts there name weapons the game
+does not have: a remake's scripts, from a pk3 in a main folder whose
+name sorts after pak0.pk3 and so wins over the game's own maps/*.ai.
+At parse time 0021 already passed over such a giveweapon; the actions
+themselves - giveweapon, takeweapon, selectweapon, suggestweapon,
+givearmor and giveinventory - still ended the mission with "AI
+Scripting: ... unknown weapon". Each now prints a warning, sets
+eta_problem, which the cgame says, and goes on (ETA_SCRIPT_UNKNOWN).
+Both reports now say the likely cause: a file in the main folder that
+is not the original game's.
+
+Checked with a copy of escape1.ai giving the player weapon_realknife,
+in an x_test.pk3 in the home main folder (a zz_ name is turned into sp_
+by the engine's own sort, and skipped): the mission went on, and
+"Problem: a character's script uses weapon_realknife, which this game
+does not have. A file in the main folder that is not the original
+game's is the likely cause" was said.

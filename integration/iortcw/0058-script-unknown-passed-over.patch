@@ -1,0 +1,111 @@
+diff --git a/SP/code/game/ai_cast_script.c b/SP/code/game/ai_cast_script.c
+index 32e04039..e8b4800c 100644
+--- a/SP/code/game/ai_cast_script.c
++++ b/SP/code/game/ai_cast_script.c
+@@ -558,7 +558,7 @@ void AICast_ScriptParse( cast_state_t *cs ) {
+ 							if ( !weap ) {
+ 								G_Printf( S_COLOR_YELLOW "WARNING: giveweapon: no item called '%s' (%i letters), %i items known\n",
+ 										  token, (int)strlen( token ), bg_numItems );
+-								trap_Cvar_Set( "eta_problem", va( "a character is given %s, %i letters, which the game cannot find among its %i items",
++								trap_Cvar_Set( "eta_problem", va( "a character is given %s, %i letters, which the game cannot find among its %i items. A file in the main folder that is not the original game's is the likely cause",
+ 																   token, (int)strlen( token ), bg_numItems ) );
+ 							} else {
+ 								RegisterItem( weap );
+diff --git a/SP/code/game/ai_cast_script_actions.c b/SP/code/game/ai_cast_script_actions.c
+index 10a5f088..4d9dd5c1 100644
+--- a/SP/code/game/ai_cast_script_actions.c
++++ b/SP/code/game/ai_cast_script_actions.c
+@@ -46,6 +46,21 @@ If you have questions concerning this license or the applicable additional terms
+ 
+ #include "ai_cast.h"
+ 
++#ifdef FEATURE_ACCESSIBILITY
++/*
++ * [Accessibility]: a script naming a weapon or item this game does not
++ * have - a remake's script, from a file left in the main folder that
++ * wins over the game's own - is passed over and reported, not an error
++ * that ends the mission: the tester was put out of the game at escape1's
++ * way out. The cgame says the report.
++ */
++#define ETA_SCRIPT_UNKNOWN( action, name ) do { \
++		G_Printf( S_COLOR_YELLOW "WARNING: AI Scripting: %s %s, unknown, passed over\n", action, name ); \
++		trap_Cvar_Set( "eta_problem", va( "a character's script uses %s, which this game does not have. A file in the main folder that is not the original game's is the likely cause", name ) ); \
++		return qtrue; \
++} while ( 0 )
++#endif
++
+ /*
+ Contains the code to handle the various commands available with an event script.
+ 
+@@ -1166,7 +1181,11 @@ qboolean AICast_ScriptAction_SuggestWeapon( cast_state_t *cs, char *params ) {
+ 	if ( weapon != WP_NONE ) {
+ 		G_AddEvent( &g_entities[cs->entityNum], EV_SUGGESTWEAP, weapon );
+ 	} else {
++#ifdef FEATURE_ACCESSIBILITY
++		ETA_SCRIPT_UNKNOWN( "suggestweapon", params );
++#else
+ 		G_Error( "AI Scripting: suggestweapon: unknown weapon \"%s\"", params );
++#endif
+ 	}
+ 
+ 	return qtrue;
+@@ -1216,7 +1235,11 @@ qboolean AICast_ScriptAction_SelectWeapon( cast_state_t *cs, char *params ) {
+ 	} else {
+ //		G_Printf( "--SCRIPTER WARNING-- AI Scripting: selectweapon: unknown weapon \"%s\"\n", params );
+ //		return qfalse;	// (SA) temp as scripts transition to new names
++#ifdef FEATURE_ACCESSIBILITY
++		ETA_SCRIPT_UNKNOWN( "selectweapon", params );
++#else
+ 		G_Error( "AI Scripting: selectweapon: unknown weapon \"%s\"", params );
++#endif
+ 	}
+ 
+ 	return qtrue;
+@@ -1268,7 +1291,11 @@ qboolean AICast_ScriptAction_GiveArmor( cast_state_t *cs, char *params ) {
+ 	}
+ 
+ 	if ( !item ) { // item not found
++#ifdef FEATURE_ACCESSIBILITY
++		ETA_SCRIPT_UNKNOWN( "givearmor", params );
++#else
+ 		G_Error( "AI Scripting: givearmor %s, unknown item", params );
++#endif
+ 	}
+ 
+ 	if ( item->giType == IT_ARMOR ) {
+@@ -1350,7 +1377,11 @@ qboolean AICast_ScriptAction_GiveWeapon( cast_state_t *cs, char *params ) {
+ 			}
+ 		}
+ 	} else {
++#ifdef FEATURE_ACCESSIBILITY
++		ETA_SCRIPT_UNKNOWN( "giveweapon", params );
++#else
+ 		G_Error( "AI Scripting: giveweapon %s, unknown weapon", params );
++#endif
+ 	}
+ 
+ 	return qtrue;
+@@ -1424,7 +1455,11 @@ qboolean AICast_ScriptAction_TakeWeapon( cast_state_t *cs, char *params ) {
+ //				g_entities[cs->entityNum].client->ps.ammo[BG_FindAmmoForWeapon(weapon)] = 0;
+ 			}
+ 		} else {
++#ifdef FEATURE_ACCESSIBILITY
++			ETA_SCRIPT_UNKNOWN( "takeweapon", params );
++#else
+ 			G_Error( "AI Scripting: takeweapon %s, unknown weapon", params );
++#endif
+ 		}
+ 
+ 	}
+@@ -1465,7 +1500,11 @@ qboolean AICast_ScriptAction_GiveInventory( cast_state_t *cs, char *params ) {
+ 	}
+ 
+ 	if ( !item ) { // item not found
++#ifdef FEATURE_ACCESSIBILITY
++		ETA_SCRIPT_UNKNOWN( "giveinventory", params );
++#else
+ 		G_Error( "AI Scripting: giveinventory %s, unknown item", params );
++#endif
+ 	}
+ 
+ 	if ( item->giType == IT_KEY ) {
