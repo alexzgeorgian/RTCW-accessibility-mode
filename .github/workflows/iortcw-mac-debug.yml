@@ -8,7 +8,11 @@ name: iortcw Mac debug
 #    eta-debug-data (never published), with the game's log printed.
 # On a change to this workflow or the test, or by hand.
 on:
+  # Branches only: a published build's tag, made in this repository,
+  # would otherwise start a build of its own, and that one another.
   push:
+    branches:
+      - '**'
     paths:
       - 'release/iortcw-debug/**'
       - '.github/workflows/iortcw-mac-debug.yml'

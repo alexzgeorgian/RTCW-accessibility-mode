@@ -11,7 +11,11 @@ name: RTCW test build
 # mode's in-game updater, which asks only for the latest, never offers
 # it. None of RTCW's own files are in it: the player brings their own.
 on:
+  # Branches only: a published build's tag, made in this repository,
+  # would otherwise start a build of its own, and that one another.
   push:
+    branches:
+      - '**'
     paths:
       - 'integration/iortcw/**'
       - 'release/build-iortcw.sh'
