@@ -1347,3 +1347,25 @@ is played there and then, Escape still skipping it.
 Checked with com_introplayed 1 and generation 17 in the config: "Intro
 movie. Escape skips it. Rain falls on dark rubble" at start, and
 com_introplayed 0 and generation 18 written back.
+
+## 0062: the alarm, quieter, and its box on F and T
+
+An alarm going gave the tester a headache and drowned out what they
+navigate by, and they could not tell whether its box was anywhere on
+the lists. The alarm box (ET_ALARMBOX) was on neither.
+
+- F's list has it: "Alarm box, ringing" while it rings, which F
+  presses - pressing it switches the alarm off - and "Alarm box" while
+  quiet, which F only turns to (locked), so it is never set ringing.
+  One destroyed (frame 2) is left out. Its middle is in the wall it is
+  set in, so it is seen from 12 units out toward the player.
+- T's list has a ringing one, as a switch.
+- The alarm's sound - the klaxon an alarm box gives the dlights it sets
+  going, played by the cgame as a one-shot each light cycle - is played
+  instead as a loop at eta_alarmVolume (default 50 percent; "The game's
+  alarm volume" on the Volumes page), which a one-shot cannot be; off,
+  not at all; at full, as the game plays it. A loop sound named alarm,
+  klaxon or siren on any entity follows the same setting.
+
+Checked in the first level by the alarm box off the start's corridor:
+F said "Alarm box, ahead, 1 meter" and did not press it.

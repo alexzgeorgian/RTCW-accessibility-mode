@@ -1,0 +1,197 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index cebea6d0..5b020bbd 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -58,6 +58,8 @@ vmCvar_t eta_crosshairVolume;
+ vmCvar_t eta_pickupVolume;
+ vmCvar_t eta_bumpVolume;
+ vmCvar_t eta_markerVolume;
++/* The game's own alarm, which drowned out everything else. */
++vmCvar_t eta_alarmVolume;
+ 
+ static const struct {
+ 	vmCvar_t *cvar;
+@@ -104,6 +106,33 @@ static int ETA_VolumePercent( const vmCvar_t *cvar ) {
+ 	return cvar->integer <= 0 ? 0 : cvar->integer >= 100 ? 100 : cvar->integer;
+ }
+ 
++/*
++ * A loop sound: the alarm, 0 to 255 as the alarm volume setting
++ * says, and -1 for any other sound, played as the game plays it. The
++ * tester, with an alarm going, could not hear the mode's own sounds or
++ * find their way for it.
++ */
++int CG_AccessibilitySpeakerVolume( int loopSound ) {
++	const char *name;
++
++	if ( loopSound <= 0 || loopSound >= MAX_SOUNDS ) {
++		return -1;
++	}
++	name = CG_ConfigString( CS_SOUNDS + loopSound );
++	if ( !name || ( !Q_stristr( name, "alarm" ) && !Q_stristr( name, "klaxon" ) && !Q_stristr( name, "siren" ) ) ) {
++		return -1;
++	}
++	return ( 255 * ETA_VolumePercent( &eta_alarmVolume ) ) / 100;
++}
++
++/* Whether a sound is played as the game plays it: anything but the alarm,
++   and the alarm at full volume. */
++qboolean CG_AccessibilityAlarmLoud( int sound ) {
++	int volume = CG_AccessibilitySpeakerVolume( sound );
++
++	return (qboolean)( volume < 0 || volume >= 255 );
++}
++
+ /* The loop's volume, 0 to 255, from its kind's setting. */
+ int CG_AccessibilityLoopVolume( eta_loopSoundType_t which ) {
+ 	const vmCvar_t *cvar;
+diff --git a/SP/code/cgame/cg_accessibility_settings.h b/SP/code/cgame/cg_accessibility_settings.h
+index afcf4829..3216fcbe 100644
+--- a/SP/code/cgame/cg_accessibility_settings.h
++++ b/SP/code/cgame/cg_accessibility_settings.h
+@@ -36,3 +36,4 @@ ETA_SETTING( eta_crosshairVolume,     "100" )
+ ETA_SETTING( eta_pickupVolume,        "100" )
+ ETA_SETTING( eta_bumpVolume,          "100" )
+ ETA_SETTING( eta_markerVolume,        "100" )
++ETA_SETTING( eta_alarmVolume,         "50" )
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 05fb73cb..cdf3720a 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -109,6 +109,9 @@ static int ETA_ThingKind(const etaAimTarget_t *target)
+ 			       ? ETA_THING_TREASURE : ETA_THING_ITEM;
+ 		case ET_EXPLOSIVE:
+ 			return ETA_THING_BREAKABLE;
++		case ET_ALARMBOX:
++			/* Ringing: F turns it off. */
++			return es->frame == 1 ? ETA_THING_SWITCH : -1;
+ 		case ET_MOVER:
+ 			/* A door is a way; a button is a switch. */
+ 			return Q_stristr(target->name, "door") && !Q_stristr(target->name, "for a door") ? -1 : ETA_THING_SWITCH;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 8b8e304c..39711671 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5764,6 +5764,25 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 		case ET_MG42:
+ 			Q_strncpyz(target.name, "Mounted machine gun", sizeof(target.name));
+ 			break;
++		case ET_ALARMBOX:
++			/* Ringing, F turns it off; quiet, F only turns to it - pressed,
++			   it would ring. Destroyed, it is gone. Shooting it stops it
++			   for good. The tester, with an alarm going, could not find
++			   what to do about it. */
++			if (es->frame == 2)
++			{
++				continue;
++			}
++			if (es->frame == 1)
++			{
++				Q_strncpyz(target.name, "Alarm box, ringing", sizeof(target.name));
++			}
++			else
++			{
++				Q_strncpyz(target.name, "Alarm box", sizeof(target.name));
++				target.locked = qtrue;
++			}
++			break;
+ 		case ET_EXPLOSIVE:
+ 			/* Turned to, to shoot or knife: there is nothing to press. */
+ 			if (es->modelindex <= 0 || es->modelindex >= MAX_MODELS || !eta_breakModel[es->modelindex])
+@@ -5824,6 +5843,17 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 			VectorAdd(target.point, cgs.inlineModelMidpoints[es->modelindex], target.point);
+ 		}
+ 
++		/* An alarm box is set in its wall: its middle is in the wall, and
++		   is seen from a little way out of it. */
++		if (es->eType == ET_ALARMBOX)
++		{
++			vec3_t out;
++
++			VectorSubtract(eye, target.point, out);
++			VectorNormalize(out);
++			VectorMA(target.point, 12.0f, out, target.point);
++		}
++
+ 		if (Distance(ps->origin, target.point) > ETA_USE_RANGE
+ 		    || !ETA_SeesPoint(eye, target.point, es->number))
+ 		{
+diff --git a/SP/code/cgame/cg_ents.c b/SP/code/cgame/cg_ents.c
+index b7a13acd..71adc2b4 100644
+--- a/SP/code/cgame/cg_ents.c
++++ b/SP/code/cgame/cg_ents.c
+@@ -429,6 +429,11 @@ void CG_AddLightstyle( centity_t *cent ) {
+ 		if ( cent->dl_oldframe >= stringlength ) {
+ 			cent->dl_oldframe = ( cent->dl_oldframe ) % stringlength;
+ 			if ( cent->dl_oldframe < 3 && cent->dl_sound ) { // < 3 so if an alarm comes back into the pvs it will only start a sound if it's going to be closely synced with the light, otherwise wait till the next cycle
++#ifdef FEATURE_ACCESSIBILITY
++				/* [Accessibility]: an alarm below full volume is played
++				   below, as a loop, which can be made quieter. */
++				if ( CG_AccessibilityAlarmLoud( cent->dl_sound ) )
++#endif
+ 				trap_S_StartSound( NULL, cent->currentState.number, CHAN_AUTO, cgs.gameSounds[cent->dl_sound] );
+ 			}
+ 		}
+@@ -457,6 +462,21 @@ void CG_AddLightstyle( centity_t *cent ) {
+ 	b = ( cl >> 16 ) & 255;
+ 
+ 	trap_R_AddLightToScene( cent->lerpOrigin, lightval, (float)r / 255.0f, (float)g / 255.0f, (float)b / 255.0f, 0 ); // overdraw forced to 0 for now
++
++#ifdef FEATURE_ACCESSIBILITY
++	/* [Accessibility]: the klaxon an alarm box gives its lights, which
++	   drowned out everything else for the tester: as loud as the alarm
++	   volume setting says, or not at all. Played as a loop, which the
++	   sound system can make quieter; the game's own one-shot cannot be. */
++	if ( cent->dl_sound && !CG_AccessibilityAlarmLoud( cent->dl_sound ) ) {
++		int volume = CG_AccessibilitySpeakerVolume( cent->dl_sound );
++
++		if ( volume > 0 ) {
++			trap_S_AddLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, 1250,
++									cgs.gameSounds[cent->dl_sound], volume );
++		}
++	}
++#endif
+ }
+ 
+ 
+@@ -479,6 +499,26 @@ static void CG_EntityEffects( centity_t *cent ) {
+ 		//			started with the lerpOriging right here. \/ \/	How do looping sounds ever work for bmodels?
+ 		//			Or have they always been broken and we just never used them?
+ 
++#ifdef FEATURE_ACCESSIBILITY
++		/* [Accessibility]: the alarm - a klaxon given to the lights an
++		   alarm box sets going - as loud as its setting says. */
++		if ( cgs.gameSoundTypes[ cent->currentState.loopSound ] == 1
++			 && CG_AccessibilitySpeakerVolume( cent->currentState.loopSound ) >= 0 ) {
++			int    volume = CG_AccessibilitySpeakerVolume( cent->currentState.loopSound );
++			vec3_t origin;
++
++			VectorCopy( cent->lerpOrigin, origin );
++			if ( cent->currentState.solid == SOLID_BMODEL ) {
++				VectorAdd( origin, cgs.inlineModelMidpoints[ cent->currentState.modelindex ], origin );
++			}
++			if ( volume > 0 ) {
++				trap_S_AddLoopingSound( cent->currentState.number, origin, vec3_origin,
++										cent->currentState.eType == ET_SPEAKER && cent->currentState.dmgFlags
++										? cent->currentState.dmgFlags : 1250,
++										cgs.gameSounds[ cent->currentState.loopSound ], volume );
++			}
++		} else
++#endif
+ 		if ( cent->currentState.eType == ET_SPEAKER ) {
+ 			/*if(cent->currentState.density == 1) {	// NO_PVS
+ 				CG_S_AddRealLoopingSound( cent->currentState.number, cent->lerpOrigin, vec3_origin, cgs.gameSounds[ cent->currentState.loopSound ] );
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0216deec..4087b526 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2402,6 +2402,9 @@ extern vmCvar_t eta_autoLock;
+ extern vmCvar_t eta_autoSteer;
+ extern vmCvar_t eta_stairKeeper;
+ extern vmCvar_t eta_edgeGuard;
++extern vmCvar_t eta_alarmVolume;
++int CG_AccessibilitySpeakerVolume( int loopSound );
++qboolean CG_AccessibilityAlarmLoud( int sound );
+ extern vmCvar_t eta_waysCallouts;
+ extern vmCvar_t eta_enemyCues;
+ extern vmCvar_t eta_secretsLead;

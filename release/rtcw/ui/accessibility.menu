@@ -174,7 +174,8 @@ menuDef {
 	ETA_VOLUME(86, "Crosshair and enemy volume", "eta_crosshairVolume")
 	ETA_VOLUME(104, "Bump volume", "eta_bumpVolume")
 	ETA_VOLUME(122, "Marker volume", "eta_markerVolume")
-	ETA_BUTTON(150, "BACK", close eta_acc_volumes ; open eta_accessibility)
+	ETA_VOLUME(140, "The game's alarm volume", "eta_alarmVolume")
+	ETA_BUTTON(168, "BACK", close eta_acc_volumes ; open eta_accessibility)
 }
 
 // Moving and aiming: the help with turning, walking and aiming.

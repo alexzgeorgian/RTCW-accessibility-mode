@@ -130,6 +130,7 @@ them. K and Y are back, going back through the lists.
 | K | Back through your waypoints, to the one before |
 | Left and Right arrows | A tap turns you to the next compass point and says it; two taps, a quarter turn. Held, they turn smoothly as before, and each point is said as you pass it |
 | F or Enter | Uses what is in front of you, as before. With nothing there, it turns you to the nearest thing to use, if it is close - within about 4 meters - a door, a button or a switch, a mounted gun, something on the ground, something you can break, a ladder, stairs - and says what it is and where: "Door, ahead left, 3 meters". F is always the nearest one; pressing it again stays on it. With nothing close, F says "Nothing close. T finds things further off". If the thing is out of reach, you are kept facing it while you walk, and you hear "in reach, F to use" when you get there. At a ladder, F climbs it, up or down, and says when you reach the top or the bottom; F again stops the climb. After you choose something with T or Y, F is for that thing, not for whatever else is near: further off than F reaches, F turns you toward the way there, as O does, and its ping leads you; close by, F turns you to the thing and uses it - even a switch the game hides in the wall, which F would not find by itself: "Button for a door, ahead left, 3 meters. A step closer, and F uses it". Once it is done, F is back to the nearest thing |
+| Alarm boxes | An alarm box is on the F list: "Alarm box, ahead, 1 meter". While it rings it is "Alarm box, ringing", on T's list too, and F switches it off; a quiet one F only turns you to, so you do not set it ringing. Shooting it stops it for good. The alarm itself plays at half its volume, and "The game's alarm volume" on the Volumes page of the Accessibility menu sets it, from full to off |
 | Breakables | Crates, windows, boards and other things that break are on the F and T lists too: "Breakable wood, ahead, 3 meters", or "Breakable glass", "Breakable, needs dynamite". F turns you to face it, aimed at it, so you can shoot it or knife it. Nothing is pressed |
 | U | The enemy key, as F is for things: turns you to the nearest enemy in sight, wherever they are, and keeps your aim on them: "Locked, Soldier, behind, 10 meters". When they fall, the lock lets go by itself: "Down. Lock off". U again lets go too, and so does turning with the arrows; "Lock lost" when they are out of sight |
 | Insert, held | The same lock, while you hold the key, for a keyboard that has Insert |
@@ -305,7 +306,8 @@ of settings, Up and Down to go through them and Enter to change one:
 - **Sounds**: door, ladder, pickup and bump sounds, the crosshair
   ticks, the enemies' sound and the marker's ping.
 - **Volumes**: how loud each of those is - full, 75, 50 or 25 percent,
-  or off.
+  or off - and the game's own alarm, at 50 percent unless you change
+  it.
 - **Moving and aiming**: the arrows turning by compass points, being
   turned along curved stairs, the aim locking on to enemies by itself,
   being turned along the way as you walk, whether T chooses
