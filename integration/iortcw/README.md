@@ -1379,3 +1379,28 @@ reads rtcw-update.txt from this repository's rtcw-updates release
 before the move read the file on the old page, which the workflow keeps
 updating to name the newest build here; the campaign's builds are taken
 off the old page.
+
+## 0064: back to the areas explored, and the status on four keys
+
+The tester finished the first level, but came to its last area with a
+rifle still left behind, and no key went back through the areas already
+explored. And F1, with everything on it, was long to wait through; they
+asked for it split, as 1428 has it.
+
+- Semicolon (bind generation 19, only where empty): the areas explored
+  other than this one, those with things left first, nearest first,
+  then the rest, round again (CG_AccessibilityAreasBack); each is
+  chosen for O, which leads to where the player first stood in it - a
+  spot kept as the area is come into, and in accessibility_explored.txt
+  - or, for one without, just through a door into it.
+- F1: the area, the kind of place, what is left here and in the level,
+  and the objectives done.
+- H: health and armor. I: the weapon, its ammo, and what is carried.
+  V: the facing and what is ahead, as before, and the coordinates in
+  meters from the map's middle. All generation 19, only where empty.
+  Z stays the game's alternate fire.
+
+Checked in the first level: F1, H, I and V said as above; through the
+door from the start's area, semicolon said "1 other area explored, 1
+with things left. 1 of 1, area 1, 9 things left, ahead, 61 meters, 24
+meters below you. O leads there", and O led there.

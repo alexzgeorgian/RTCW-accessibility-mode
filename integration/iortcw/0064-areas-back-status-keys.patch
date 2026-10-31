@@ -1,0 +1,444 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 5b020bbd..e32d7805 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -23,6 +23,7 @@
+ #include "core/accessibility_runtime.h"
+ #include "hud/hud_narrator.h"
+ #include "navigation/navigation_system.h"
++#include "navigation/place_classifier.h"
+ #include "speech/speech_manager.h"
+ 
+ /*
+@@ -603,25 +604,41 @@ static void CG_AccessibilityEnemyCallouts_f( void ) {
+ 	CG_AccessibilitySay( on ? "Enemy callouts on" : "Enemy callouts off. M turns them on" );
+ }
+ 
+-static void CG_AccessibilityStatus_f( void ) {
++/*
++ * The status, as 1428 has it, on a key each rather than all on F1, which
++ * the tester found too long to wait through: F1 where the player is, H
++ * their health, I their weapon, ammo and what they carry, V which way
++ * they face and where on the map (cg_accessibility_world.c).
++ */
++
++/* H: "Health 100, armor 20". */
++void CG_AccessibilityHealth_f( void ) {
+ 	playerState_t *ps = &cg.snap->ps;
+-	char text[1024];
+-	int count = CG_AccessibilityObjectiveCount();
+-	int bits = CG_AccessibilityObjectiveBits();
+-	int i, done = 0;
++	char text[128];
+ 
+ 	if ( ps->stats[STAT_HEALTH] <= 0 ) {
+-		Com_sprintf( text, sizeof( text ), "Dead" );
++		Q_strncpyz( text, "Dead", sizeof( text ) );
+ 	} else {
+ 		Com_sprintf( text, sizeof( text ), "Health %i", ps->stats[STAT_HEALTH] );
+ 		if ( ps->stats[STAT_ARMOR] > 0 ) {
+ 			Q_strcat( text, sizeof( text ), va( ", armor %i", ps->stats[STAT_ARMOR] ) );
+-		}
+-		Q_strcat( text, sizeof( text ), va( ". %s", CG_AccessibilityWeaponName( ps->weapon ) ) );
+-		if ( CG_AccessibilityAmmoText( ps, ps->weapon )[0] ) {
+-			Q_strcat( text, sizeof( text ), va( ", %s", CG_AccessibilityAmmoText( ps, ps->weapon ) ) );
++		} else {
++			Q_strcat( text, sizeof( text ), ", no armor" );
+ 		}
+ 	}
++	CG_AccessibilitySay( text );
++}
++
++/* I: "Luger, 8 in the clip, 24 more. Gold key. Health kit, 1". */
++void CG_AccessibilityAmmo_f( void ) {
++	playerState_t *ps = &cg.snap->ps;
++	char text[1024];
++	int i;
++
++	Com_sprintf( text, sizeof( text ), "%s", CG_AccessibilityWeaponName( ps->weapon ) );
++	if ( CG_AccessibilityAmmoText( ps, ps->weapon )[0] ) {
++		Q_strcat( text, sizeof( text ), va( ", %s", CG_AccessibilityAmmoText( ps, ps->weapon ) ) );
++	}
+ 
+ 	/* What is carried besides the weapons: keys, and the items the item
+ 	   keys cycle through. */
+@@ -636,6 +653,41 @@ static void CG_AccessibilityStatus_f( void ) {
+ 												ps->holding == item->giTag ? ", ready" : "" ) );
+ 		}
+ 	}
++	CG_AccessibilitySay( text );
++}
++
++/* F1: where the player is - the area, the kind of place, how far the
++   exploring has got, what is left, and the objectives done. */
++static void CG_AccessibilityStatus_f( void ) {
++	char text[1024], progress[160];
++	int count = CG_AccessibilityObjectiveCount();
++	int bits = CG_AccessibilityObjectiveBits();
++	int i, done = 0;
++	ETA_Place place;
++
++	/* The area, where the map has them, in place of the numbered places
++	   and the ways tried. */
++	if ( CG_AccessibilityAreasOn() ) {
++		CG_AccessibilityAreaText( text, sizeof( text ) );
++	} else {
++		CG_AccessibilityPlaceText( text, sizeof( text ) );
++	}
++
++	CG_AccessibilityPlace( cg.predictedPlayerState.origin, &place );
++	ETA_Place_Text( &place, progress, sizeof( progress ) );
++	if ( progress[0] ) {
++		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
++	}
++
++	if ( !CG_AccessibilityAreasOn() ) {
++		CG_AccessibilityExploreProgress( progress, sizeof( progress ) );
++		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
++	} else {
++		CG_AccessibilityThingsInArea( CG_AccessibilityAreaHere(), progress, sizeof( progress ) );
++		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
++	}
++	CG_AccessibilityThingsProgress( progress, sizeof( progress ) );
++	Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+ 
+ 	if ( count ) {
+ 		for ( i = 0; i < count; i++ ) {
+@@ -646,28 +698,6 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		Q_strcat( text, sizeof( text ), va( ". Objectives %i of %i done", done, count ) );
+ 	}
+ 
+-	/* Where the player is and which way they face - H's, before H went
+-	   to keep the keys few - and how far the exploring has got. */
+-	{
+-		char progress[160];
+-
+-		/* The area, where the map has them, in place of the numbered
+-		   places and the ways tried. */
+-		if ( CG_AccessibilityAreasOn() ) {
+-			CG_AccessibilityAreaText( progress, sizeof( progress ) );
+-		} else {
+-			CG_AccessibilityPlaceText( progress, sizeof( progress ) );
+-		}
+-		Q_strcat( text, sizeof( text ), va( ". %s, facing %s", progress,
+-											ETA_HudNarrator_FacingName( ETA_HudNarrator_FacingFromYaw( cg.predictedPlayerState.viewangles[YAW] ) ) ) );
+-		if ( !CG_AccessibilityAreasOn() ) {
+-			CG_AccessibilityExploreProgress( progress, sizeof( progress ) );
+-			Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+-		}
+-		CG_AccessibilityThingsProgress( progress, sizeof( progress ) );
+-		Q_strcat( text, sizeof( text ), va( ". %s", progress ) );
+-	}
+-
+ 	CG_AccessibilitySay( text );
+ }
+ 
+@@ -755,6 +785,9 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityThingsNext" );
+ 	trap_AddCommand( "accessibilityThingsPrev" );
+ 	trap_AddCommand( "accessibilityAreaExits" );
++	trap_AddCommand( "accessibilityAreasBack" );
++	trap_AddCommand( "accessibilityHealth" );
++	trap_AddCommand( "accessibilityAmmo" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+ 	trap_AddCommand( "-accessibilityTurnLeft" );
+ 	trap_AddCommand( "+accessibilityTurnRight" );
+@@ -808,6 +841,16 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityThingsPrev();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityAreaExits" ) ) {
+ 		CG_AccessibilityAreaExits();
++	} else if ( !Q_stricmp( cmd, "accessibilityAreasBack" ) ) {
++		CG_AccessibilityAreasBack();
++	} else if ( !Q_stricmp( cmd, "accessibilityHealth" ) ) {
++		if ( cg.snap ) {
++			CG_AccessibilityHealth_f();
++		}
++	} else if ( !Q_stricmp( cmd, "accessibilityAmmo" ) ) {
++		if ( cg.snap ) {
++			CG_AccessibilityAmmo_f();
++		}
+ 	} else if ( !Q_stricmp( cmd, "+accessibilityTurnLeft" ) ) {
+ 		CG_AccessibilityTurnLeftDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityTurnLeft" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 0db7d664..d61800bc 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -63,6 +63,13 @@ static struct
+ 	int            pressedAt;
+ 	int            list[ETA_AREA_LIST_MAX];   /* X's list: what is new, then the doors back */
+ 	int            listCount, listPos, listArea, listWays;
++	/* Where the player stood on coming into each area, for the way back
++	   to it. */
++	vec3_t         spot[ETA_AREAS_MAX];
++	unsigned char  hasSpot[ETA_AREAS_MAX];
++	/* Semicolon's list: the areas explored. */
++	int            backPressedAt, backArea, backPos, backCount;
++	int            back[ETA_AREAS_MAX];
+ } eta_areas;
+ 
+ /* The area a point is in: a point in a wall or in the floor - a switch,
+@@ -245,6 +252,12 @@ static void ETA_ExploredSave(void)
+ 		{
+ 			Com_sprintf(line, sizeof(line), "area %d %d\n", i, eta_areas.number[i]);
+ 			trap_FS_Write(line, strlen(line), f);
++			if (eta_areas.hasSpot[i])
++			{
++				Com_sprintf(line, sizeof(line), "spot %d %.0f %.0f %.0f\n", i, eta_areas.spot[i][0],
++				            eta_areas.spot[i][1], eta_areas.spot[i][2]);
++				trap_FS_Write(line, strlen(line), f);
++			}
+ 		}
+ 	}
+ 	for (i = 0; CG_AccessibilityFrontierGet(i, feature, lead, &kind, &tried); i++)
+@@ -304,6 +317,12 @@ static void ETA_ExploredLoad(void)
+ 				eta_areas.numbered = n;
+ 			}
+ 		}
++		else if (sscanf(line, "spot %d %f %f %f", &a, &feature[0], &feature[1], &feature[2]) == 4 && a >= 0
++		         && a < ETA_AREAS_MAX)
++		{
++			VectorCopy(feature, eta_areas.spot[a]);
++			eta_areas.hasSpot[a] = 1;
++		}
+ 		else if (sscanf(line, "way %d %d %f %f %f %f %f %f", &kind, &tried, &feature[0], &feature[1], &feature[2],
+ 		                &lead[0], &lead[1], &lead[2]) == 8)
+ 		{
+@@ -438,6 +457,12 @@ void CG_AccessibilityAreasFrame(void)
+ 	first             = (qboolean)(eta_areas.current < 0);
+ 	eta_areas.current = area;
+ 	eta_areas.pending = -1;
++	if (!eta_areas.hasSpot[area])
++	{
++		VectorCopy(ps->origin, eta_areas.spot[area]);
++		eta_areas.hasSpot[area] = 1;
++		eta_exploredDirty       = qtrue;
++	}
+ 	if (!eta_areas.number[area])
+ 	{
+ 		eta_areas.number[area] = ++eta_areas.numbered;
+@@ -758,4 +783,147 @@ void CG_AccessibilityAreaExits(void)
+ 	CG_AccessibilityChoose(exit->side[side], name);
+ }
+ 
++/* Where to lead to an area: where the player stood on coming into it,
++   else just through a door into it. */
++static qboolean ETA_AreaSpot(int area, vec3_t out)
++{
++	int i;
++
++	if (eta_areas.hasSpot[area])
++	{
++		VectorCopy(eta_areas.spot[area], out);
++		return qtrue;
++	}
++	for (i = 0; i < eta_areas.exitCount; i++)
++	{
++		const eta_areaExit_t *exit = &eta_areas.exits[i];
++
++		if (exit->area[0] == area || exit->area[1] == area)
++		{
++			VectorCopy(exit->side[exit->area[0] == area ? 0 : 1], out);
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/*
++ * Semicolon: the areas explored, one after another and round again -
++ * those with things left in them first, nearest first, then the rest -
++ * each chosen for O to lead back to. The tester came to the last area of
++ * the first level with a rifle still left behind, and no key that went
++ * back through the areas already seen.
++ */
++void CG_AccessibilityAreasBack(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 here, i, j, count = 0, withThings = 0, meters, left, area;
++	float               far[ETA_AREAS_MAX];
++	vec3_t              at, delta;
++	char                height[64], name[32], things[48];
++	qboolean            fresh;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	if (!eta_areas.loaded)
++	{
++		ETA_Speech_Say("This level is all one area. T finds things, O leads to the way out");
++		return;
++	}
++	here  = CG_AccessibilityAreaHere();
++	fresh = (qboolean)(cg.time < eta_areas.backPressedAt || cg.time - eta_areas.backPressedAt >= ETA_AREA_LIST_MS
++	                   || here != eta_areas.backArea || !eta_areas.backCount);
++	eta_areas.backPressedAt = cg.time;
++
++	if (fresh)
++	{
++		/* Those with things left, then the rest. */
++		for (j = 0; j < 2; j++)
++		{
++			int start = count;
++
++			for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
++			{
++				if (!eta_areas.number[i] || i == here || !ETA_AreaSpot(i, at))
++				{
++					continue;
++				}
++				if (( CG_AccessibilityThingsLeftIn(i) > 0 ) != ( j == 0 ))
++				{
++					continue;
++				}
++				far[count]              = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
++				eta_areas.back[count++] = i;
++			}
++			if (!j)
++			{
++				withThings = count;
++			}
++			/* Nearest first within each part. */
++			for (i = start; i < count; i++)
++			{
++				int k;
++
++				for (k = i + 1; k < count; k++)
++				{
++					if (far[k] < far[i])
++					{
++						int   t  = eta_areas.back[i];
++						float ft = far[i];
++
++						eta_areas.back[i] = eta_areas.back[k];
++						eta_areas.back[k] = t;
++						far[i]            = far[k];
++						far[k]            = ft;
++					}
++				}
++			}
++		}
++		eta_areas.backCount = count;
++		eta_areas.backArea  = here;
++		eta_areas.backPos   = -1;
++		if (!count)
++		{
++			ETA_Speech_Say("No other area explored yet. X finds the doors out");
++			return;
++		}
++	}
++
++	eta_areas.backPos = ( eta_areas.backPos + 1 ) % eta_areas.backCount;
++	area              = eta_areas.back[eta_areas.backPos];
++	ETA_AreaSpot(area, at);
++	left = CG_AccessibilityThingsLeftIn(area);
++	if (left)
++	{
++		Com_sprintf(things, sizeof(things), ", %d %s left", left, left == 1 ? "thing" : "things");
++	}
++	else
++	{
++		Q_strncpyz(things, ", nothing left", sizeof(things));
++	}
++
++	VectorSubtract(at, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	meters = meters < 1 ? 1 : meters;
++	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++
++	ETA_Speech_BeginReport();
++	if (fresh)
++	{
++		ETA_Speech_Say(withThings ? va("%d other %s explored, %d with things left", eta_areas.backCount,
++		                               eta_areas.backCount == 1 ? "area" : "areas", withThings)
++		               : va("%d other %s explored, nothing left in them", eta_areas.backCount,
++		                    eta_areas.backCount == 1 ? "area" : "areas"));
++	}
++	ETA_Speech_Say(va("%d of %d, area %d%s, %s, %d %s%s%s. O leads there", eta_areas.backPos + 1, eta_areas.backCount,
++	                  eta_areas.number[area], things, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
++	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
++	ETA_Speech_EndReport();
++
++	Com_sprintf(name, sizeof(name), "area %d", eta_areas.number[area]);
++	CG_AccessibilityChoose(at, name);
++}
++
+ #endif
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index cdf3720a..d987a1b4 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -355,6 +355,15 @@ void CG_AccessibilityThingsProgress(char *out, size_t size)
+ 	ETA_ThingsProgress(-1, " in the level", out, size);
+ }
+ 
++/* For the explored areas' list: how many things are left in an area. */
++int CG_AccessibilityThingsLeftIn(int area)
++{
++	int counts[ETA_THING_KINDS], left;
++
++	ETA_ThingsCount(area, counts, &left);
++	return left;
++}
++
+ /* For an area come into: "4 things left here: 2 items, 1 switch". */
+ void CG_AccessibilityThingsInArea(int area, char *out, size_t size)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 39711671..facf4669 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -474,6 +474,17 @@ void CG_AccessibilityFacing_f(void)
+ 		}
+ 	}
+ 
++	/* Where on the map, as 1428 gives its coordinates: meters east or
++	   west, north or south, and up or down, from the map's own middle. */
++	{
++		int east  = (int)(ps->origin[0] * ETA_QU_TO_METERS);
++		int north = (int)(ps->origin[1] * ETA_QU_TO_METERS);
++		int up    = (int)(ps->origin[2] * ETA_QU_TO_METERS);
++
++		Q_strcat(line, sizeof(line), va(". Coordinates %d %s, %d %s, %d %s", abs(east), east < 0 ? "west" : "east",
++		                                abs(north), north < 0 ? "south" : "north", abs(up), up < 0 ? "down" : "up"));
++	}
++
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_Speech_Say(line);
+ 	ETA_Speech_EndReport();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 4087b526..a6cea5a3 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2291,6 +2291,10 @@ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
++void CG_AccessibilityAreasBack( void );
++int CG_AccessibilityThingsLeftIn( int area );
++void CG_AccessibilityHealth_f( void );
++void CG_AccessibilityAmmo_f( void );
+ qboolean CG_AccessibilityDoorBox( int model, vec3_t mins, vec3_t maxs, qboolean *opens );
+ #define ETA_MAP_ITEM     0
+ #define ETA_MAP_SWITCH   1
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 0c92f7a6..c7466c1e 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8410,6 +8410,15 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   fifteenth generation, so only where they are still empty. */
+ 		{ 'y',          "accessibilityThingsPrev",    17, NULL },
+ 		{ 'k',          "accessibilityWaypointPrev",  17, NULL },
++		/* The status on a key each, as 1428 has it, rather than all on
++		   F1: H the health, I the weapon, ammo and what is carried, V the
++		   facing and coordinates; and semicolon back through the areas
++		   explored. All four let go of in the fifteenth generation, so
++		   only where they are still empty. */
++		{ 'h',          "accessibilityHealth",        19, NULL },
++		{ 'i',          "accessibilityAmmo",          19, NULL },
++		{ 'v',          "accessibilityFacing",        19, NULL },
++		{ ';',          "accessibilityAreasBack",     19, NULL },
+ 	};
+ 
+ 	/*
