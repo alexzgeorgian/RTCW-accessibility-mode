@@ -1334,3 +1334,16 @@ tester stood still at it, and again whenever something in front or a
 turn broke the probe off it and back. A drop is now said again only
 once the player has moved 3 meters from where it was last said, or it
 is a different drop (ETA_DROP_SAME_PLACE).
+
+## 0061: the intro back at start
+
+The tester found the intro movie no longer started. The engine plays it
+at start only while com_introplayed is 0, and the options' "Reset to
+defaults" (resetDefaults, from the multiplayer menus) sets it to 1 for
+good. With the mode, resetDefaults no longer does; and once (bind
+generation 18), a com_introplayed of 1 is put back to 0 and the intro
+is played there and then, Escape still skipping it.
+
+Checked with com_introplayed 1 and generation 17 in the config: "Intro
+movie. Escape skips it. Rain falls on dark rubble" at start, and
+com_introplayed 0 and generation 18 written back.

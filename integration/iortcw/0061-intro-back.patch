@@ -1,0 +1,49 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index c131ae0a..276937f4 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -4740,7 +4740,9 @@ static void UI_RunMenuScript( char **args ) {
+ 			trap_Cmd_ExecuteText( EXEC_NOW, "exec language.cfg\n" );       // NERVE - SMF
+ 			trap_Cmd_ExecuteText( EXEC_NOW, "setRecommended\n" );     // NERVE - SMF
+ 			Controls_SetDefaults();
+-#ifdef CINEMATICS_INTRO
++#if defined( CINEMATICS_INTRO ) && !defined( FEATURE_ACCESSIBILITY )
++			// [Accessibility]: not with the mode - this marked the intro as
++			// seen for good, and the tester found it no longer started.
+ 			trap_Cvar_Set( "com_introPlayed", "1" );
+ #endif
+ 			trap_Cvar_Set( "com_recommendedSet", "1" );                   // NERVE - SMF
+@@ -8434,6 +8436,7 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'h',  "accessibilityFacing" },
+ 	};
+ 	const int retiredAt = 15;
++	const int introAt   = 18;
+ 
+ 	vmCvar_t installed;
+ 	int i;
+@@ -8473,6 +8476,25 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		}
+ 	}
+ 
++#ifdef CINEMATICS_INTRO
++	/* The intro at start, which "Reset to defaults" in the options had
++	   marked as seen for good: the tester found it no longer started.
++	   Given back once, and played now; Escape still skips it. */
++	if ( installed.integer < introAt ) {
++		char played[16];
++
++		played[0] = '\0';
++		trap_Cvar_VariableStringBuffer( "com_introplayed", played, sizeof( played ) );
++		if ( atoi( played ) ) {
++			trap_Cvar_Set( "com_introplayed", "0" );
++			trap_Cmd_ExecuteText( EXEC_APPEND, "cinematic " CINEMATICS_INTRO " 3\n" );
++		}
++	}
++#endif
++	if ( introAt > newest ) {
++		newest = introAt;
++	}
++
+ 	if ( newest > installed.integer ) {
+ 		trap_Cvar_Set( "eta_bindsInstalled", va( "%i", newest ) );
+ 	}
