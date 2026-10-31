@@ -1326,3 +1326,11 @@ a folder of its own"; F10: "Moved x_test.pk3 into the folder not the
 original game, inside the main folder. Quit the game and open it again
 to have the original game"; the file was in main/not the original game,
 and the next start said nothing.
+
+## 0060: a ledge said once, until the player moves on
+
+"Ledge ahead, 2 metres down" came again every four seconds while the
+tester stood still at it, and again whenever something in front or a
+turn broke the probe off it and back. A drop is now said again only
+once the player has moved 3 meters from where it was last said, or it
+is a different drop (ETA_DROP_SAME_PLACE).

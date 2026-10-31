@@ -1,0 +1,51 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 57a87e9f..8b8e304c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -589,6 +589,9 @@ static int ETA_WaterLevel(void)
+  */
+ #define ETA_DROP_MIN_INTERVAL 4000
+ 
++/* A drop said is not said again until the player has moved this far. */
++#define ETA_DROP_SAME_PLACE 96.0f
++
+ /**
+  * @brief Says when the ground ahead falls away.
+  *
+@@ -615,9 +618,11 @@ static int ETA_WaterLevel(void)
+  */
+ static void ETA_NarrateDropAhead(void)
+ {
+-	static char lastDescription[64];
+-	static int  lastTime;
+-	char        description[64];
++	static char   lastDescription[64];
++	static int    lastTime;
++	static char   spokenDescription[64];
++	static vec3_t spokenAt;
++	char          description[64];
+ 
+ 	const playerState_t *ps;
+ 	trace_t             trace;
+@@ -754,8 +759,21 @@ static void ETA_NarrateDropAhead(void)
+ 		return;
+ 	}
+ 
++	/* The same drop, from where it was last said: said already. The
++	   tester, standing at a ledge, heard it again every few seconds
++	   without moving - and again each time something in front, or a
++	   turn, broke the probe off it and back. */
++	if (!Q_stricmp(description, spokenDescription) && Distance(ps->origin, spokenAt) < ETA_DROP_SAME_PLACE)
++	{
++		Q_strncpyz(lastDescription, description, sizeof(lastDescription));
++		lastTime = cg.time;
++		return;
++	}
++
+ 	Q_strncpyz(lastDescription, description, sizeof(lastDescription));
+ 	lastTime = cg.time;
++	Q_strncpyz(spokenDescription, description, sizeof(spokenDescription));
++	VectorCopy(ps->origin, spokenAt);
+ 
+ 	ETA_Speech_BeginReport();
+ 	ETA_HudNarrator_SpeakDrop(kind, meters);
