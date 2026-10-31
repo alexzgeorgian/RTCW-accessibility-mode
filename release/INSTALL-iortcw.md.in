@@ -90,6 +90,13 @@ plays its opening cutscene first: press Enter to start it, and Escape,
 Space or Enter skips it. Before each mission its briefing is read: the
 objectives, then the orders. **Press Enter to begin the mission.**
 
+If your main folder has game files other than the original game's -
+pak0.pk3, sp_pak1.pk3 to sp_pak4.pk3, the multiplayer mp_ files and the
+mode's own sp_zaccessibility.pk3 - the menus say so once, a few seconds
+in, and name them: a remake's files there change the game's sounds,
+music and menus. Move them out of the main folder to have the original
+game.
+
 ### Keys in a mission
 
 Getting around is done as in 1428: Shadows over Silesia, where a level

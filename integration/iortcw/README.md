@@ -1252,3 +1252,21 @@ the thing is done, F lets go of it (CG_AccessibilityLedClear).
 Checked in the first level: T to a switch 54 meters off, then F: "Facing
 the way. 5 meters, then right. Switch, 54 meters"; by the buttons, T to
 the button 2 meters off and F: "Button, right, 2 meters", then "Done".
+
+## 0056: game files that are not the game's own, named
+
+The tester heard the weapons reload, the footsteps and the main menu as
+a remake has them, with the menu's theme gone: a pk3 that is not the
+game's own, left in a main folder, wins over the original's sounds and
+menus. Nothing in the mode ships or changes them, and the tester could
+not look through the folder. Nine seconds into the menus, once, the
+pk3s the game finds (trap_FS_GetFileList "" "pk3") are checked against
+the campaign's own five, the multiplayer mp_ ones and the mode's
+sp_zaccessibility.pk3, and any other is named, with where to move it
+from (UI_AccessibilityExtraPaksFrame).
+
+Checked with a z_realrtcw_test.pk3 put in the home main folder: "Your
+game's main folder has a file that is not the original game's:
+z_realrtcw_test.pk3. It can change the game's sounds, music and menus.
+To have the original game, move it out of the main folder beside the
+game"; without it, nothing is said.
