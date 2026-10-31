@@ -1296,7 +1296,7 @@ the game cannot find" through the first level, and at its way out was
 put out of the game. The level's scripts there name weapons the game
 does not have: a remake's scripts, from a pk3 in a main folder whose
 name sorts after pak0.pk3 and so wins over the game's own maps/*.ai.
-At parse time 0021 already passed over such a giveweapon; the actions
+At parse time 0006 already passed over such a giveweapon; the actions
 themselves - giveweapon, takeweapon, selectweapon, suggestweapon,
 givearmor and giveinventory - still ended the mission with "AI
 Scripting: ... unknown weapon". Each now prints a warning, sets
