@@ -1,0 +1,53 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index a3ceedc1..4fb334eb 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -452,8 +452,46 @@ qboolean CG_AccessibilityAreaHolds(int area, const vec3_t at)
+ 		return qtrue;
+ 	}
+ 	there = ETA_AreaOf(at);
+-	return (qboolean)(there == area
+-	                  || ( there < 0 && Distance(at, cg.predictedPlayerState.origin) < ETA_AREA_THINGS_NEAR ));
++	if (there >= 0)
++	{
++		return (qboolean)( there == area );
++	}
++
++	/* In a doorway, between two areas and in neither: it is in both of
++	   them, the rooms just either side. Counting it in whatever room the
++	   player was near put the wine room's doorway in the corridor above
++	   it, through the floor. */
++	{
++		static const float reach[] = { 48.0f, 96.0f };
++		qboolean           any = qfalse;
++		int                r, k;
++
++		for (r = 0; r < (int)ARRAY_LEN(reach); r++)
++		{
++			for (k = 0; k < 8; k++)
++			{
++				vec3_t probe;
++				float  angle = k * ( M_PI / 4.0f );
++
++				VectorCopy(at, probe);
++				probe[0] += cos(angle) * reach[r];
++				probe[1] += sin(angle) * reach[r];
++				there     = ETA_AreaOf(probe);
++				if (there == area)
++				{
++					return qtrue;
++				}
++				any |= there >= 0;
++			}
++		}
++		if (any)
++		{
++			return qfalse;
++		}
++	}
++	/* Nowhere near any area: by the player, on the same floor. */
++	return (qboolean)( Distance(at, cg.predictedPlayerState.origin) < ETA_AREA_THINGS_NEAR
++	                   && fabsf(at[2] - cg.predictedPlayerState.origin[2]) < 64.0f );
+ }
+ 
+ static int ETA_AreaDoorsOut(int area, int *toNew)

@@ -1499,3 +1499,15 @@ once their trigger has gone like the others. Where one stands at the
 same place as a spot that unlocks a door, the door's comes first.
 "Spot " now marks every place walked onto for T's "Walk onto it", and
 one that wakes is said by its name.
+
+### 0070 Things in a doorway
+
+The tester, in the keep's upper corridor: T listed one thing there that
+could not be reached at all. It was the wine room's "Spot where
+soldiers come in", on the floor below: its trigger stands in the wine
+room's doorway, a portal between two of the bots' clusters, so in no
+area, and a thing in no area was counted in the player's own if within
+10 meters - through the floor. CG_AccessibilityAreaHolds now puts a
+thing in a doorway in the areas just either side of it, 48 and 96 units
+out; only a thing with no area anywhere near is still counted by the
+player, and then only on the same floor.
