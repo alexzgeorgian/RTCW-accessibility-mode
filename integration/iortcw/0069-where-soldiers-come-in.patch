@@ -1,0 +1,138 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 16937ceb..80d9d398 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -531,7 +531,7 @@ static void ETA_ThingsStep(int step)
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+ 		                  why[0] ? "Walking onto it does nothing yet"
+-		                  : !Q_stricmpn(thing->name, "Spot that unlocks", 17) ? "Walk onto it" : what[thing->kind]));
++		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind]));
+ 	}
+ 	else
+ 	{
+@@ -633,13 +633,13 @@ void CG_AccessibilityThingsFrame(void)
+ 			/* A spot that unlocks a door is done once used: the game says
+ 			   when its trigger has gone. One switched off does nothing
+ 			   walked onto, so stays until it works and is used. */
+-			if (thing->kind == ETA_THING_SWITCH && !Q_stricmpn(thing->name, "Spot that unlocks", 17)
++			if (thing->kind == ETA_THING_SWITCH && !Q_stricmpn(thing->name, "Spot ", 5)
+ 			    && CG_AccessibilityUnlockState(CG_AccessibilityUnlockSpotAt(thing->point)) >= 0)
+ 			{
+ 				thing->done = (qboolean)( CG_AccessibilityUnlockState(CG_AccessibilityUnlockSpotAt(thing->point)) == 2 );
+ 				continue;
+ 			}
+-			if (!thing->done && thing->kind == ETA_THING_SWITCH && !Q_stricmpn(thing->name, "Spot that unlocks", 17)
++			if (!thing->done && thing->kind == ETA_THING_SWITCH && !Q_stricmpn(thing->name, "Spot ", 5)
+ 			    && fabsf(ps->origin[2] - thing->point[2]) < 64.0f
+ 			    && ( ps->origin[0] - thing->point[0] ) * ( ps->origin[0] - thing->point[0] )
+ 			    + ( ps->origin[1] - thing->point[1] ) * ( ps->origin[1] - thing->point[1] ) < 64.0f * 64.0f)
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 3dcf2864..97de62dc 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -255,6 +255,9 @@ static void ETA_UnlockFired(const char *name, int depth);
+ /* The spot being explained: what wakes a trigger that starts off. */
+ static int eta_unlockExplain = -1;
+ 
++/* What a place walked onto is called: what it leads to. */
++static const char *eta_unlockSpotName = "Spot that unlocks a door";
++
+ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ {
+ 	vec3_t   mins, maxs, at;
+@@ -279,10 +282,19 @@ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ 	{
+ 		if (Distance(eta_unlockSpots[i].at, at) < 64.0f)
+ 		{
++			/* One place, two triggers: what unlocks a door comes first. */
++			if (eta_unlockSpots[i].trigger && !Q_stricmp(eta_unlockSpots[i].name, "Spot where soldiers come in")
++			    && Q_stricmp(name, eta_unlockSpots[i].name))
++			{
++				break;
++			}
+ 			return i;
+ 		}
+ 	}
+-	i = eta_unlockSpotCount++;
++	if (i == eta_unlockSpotCount)
++	{
++		eta_unlockSpotCount++;
++	}
+ 	memset(&eta_unlockSpots[i], 0, sizeof(eta_unlockSpots[i]));
+ 	VectorCopy(at, eta_unlockSpots[i].at);
+ 	Q_strncpyz(eta_unlockSpots[i].name, name, sizeof(eta_unlockSpots[0].name));
+@@ -328,7 +340,7 @@ static void ETA_UnlockEvent(const char *owner, const char *event, int depth)
+ 			}
+ 			if (!Q_stricmp(r->classname, "ai_trigger") && !Q_stricmp(r->ainame, "player"))
+ 			{
+-				ETA_UnlockAddSpot(r, "Spot that unlocks a door");
++				ETA_UnlockAddSpot(r, eta_unlockSpotName);
+ 			}
+ 			else if (!Q_stricmp(r->classname, "target_script_trigger") && r->targetname[0])
+ 			{
+@@ -376,7 +388,7 @@ static void ETA_UnlockFired(const char *name, int depth)
+ 		if (r->model && ( !Q_stricmp(r->classname, "trigger_once") || !Q_stricmp(r->classname, "trigger_multiple")
+ 		                  || ( !Q_stricmp(r->classname, "ai_trigger") && !Q_stricmp(r->ainame, "player") ) ))
+ 		{
+-			ETA_UnlockAddSpot(r, "Spot that unlocks a door");
++			ETA_UnlockAddSpot(r, eta_unlockSpotName);
+ 		}
+ 		else if (r->model && !Q_stricmpn(r->classname, "func_door", 9))
+ 		{
+@@ -426,8 +438,29 @@ static void ETA_UnlockFired(const char *name, int depth)
+ 			}
+ 			if (of >= l->need)
+ 			{
++				const char *naming = eta_unlockSpotName;
++				int        explaining = eta_unlockExplain;
++
+ 				eta_unlockSpots[eta_unlockExplain].need = l->need;
+ 				eta_unlockSpots[eta_unlockExplain].of   = of;
++
++				/* Those soldiers may not be in the level yet: they come
++				   in when the player walks into a place, and those
++				   places are where to go next. */
++				eta_unlockSpotName = "Spot where soldiers come in";
++				eta_unlockExplain  = -1;
++				for (j = 0; j < eta_unlockLineCount; j++)
++				{
++					const eta_unlockLine_t *d = &eta_unlockLines[j];
++
++					if (d->verb == 't' && !Q_stricmp(d->what, l->owner) && !Q_stricmp(d->whatEvent, l->event)
++					    && !Q_stricmp(d->event, "death"))
++					{
++						ETA_UnlockEvent(d->owner, "spawn", depth + 1);
++					}
++				}
++				eta_unlockSpotName = naming;
++				eta_unlockExplain  = explaining;
+ 			}
+ 		}
+ 		ETA_UnlockEvent(l->owner, l->event, depth + 1);
+@@ -565,7 +598,7 @@ const char *CG_AccessibilityUnlockWhy(int index)
+ /* Says so when a spot that did nothing starts to work. */
+ void CG_AccessibilityUnlockFrame(void)
+ {
+-	int i, now, woke = 0;
++	int i, now, woke = 0, last = 0;
+ 
+ 	for (i = 0; i < eta_unlockSpotCount; i++)
+ 	{
+@@ -577,13 +610,14 @@ void CG_AccessibilityUnlockFrame(void)
+ 		if (eta_unlockSpots[i].seen == 0 && now == 1)
+ 		{
+ 			woke++;
++			last = i;
+ 		}
+ 		eta_unlockSpots[i].seen = now;
+ 	}
+ 	if (woke)
+ 	{
+-		ETA_Speech_Say(woke == 1 ? "A spot that unlocks a door works now. T finds it"
+-		               : "Spots that unlock a door work now. T finds them");
++		ETA_Speech_Say(woke == 1 ? va("%s works now. T finds it", eta_unlockSpots[last].name)
++		               : "Spots on T's list work now. T finds them");
+ 	}
+ }
+ 

@@ -1484,3 +1484,18 @@ working yet: it works once K of the N soldiers of this part are
 beaten", or "something else in the level wakes it first"; it is done
 only once its trigger has gone; and "A spot that unlocks a door works
 now. T finds it" is said when one wakes.
+
+### 0069 Where the soldiers come in
+
+Loaded from the tester's own save of the second level: all eleven
+soldiers of the first part beaten and the keep entered, the next door
+waits for 8 of the next 10 - and none of those 10 were in the level
+yet. They come in when the player walks into a room (the ai_triggers
+calling the player's events that alert them, or a spawner's event that
+does). So for each soldier the count waits on, the tracer follows what
+brings that soldier in (its spawn, alerted) back to the places the
+player walks to, and lists them as "Spot where soldiers come in", done
+once their trigger has gone like the others. Where one stands at the
+same place as a spot that unlocks a door, the door's comes first.
+"Spot " now marks every place walked onto for T's "Walk onto it", and
+one that wakes is said by its name.
