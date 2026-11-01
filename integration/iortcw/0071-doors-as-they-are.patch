@@ -1,0 +1,152 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 4fb334eb..51c152ec 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -494,6 +494,19 @@ qboolean CG_AccessibilityAreaHolds(int area, const vec3_t at)
+ 	                   && fabsf(at[2] - cg.predictedPlayerState.origin[2]) < 64.0f );
+ }
+ 
++/* Whether a way out can be gone through now: an opening, or a door the
++   game has open or unlocked (CG_AccessibilityDoorModel). */
++static qboolean ETA_AreaExitOpens(const eta_areaExit_t *exit)
++{
++	qboolean opens = qtrue;
++
++	if (exit->model <= 0)
++	{
++		return qtrue;
++	}
++	return (qboolean)( !CG_AccessibilityDoorModel(exit->model, &opens) || opens );
++}
++
+ static int ETA_AreaDoorsOut(int area, int *toNew)
+ {
+ 	int i, count = 0;
+@@ -748,6 +761,13 @@ void CG_AccessibilityAreaExits(void)
+ 			{
+ 				far[i] = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
+ 			}
++			/* A locked door after the ways that can be gone through: the
++			   tester, with ten ways out, was led to one locked door after
++			   another. */
++			if (eta_areas.list[i] >= 0 && !ETA_AreaExitOpens(&eta_areas.exits[eta_areas.list[i]]))
++			{
++				far[i] += 1000000.0f;
++			}
+ 		}
+ 		for (i = 0; i < count; i++)
+ 		{
+@@ -880,7 +900,8 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
+ 	                  eta_areas.listCount, where,
+-	                  exit->opens ? "" : CG_AccessibilityDoorNeverOpens(exit->model) ? ", locked for good" : ", locked",
++	                  ETA_AreaExitOpens(exit) ? "" : CG_AccessibilityDoorNeverOpens(exit->model) ? ", locked for good"
++	                  : CG_AccessibilityDoorLive(exit->model) == 'S' ? ", opened by a switch or by what happens" : ", locked",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+ 	ETA_Speech_EndReport();
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 97de62dc..206d6c09 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -564,6 +564,21 @@ int CG_AccessibilityUnlockState(int index)
+ 	return c == 'o' ? 0 : c == 'a' ? 1 : c == '-' ? 2 : -1;
+ }
+ 
++/* A door's lock as the game has it now (g_main.c): 'L' locked, 'S' opened
++   only by a switch or the story, 'd' opens or stands open; 0 not known. */
++char CG_AccessibilityDoorLive(int model)
++{
++	const char *state = CG_ConfigString(CS_ETA_TRIGGERS);
++	char       c;
++
++	if (model <= 0 || model >= MAX_MODELS || state[0] != '!' || model >= (int)strlen(state))
++	{
++		return 0;
++	}
++	c = state[model];
++	return c == 'L' || c == 'S' || c == 'd' ? c : 0;
++}
++
+ /* The spot T's list has at a point: -1 none. */
+ int CG_AccessibilityUnlockSpotAt(const vec3_t at)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 9ed2560f..b6d88870 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4285,7 +4285,21 @@ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+ 		return qfalse;
+ 	}
+ 
+-	*opens = (qboolean)!eta_doorLocked[modelindex];
++	/* As the game has it now, when it says: a door locked or unlocked
++	   since the map was read, or one only a switch opens. */
++	switch (CG_AccessibilityDoorLive(modelindex))
++	{
++	case 'L':
++	case 'S':
++		*opens = qfalse;
++		break;
++	case 'd':
++		*opens = qtrue;
++		break;
++	default:
++		*opens = (qboolean)!eta_doorLocked[modelindex];
++		break;
++	}
+ 	return qtrue;
+ }
+ 
+@@ -5074,7 +5088,9 @@ qboolean CG_AccessibilityLockedDoor(int index, int *model, vec3_t origin)
+ 	ETA_WorldRead();
+ 	for (i = 1; i < MAX_MODELS; i++)
+ 	{
+-		if (eta_doorLocked[i] == 1 && index-- == 0)
++		qboolean opens = qtrue;
++
++		if (CG_AccessibilityDoorModel(i, &opens) && !opens && index-- == 0)
+ 		{
+ 			*model = i;
+ 			VectorCopy(eta_doorOrigins[i], origin);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f4b71c9f..88111b37 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2306,6 +2306,7 @@ qboolean CG_AccessibilityDoorNeverOpens( int model );
+ qboolean CG_AccessibilityUnlockSpot( int index, vec3_t at, char *name, size_t nameSize );
+ int CG_AccessibilityUnlockState( int index );
+ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
++char CG_AccessibilityDoorLive( int model );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+ #define ETA_MAP_ITEM     0
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index 79fbd46b..98b00be3 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2464,6 +2464,12 @@ Advances the non-player objects in the world
+  * go once walked onto. The client cannot see a trigger, so each brush
+  * model's state is told it: 'a' a trigger that works, 'o' one switched
+  * off, 'x' something else, '-' nothing (a trigger used and gone).
++ *
++ * A door's lock too: the client knew only the map's "key" -1, read once,
++ * so a door the script locks or unlocks later, or one only a switch or
++ * the story opens, was said and led through wrongly. 'L' locked, 'S'
++ * opened only by a switch or the story, 'd' one that opens by hand or
++ * stands open now.
+  */
+ static void G_AccessibilityTriggers( void ) {
+ 	static int  next;
+@@ -2491,6 +2497,10 @@ static void G_AccessibilityTriggers( void ) {
+ 		}
+ 		if ( !Q_strncmp( ent->classname, "trigger_", 8 ) || !Q_stricmp( ent->classname, "ai_trigger" ) ) {
+ 			state[model] = ( ent->r.linked && ent->touch ) ? 'a' : 'o';
++		} else if ( !Q_strncmp( ent->classname, "func_door", 9 ) ) {
++			qboolean shut = ( ent->moverState == MOVER_POS1 || ent->moverState == MOVER_POS1ROTATE );
++
++			state[model] = !shut ? 'd' : ent->key >= KEY_LOCKED_ENT ? 'L' : ent->key == KEY_LOCKED_TARGET ? 'S' : 'd';
+ 		} else {
+ 			state[model] = 'x';
+ 		}

@@ -1511,3 +1511,18 @@ area, and a thing in no area was counted in the player's own if within
 thing in a doorway in the areas just either side of it, 48 and 96 units
 out; only a thing with no area anywhere near is still counted by the
 player, and then only on the same floor.
+
+### 0071 Doors as the game has them now
+
+The tester, in the courtyard, an area with ten ways out: each led to the
+same locked door. The client knew a door locked only from the map's
+"key" -1, read once: a door locked or unlocked later by a target_lock,
+or one only a switch or the story opens (KEY_LOCKED_TARGET, the bridge
+doors among them), was said as one that opens, and the way was found
+through it. The game's configstring of 0068 now carries each door too:
+'L' locked, 'S' opened only by a switch or the story, 'd' one that
+opens by hand or stands open now. CG_AccessibilityDoorModel answers from
+it, so F, X and the way (whose walls are the closed doors that do not
+open) all follow the doors as they are. X lists a door that does not
+open after the ways that can be gone through, and says one a switch
+opens as "opened by a switch or by what happens".
