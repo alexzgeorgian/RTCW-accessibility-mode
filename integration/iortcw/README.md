@@ -1526,3 +1526,17 @@ it, so F, X and the way (whose walls are the closed doors that do not
 open) all follow the doors as they are. X lists a door that does not
 open after the ways that can be gone through, and says one a switch
 opens as "opened by a switch or by what happens".
+
+### 0072 Pieces too small to be rooms
+
+The tester: one step out of area seven was another area; should an area
+not be a room with things in it? The bots' compiler cuts a cluster at
+every narrow opening, so a stair, a ladder's shaft or the landing
+between two doorways was an area of its own: ten of the second level's
+37 had less than 16 square meters of floor. ETA_BspAreas_MergeSmall
+(src/accessibility/map/bsp_areas.c) joins each such piece to the
+biggest area it opens onto with no door within 128 units of the
+opening, three passes for pieces that open only onto other small ones,
+and numbers the areas again. The second level now has 31, its courtyard
+seven ways out instead of ten. The explored file is marked "rooms2", so
+it starts again once.

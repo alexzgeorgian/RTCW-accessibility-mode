@@ -1,0 +1,55 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 51c152ec..e97b2f34 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -38,6 +38,9 @@
+ #define ETA_AREA_SETTLE_MS  700     /* in a new area this long: come into it */
+ #define ETA_AREA_LIST_MS    30000   /* X again this soon: on along the same list */
+ #define ETA_AREA_SAME_DOOR  136.0f  /* the other half of a double door */
++/* The least floor an area of the bots' file is a room with: 16 square
++   meters, in square units. */
++#define ETA_AREA_ROOM_FLOOR ( 16.0f * 39.37f * 39.37f )
+ #define ETA_AREA_THINGS_NEAR 400.0f /* a thing whose area is not known, this near: here */
+ #define ETA_AREA_THROUGH    224.0f  /* led this far through a door, where the floor goes on */
+ 
+@@ -245,7 +248,7 @@ static void ETA_ExploredSave(void)
+ 	{
+ 		return;
+ 	}
+-	Com_sprintf(line, sizeof(line), "map %s %s\n", cgs.mapname, eta_areas.bots ? "bots" : "rooms");
++	Com_sprintf(line, sizeof(line), "map %s %s\n", cgs.mapname, eta_areas.bots ? "rooms2" : "rooms");
+ 	trap_FS_Write(line, strlen(line), f);
+ 	for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
+ 	{
+@@ -297,7 +300,7 @@ static void ETA_ExploredLoad(void)
+ 
+ 	/* Another level's, or one from before the areas were cut at every
+ 	   door, numbered otherwise: nothing explored here yet. */
+-	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, eta_areas.bots ? "bots" : "rooms"))
++	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, eta_areas.bots ? "rooms2" : "rooms"))
+ 	{
+ 		return;
+ 	}
+@@ -386,8 +389,10 @@ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ 	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.bots    = bots;
+ 	/* Without the bots' rooms, cut at every door, not only those the map
+-	   counts: an area could be a whole floor of rooms. */
+-	if (count >= 1 && !bots)
++	   counts: an area could be a whole floor of rooms. With them, the
++	   pieces too small to be rooms go into the room beside them: the
++	   tester, one step out of a stair's piece, was in another area. */
++	if (count >= 1)
+ 	{
+ 		static float boxes[ETA_AREA_EXITS_MAX][6];
+ 		vec3_t       mins, maxs;
+@@ -403,7 +408,8 @@ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ 				n++;
+ 			}
+ 		}
+-		count = ETA_BspAreas_SplitAtDoors((const float (*)[6])boxes, n);
++		count = bots ? ETA_BspAreas_MergeSmall((const float (*)[6])boxes, n, ETA_AREA_ROOM_FLOOR)
++		        : ETA_BspAreas_SplitAtDoors((const float (*)[6])boxes, n);
+ 	}
+ 	eta_areas.count   = count;
+ 	eta_areas.loaded  = (qboolean)(count > 1);

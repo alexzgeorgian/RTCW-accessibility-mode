@@ -60,6 +60,15 @@ int ETA_BspAreas_SplitAtDoors(const float (*boxes)[6], int count);
  */
 int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context);
 
+/*
+ * Joins each of those areas too small to be a room - less floor than
+ * minFloor square units: a stair, a ladder's shaft, a landing between
+ * doorways - to the biggest area it opens onto with no door between;
+ * doors are boxes, mins then maxs, as for ETA_BspAreas_SplitAtDoors. The
+ * areas are numbered again. Returns how many there are.
+ */
+int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFloor);
+
 /* The ways between two of those areas with no door: a portal's middle,
    and the area on either side. 0 past the last, or with no file read. */
 int ETA_BspAreas_PortalCount(void);

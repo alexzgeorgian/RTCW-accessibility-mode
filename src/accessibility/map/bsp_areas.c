@@ -424,6 +424,7 @@ typedef struct
 {
     float mins[3], maxs[3], center[3];
     int   cluster;      /* from 1; negative, a portal */
+    int   flags;        /* AREA_GROUNDED 1: a floor to stand on */
 } ETA_AasArea;
 
 static int            gAas;
@@ -446,6 +447,8 @@ static void ETA_Aas_Free(void)
     gAasPlaneCount = gAasNodeCount = gAasAreaCount = gAasPortalCount = 0;
     gAas = 0;
 }
+
+static int ETA_Aas_Boxes(void);
 
 int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context)
 {
@@ -553,6 +556,7 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
                 }
                 break;
             case ETA_AAS_SETTINGS:
+                gAasAreas[j].flags   = ETA_Area_Int(record + 4);
                 gAasAreas[j].cluster = ETA_Area_Int(record + 12);
                 break;
             case ETA_AAS_NODES:
@@ -569,7 +573,22 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
         }
     }
 
-    /* The clusters are the areas, with their boxes. */
+    settings = ETA_Aas_Boxes();
+    if (!settings)
+    {
+        ETA_Aas_Free();
+        return 0;
+    }
+    gAas = 1;
+    return gAreaCount;
+}
+
+/* The clusters are the areas, with their boxes. Returns how many pieces
+   of the bots' file are in one. */
+static int ETA_Aas_Boxes(void)
+{
+    int j, k, settings = 0;
+
     memset(gAreaHasLeaf, 0, sizeof(gAreaHasLeaf));
     gAreaCount = 0;
     for (j = 1; j < gAasAreaCount; j++)
@@ -598,13 +617,177 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
         }
         settings++;
     }
-    if (!settings)
+    return settings;
+}
+
+static int ETA_Aas_Root(int *root, int c)
+{
+    while (root[c] != c)
     {
-        ETA_Aas_Free();
-        return 0;
+        root[c] = root[root[c]];
+        c       = root[c];
     }
-    gAas = 1;
-    return gAreaCount;
+    return c;
+}
+
+/* How far a point is from a box, 0 inside it. */
+static float ETA_Aas_ToBox(const float at[3], const float box[6])
+{
+    float d2 = 0.0f;
+    int   k;
+
+    for (k = 0; k < 3; k++)
+    {
+        float out = at[k] < box[k] ? box[k] - at[k] : at[k] > box[k + 3] ? at[k] - box[k + 3] : 0.0f;
+
+        d2 += out * out;
+    }
+    return d2 > 0.0f ? (float)sqrt(d2) : 0.0f;
+}
+
+int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFloor)
+{
+    int   *root;
+    float *floor;
+    int   clusters = 0, i, j, pass, count;
+
+    if (!gAas)
+    {
+        return gAreaCount;
+    }
+    for (i = 1; i < gAasAreaCount; i++)
+    {
+        clusters = gAasAreas[i].cluster > clusters ? gAasAreas[i].cluster : clusters;
+    }
+    for (i = 0; i < gAasPortalCount; i++)
+    {
+        clusters = gAasPortals[i * 3 + 1] > clusters ? gAasPortals[i * 3 + 1] : clusters;
+        clusters = gAasPortals[i * 3 + 2] > clusters ? gAasPortals[i * 3 + 2] : clusters;
+    }
+    if (clusters <= 1)
+    {
+        return gAreaCount;
+    }
+    root  = (int *)calloc((size_t)clusters + 1, sizeof(*root));
+    floor = (float *)calloc((size_t)clusters + 1, sizeof(*floor));
+    if (!root || !floor)
+    {
+        free(root);
+        free(floor);
+        return gAreaCount;
+    }
+    for (i = 0; i <= clusters; i++)
+    {
+        root[i] = i;
+    }
+    for (i = 1; i < gAasAreaCount; i++)
+    {
+        const ETA_AasArea *a = &gAasAreas[i];
+
+        if (a->cluster > 0 && ( a->flags & 1 ))
+        {
+            floor[a->cluster] += ( a->maxs[0] - a->mins[0] ) * ( a->maxs[1] - a->mins[1] );
+        }
+    }
+
+    /* A piece too small to be a room - a stair, a ladder's shaft, a
+       landing between two doorways - goes into the biggest room it opens
+       onto with no door between. Again, for pieces that open only onto
+       other small ones. */
+    for (pass = 0; pass < 3; pass++)
+    {
+        for (j = 1; j <= clusters; j++)
+        {
+            int   c = ETA_Aas_Root(root, j), into = 0;
+            float intoFloor = 0.0f;
+
+            if (c != j || floor[c] <= 0.0f || floor[c] >= minFloor)
+            {
+                continue;
+            }
+            for (i = 0; i < gAasPortalCount; i++)
+            {
+                int   area = gAasPortals[i * 3], front, back, other, d;
+                float nearest = 1e9f;
+
+                if (area <= 0 || area >= gAasAreaCount)
+                {
+                    continue;
+                }
+                front = ETA_Aas_Root(root, gAasPortals[i * 3 + 1]);
+                back  = ETA_Aas_Root(root, gAasPortals[i * 3 + 2]);
+                if (( front != c && back != c ) || front == back || front <= 0 || back <= 0)
+                {
+                    continue;
+                }
+                for (d = 0; d < doorCount; d++)
+                {
+                    float far = ETA_Aas_ToBox(gAasAreas[area].center, doors[d]);
+
+                    nearest = far < nearest ? far : nearest;
+                }
+                if (nearest < 128.0f)
+                {
+                    continue;   /* a door between: the rooms stay two */
+                }
+                other = front == c ? back : front;
+                if (!into || floor[other] > intoFloor)
+                {
+                    into      = other;
+                    intoFloor = floor[other];
+                }
+            }
+            if (into)
+            {
+                root[c]      = into;
+                floor[into] += floor[c];
+            }
+        }
+    }
+
+    /* Numbered again from 1, in the file's order, with no gaps. */
+    {
+        int *number = (int *)calloc((size_t)clusters + 1, sizeof(*number));
+        int  next   = 0;
+
+        if (number)
+        {
+            for (j = 1; j <= clusters; j++)
+            {
+                int r = ETA_Aas_Root(root, j);
+
+                if (!number[r])
+                {
+                    number[r] = ++next;
+                }
+            }
+            for (i = 1; i < gAasAreaCount; i++)
+            {
+                if (gAasAreas[i].cluster > 0 && gAasAreas[i].cluster <= clusters)
+                {
+                    gAasAreas[i].cluster = number[ETA_Aas_Root(root, gAasAreas[i].cluster)];
+                }
+            }
+            for (i = 0; i < gAasPortalCount; i++)
+            {
+                for (j = 1; j <= 2; j++)
+                {
+                    int c = gAasPortals[i * 3 + j];
+
+                    if (c > 0 && c <= clusters)
+                    {
+                        gAasPortals[i * 3 + j] = number[ETA_Aas_Root(root, c)];
+                    }
+                }
+            }
+            free(number);
+        }
+    }
+    free(root);
+    free(floor);
+    ETA_Aas_Boxes();
+    count = gAreaCount;
+    return count;
 }
 
 /* The bots' area a point is in: their tree, as AAS_PointAreaNum walks it.
