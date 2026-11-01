@@ -1460,3 +1460,27 @@ became "ways out". The second level has 37 areas, its start room none
 of its things and one opening out; the first level 33, its start cell
 the Luger alone. A map with no bots' file keeps 0065's areas. The
 explored file is marked "bots".
+
+### 0068 Spots that do nothing yet
+
+The tester, in the second level: a spot T named unlocked nothing when
+walked onto, and one T had named went from the list once reached. Many
+of those spots are ai_triggers that start switched off (spawnflags 1):
+the script wakes them later - in Castle Keep once 10 of the 11
+soldiers of the first part are beaten, and 8 of the 10 of the next - and
+until then walking onto one does nothing; T had it as done once stood
+on.
+
+The game now tells the client each brush model's trigger state in a
+configstring of its own, CS_ETA_TRIGGERS (just past CS_MAX), every half
+second: 'a' a trigger that works, 'o' one switched off, 'x' anything
+else, '-' nothing, a trigger used and gone (G_AccessibilityTriggers in
+g_main.c; a trigger switched off has no model index yet, so its "*N"
+name is read). The unlock tracer records which ai_triggers start off
+and follows what wakes them; the script reader keeps "accum N
+abort_if_less_than K" before an alertentity, and the soldiers whose
+death calls that event are counted. A spot switched off is said "not
+working yet: it works once K of the N soldiers of this part are
+beaten", or "something else in the level wakes it first"; it is done
+only once its trigger has gone; and "A spot that unlocks a door works
+now. T finds it" is said when one wakes.
