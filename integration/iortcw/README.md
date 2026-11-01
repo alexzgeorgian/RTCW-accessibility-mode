@@ -1427,3 +1427,14 @@ the compiler's areas is most of the castle.
   The second level has 16 areas and its start room 11 things, not 18;
   the first 15 areas and its start room 3 things, not 7. The explored
   file is marked "rooms", and one from before is not read.
+
+## 0066: doors the script opens outright, and doors locked for good
+
+Run over the campaign's 26 playable maps, 0065 left 49 of 137 locked or
+named doors unexplained. Two causes: a locked door can also be opened
+outright by a relay the script sets going, not only unlocked by its
+target_lock, so that is now followed too; and 12 locked doors are never
+unlocked by anything - a target_lock nothing fires, or none - scenery,
+now said as "Door locked for good" by F and "locked for good" by X
+(CG_AccessibilityDoorNeverOpens). 28 remain, opened as the story goes on
+- an AI's own script, a scene - with no place for the player to go.

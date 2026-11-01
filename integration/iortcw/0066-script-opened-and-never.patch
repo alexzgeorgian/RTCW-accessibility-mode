@@ -1,0 +1,132 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 3a6d4930..672637a1 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -788,7 +788,8 @@ void CG_AccessibilityAreaExits(void)
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 
+ 	ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
+-	                  eta_areas.listCount, where, exit->opens ? "" : ", locked",
++	                  eta_areas.listCount, where,
++	                  exit->opens ? "" : CG_AccessibilityDoorNeverOpens(exit->model) ? ", locked for good" : ", locked",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+ 	ETA_Speech_EndReport();
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 979a8888..259c9e42 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -66,9 +66,36 @@ static struct
+ } eta_unlockSpots[ETA_UNLOCK_SPOTS];
+ static int eta_unlockSpotCount;
+ 
++/* The locked doors nothing ever unlocks: scenery, said as locked for
++   good, so the player does not go looking for what opens them. */
++static qboolean eta_unlockNever[MAX_MODELS];
++
+ void CG_AccessibilityUnlockReset(void)
+ {
+ 	eta_unlockRecordCount = eta_unlockLineCount = eta_unlockSpotCount = 0;
++	memset(eta_unlockNever, 0, sizeof(eta_unlockNever));
++}
++
++/* Whether a name is aimed at by any entity, or alerted by the script. */
++static qboolean ETA_UnlockNamed(const char *name)
++{
++	int i;
++
++	for (i = 0; i < eta_unlockRecordCount; i++)
++	{
++		if (!Q_stricmp(eta_unlockRecords[i].target, name))
++		{
++			return qtrue;
++		}
++	}
++	for (i = 0; i < eta_unlockLineCount; i++)
++	{
++		if (eta_unlockLines[i].verb == 'a' && !Q_stricmp(eta_unlockLines[i].what, name))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
+ }
+ 
+ /* Each entity the map lays out, from ETA_ReadMapEntities: only those
+@@ -348,7 +375,7 @@ void CG_AccessibilityUnlockResolve(void)
+ 	for (i = 0; i < eta_unlockRecordCount; i++)
+ 	{
+ 		const eta_unlockRecord_t *door = &eta_unlockRecords[i];
+-		qboolean                 player = qfalse, soldiers = qfalse;
++		qboolean                 player = qfalse, soldiers = qfalse, ever = qfalse;
+ 
+ 		if (Q_stricmpn(door->classname, "func_door", 9) || !door->targetname[0])
+ 		{
+@@ -373,9 +400,27 @@ void CG_AccessibilityUnlockResolve(void)
+ 			{
+ 				soldiers = qtrue;   /* a door anyone opens, the player too */
+ 			}
+-			else if (!Q_stricmp(r->classname, "target_lock") && r->targetname[0])
++			else if (!Q_stricmp(r->classname, "target_lock"))
+ 			{
+-				ETA_UnlockFired(r->targetname, 1);
++				if (r->targetname[0] && ETA_UnlockNamed(r->targetname))
++				{
++					ever = qtrue;
++					ETA_UnlockFired(r->targetname, 1);
++				}
++			}
++			else
++			{
++				ever = qtrue;   /* a relay, a trigger: something opens it */
++			}
++		}
++		/* A locked door can also be opened outright by a relay the script
++		   sets going. */
++		if (door->lock)
++		{
++			ETA_UnlockFired(door->targetname, 1);
++			if (!ever && !player && door->model > 0 && door->model < MAX_MODELS)
++			{
++				eta_unlockNever[door->model] = qtrue;
+ 			}
+ 		}
+ 		if (!door->lock && !player && !soldiers)
+@@ -386,6 +431,11 @@ void CG_AccessibilityUnlockResolve(void)
+ 	CG_Printf("eta: %d places unlock doors in %s\n", eta_unlockSpotCount, cgs.mapname);
+ }
+ 
++qboolean CG_AccessibilityDoorNeverOpens(int model)
++{
++	return (qboolean)(model > 0 && model < MAX_MODELS && eta_unlockNever[model]);
++}
++
+ int CG_AccessibilityUnlockCount(void)
+ {
+ 	return eta_unlockSpotCount;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6948f81f..071265a8 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5838,7 +5838,8 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 				target.locked = (qboolean)(CG_AccessibilityDoorModel(es->modelindex, &opens) && !opens);
+ 				if (target.locked)
+ 				{
+-					Q_strncpyz(target.name, "Locked door", sizeof(target.name));
++					Q_strncpyz(target.name, CG_AccessibilityDoorNeverOpens(es->modelindex) ? "Door locked for good"
++					           : "Locked door", sizeof(target.name));
+ 				}
+ 
+ 				/* What a door needs, as BROK's things say what they are
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0414c26b..f83e86a0 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2301,6 +2301,7 @@ void CG_AccessibilityUnlockEntity( const char *classname, const char *model, con
+ 								   const char *target, const char *ainame, const char *lock );
+ void CG_AccessibilityUnlockResolve( void );
+ int CG_AccessibilityUnlockCount( void );
++qboolean CG_AccessibilityDoorNeverOpens( int model );
+ qboolean CG_AccessibilityUnlockSpot( int index, vec3_t at, char *name, size_t nameSize );
+ #define ETA_MAP_ITEM     0
+ #define ETA_MAP_SWITCH   1
