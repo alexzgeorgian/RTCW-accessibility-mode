@@ -1549,3 +1549,18 @@ dropped: ETA_BspAreas_FromBefore gives the room each old piece is part
 of now, its area and spot lines are moved there (two joined: the first
 numbered keeps its number), and the areas are numbered again 1, 2, 3 in
 the order they were found. It is saved as "rooms2" from then on.
+
+### 0074 What opens a locked door, from the door
+
+The tester, at a locked door: there is a switch for it, but T lists only
+the area's own things, and the switch was in another. X now says what
+opens a locked door out of the area and O leads there: "locked, a switch
+opens it ... O leads to the switch", or "locked, a spot unlocks it ... O
+leads to the spot", with why it does not work yet if it does not (the
+unlock tracer now keeps the door each spot was found for,
+CG_AccessibilityUnlockSpotForDoor). T lists that switch or spot with the
+area's own things. One that is through the door, on its far side and in
+another area - a door that unlocks once the player comes to it from
+there - is said "locked from this side: what opens it is on the other
+side, so find another way round", and not led to; a switch set in the
+wall beside the door is on neither side, and is this one's.

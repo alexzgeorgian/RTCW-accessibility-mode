@@ -1,0 +1,205 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 70bbded7..9eeac04a 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -508,6 +508,54 @@ int CG_AccessibilityAreaHere(void)
+ }
+ 
+ /* Whether a thing at a point is in the area the player is in. */
++static qboolean ETA_AreaExitOpens(const eta_areaExit_t *exit);
++
++/* Whether what opens a door, at a point, is on its far side from an area:
++   well through the door, and not in the area. A switch set in the wall
++   beside the door is on neither side, and counts as this one's. */
++static qboolean ETA_AreaBeyondDoor(const eta_areaExit_t *exit, int area, const vec3_t at)
++{
++	int    mine = exit->area[0] == area ? 0 : 1;
++	vec3_t through, off;
++
++	VectorSubtract(exit->side[1 - mine], exit->side[mine], through);
++	through[2] = 0.0f;
++	if (VectorNormalize(through) < 1.0f)
++	{
++		return qfalse;
++	}
++	VectorSubtract(at, exit->middle, off);
++	off[2] = 0.0f;
++	return (qboolean)( DotProduct(off, through) > 48.0f && ETA_AreaOf(at) != area );
++}
++
++/* Whether a point is the switch that opens a locked door out of an area. */
++static qboolean ETA_AreaDoorSwitch(int area, const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_areas.exitCount; i++)
++	{
++		const eta_areaExit_t *exit = &eta_areas.exits[i];
++		vec3_t               opener;
++
++		int                  spot;
++
++		if (exit->model <= 0 || ( exit->area[0] != area && exit->area[1] != area ) || ETA_AreaExitOpens(exit))
++		{
++			continue;
++		}
++		/* Not one beyond the door: it is that area's own already. */
++		if (( CG_AccessibilityDoorOpener(exit->model, exit->middle, opener)
++		      || CG_AccessibilityUnlockSpotForDoor(exit->model, opener, &spot) ) && Distance(opener, at) < 48.0f
++		    && !ETA_AreaBeyondDoor(exit, area, opener))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ qboolean CG_AccessibilityAreaHolds(int area, const vec3_t at)
+ {
+ 	int there;
+@@ -516,6 +564,14 @@ qboolean CG_AccessibilityAreaHolds(int area, const vec3_t at)
+ 	{
+ 		return qtrue;
+ 	}
++	/* The switch for a locked door of this area is this area's too,
++	   wherever it is: the tester, at a door a switch opens, could not
++	   find the switch on T's list - it was in another area. */
++	if (ETA_AreaDoorSwitch(area, at))
++	{
++		return qtrue;
++	}
++
+ 	there = ETA_AreaOf(at);
+ 	if (there >= 0)
+ 	{
+@@ -963,13 +1019,42 @@ void CG_AccessibilityAreaExits(void)
+ 	meters = meters < 1 ? 1 : meters;
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 
+-	ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.listPos + 1,
+-	                  eta_areas.listCount, where,
+-	                  ETA_AreaExitOpens(exit) ? "" : CG_AccessibilityDoorNeverOpens(exit->model) ? ", locked for good"
+-	                  : CG_AccessibilityDoorLive(exit->model) == 'S' ? ", opened by a switch or by what happens" : ", locked",
+-	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
+-	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+-	ETA_Speech_EndReport();
++	/* A locked door a switch opens: O leads to the switch, wherever it
++	   is, and T lists it with this area's things. */
++	{
++		vec3_t     opener;
++		int        spot = -1;
++		qboolean   shut = (qboolean)( exit->model > 0 && !ETA_AreaExitOpens(exit) );
++		qboolean   bySwitch = (qboolean)( shut && CG_AccessibilityDoorOpener(exit->model, exit->middle, opener) );
++		qboolean   bySpot = (qboolean)( shut && !bySwitch && CG_AccessibilityUnlockSpotForDoor(exit->model, opener, &spot) );
++		char       why[128];
++		qboolean   beyond = (qboolean)( ( bySwitch || bySpot ) && ETA_AreaBeyondDoor(exit, area, opener) );
++
++		/* What opens it is on the far side: a door that unlocks once the
++		   player comes to it from there, by another way. Not led to. */
++		if (beyond)
++		{
++			bySwitch = bySpot = qfalse;
++		}
++		Q_strncpyz(why, bySpot ? CG_AccessibilityUnlockWhy(spot) : "", sizeof(why));
++		ETA_Speech_Say(va("%d of %d, %s%s%s%s, %s, %d %s%s%s. %s", eta_areas.listPos + 1,
++		                  eta_areas.listCount, where,
++		                  !shut ? "" : beyond ? ", locked from this side: what opens it is on the other side, so find another way round"
++		                  : bySwitch ? ", locked, a switch opens it"
++		                  : bySpot ? ", locked, a spot unlocks it"
++		                  : CG_AccessibilityDoorNeverOpens(exit->model) ? ", locked for good"
++		                  : CG_AccessibilityDoorLive(exit->model) == 'S' ? ", opened by a switch or by what happens" : ", locked",
++		                  why[0] ? ". The spot is" : "", why[0] ? why + 1 : "",
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(exit->middle)),
++		                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height,
++		                  bySwitch ? "O leads to the switch" : bySpot ? "O leads to the spot" : "O leads there"));
++		ETA_Speech_EndReport();
++		if (bySwitch || bySpot)
++		{
++			CG_AccessibilityChoose(opener, bySwitch ? "the switch that opens the door" : "the spot that unlocks the door");
++			return;
++		}
++	}
+ 
+ 	if (eta_areas.number[other])
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 206d6c09..697f4abc 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -72,7 +72,11 @@ static struct
+ 	int    startOff;    /* works only once the script wakes it */
+ 	int    need, of;    /* soldiers to beat first, of how many */
+ 	int    seen;        /* its state as last looked at, -1 none yet */
++	int    door;        /* the door it unlocks, as first found */
+ } eta_unlockSpots[ETA_UNLOCK_SPOTS];
++
++/* The door whose unlocking is being followed back. */
++static int eta_unlockDoor;
+ static int eta_unlockSpotCount;
+ 
+ /* The locked doors nothing ever unlocks: scenery, said as locked for
+@@ -302,6 +306,7 @@ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ 	eta_unlockSpots[i].trigger  = Q_stricmpn(r->classname, "func_", 5) != 0;
+ 	eta_unlockSpots[i].startOff = r->startOff;
+ 	eta_unlockSpots[i].seen     = -1;
++	eta_unlockSpots[i].door     = eta_unlockDoor;
+ 
+ 	/* Switched off at the start: what wakes it is found too, and why,
+ 	   so the player is not sent to a spot that does nothing yet. */
+@@ -487,6 +492,7 @@ void CG_AccessibilityUnlockResolve(void)
+ 		{
+ 			continue;
+ 		}
++		eta_unlockDoor = door->model;
+ 
+ 		/* A door with a name opens only when fired - unless it is the
+ 		   player's to open, by a switch (on T's list) or as a door. */
+@@ -579,6 +585,36 @@ char CG_AccessibilityDoorLive(int model)
+ 	return c == 'L' || c == 'S' || c == 'd' ? c : 0;
+ }
+ 
++/* The spot that unlocks a door, the first not yet used: for X, and for T
++   with the things of the door's area. qfalse with none. */
++qboolean CG_AccessibilityUnlockSpotForDoor(int model, vec3_t at, int *index)
++{
++	int i, j;
++
++	for (i = 0; i < eta_unlockSpotCount; i++)
++	{
++		if (eta_unlockSpots[i].door != model || CG_AccessibilityUnlockState(i) == 2
++		    || Q_stricmpn(eta_unlockSpots[i].name, "Spot that unlocks", 17))
++		{
++			continue;
++		}
++		/* One that works first. */
++		for (j = i; j < eta_unlockSpotCount; j++)
++		{
++			if (eta_unlockSpots[j].door == model && CG_AccessibilityUnlockState(j) == 1
++			    && !Q_stricmpn(eta_unlockSpots[j].name, "Spot that unlocks", 17))
++			{
++				i = j;
++				break;
++			}
++		}
++		VectorCopy(eta_unlockSpots[i].at, at);
++		*index = i;
++		return qtrue;
++	}
++	return qfalse;
++}
++
+ /* The spot T's list has at a point: -1 none. */
+ int CG_AccessibilityUnlockSpotAt(const vec3_t at)
+ {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 88111b37..30030adb 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2307,6 +2307,7 @@ qboolean CG_AccessibilityUnlockSpot( int index, vec3_t at, char *name, size_t na
+ int CG_AccessibilityUnlockState( int index );
+ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
+ char CG_AccessibilityDoorLive( int model );
++qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+ #define ETA_MAP_ITEM     0
