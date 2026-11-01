@@ -1,0 +1,576 @@
+diff --git a/SP/Makefile b/SP/Makefile
+index 34e275b6..18c12d08 100644
+--- a/SP/Makefile
++++ b/SP/Makefile
+@@ -2581,6 +2581,7 @@ Q3CGOBJ_ = \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_ways.o \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_things.o \
+   $(B)/$(BASEGAME)/cgame/cg_accessibility_areas.o \
++  $(B)/$(BASEGAME)/cgame/cg_accessibility_unlock.o \
+   $(B)/$(BASEGAME)/ui/ui_shared.o \
+   \
+   $(B)/$(BASEGAME)/qcommon/q_math.o \
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index d61800bc..3a6d4930 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -244,7 +244,7 @@ static void ETA_ExploredSave(void)
+ 	{
+ 		return;
+ 	}
+-	Com_sprintf(line, sizeof(line), "map %s\n", cgs.mapname);
++	Com_sprintf(line, sizeof(line), "map %s rooms\n", cgs.mapname);
+ 	trap_FS_Write(line, strlen(line), f);
+ 	for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
+ 	{
+@@ -273,7 +273,7 @@ static void ETA_ExploredLoad(void)
+ {
+ 	static char  text[32768];
+ 	fileHandle_t f;
+-	char         *line, *next, map[MAX_QPATH];
++	char         *line, *next, map[MAX_QPATH], kind[16];
+ 	int          length;
+ 
+ 	eta_exploredDirty = qfalse;
+@@ -294,8 +294,9 @@ static void ETA_ExploredLoad(void)
+ 	trap_FS_FCloseFile(f);
+ 	text[length] = '\0';
+ 
+-	/* Another level's: nothing explored here yet. */
+-	if (sscanf(text, "map %63s", map) != 1 || Q_stricmp(map, cgs.mapname))
++	/* Another level's, or one from before the areas were cut at every
++	   door, numbered otherwise: nothing explored here yet. */
++	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, "rooms"))
+ 	{
+ 		return;
+ 	}
+@@ -336,6 +337,26 @@ void CG_AccessibilityAreasLoaded(int count)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+ 	eta_areas.current = eta_areas.pending = -1;
++	/* Cut at every door, not only those the map counts: an area could
++	   be a whole floor of rooms. */
++	if (count >= 1)
++	{
++		static float boxes[ETA_AREA_EXITS_MAX][6];
++		vec3_t       mins, maxs;
++		qboolean     opens;
++		int          model, n = 0;
++
++		for (model = 1; model < MAX_MODELS && n < ETA_AREA_EXITS_MAX; model++)
++		{
++			if (CG_AccessibilityDoorBox(model, mins, maxs, &opens))
++			{
++				VectorCopy(mins, boxes[n]);
++				VectorCopy(maxs, boxes[n] + 3);
++				n++;
++			}
++		}
++		count = ETA_BspAreas_SplitAtDoors((const float (*)[6])boxes, n);
++	}
+ 	eta_areas.count   = count;
+ 	eta_areas.loaded  = (qboolean)(count > 1);
+ 	if (eta_areas.loaded)
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index d987a1b4..62c0d0af 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -525,7 +525,8 @@ static void ETA_ThingsStep(int step)
+ 
+ 		ETA_Speech_Say(va("%d of %d, %s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, thing->name,
+ 		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+-		                  meters == 1 ? "meter" : "meters", what[thing->kind]));
++		                  meters == 1 ? "meter" : "meters",
++		                  !Q_stricmpn(thing->name, "Spot that unlocks", 17) ? "Walk onto it" : what[thing->kind]));
+ 	}
+ 	else
+ 	{
+@@ -623,6 +624,16 @@ void CG_AccessibilityThingsFrame(void)
+ 		{
+ 			eta_thing_t *thing = &eta_things.things[i];
+ 
++			/* A spot that unlocks a door is done once walked onto. */
++			if (!thing->done && thing->kind == ETA_THING_SWITCH && !Q_stricmpn(thing->name, "Spot that unlocks", 17)
++			    && fabsf(ps->origin[2] - thing->point[2]) < 64.0f
++			    && ( ps->origin[0] - thing->point[0] ) * ( ps->origin[0] - thing->point[0] )
++			    + ( ps->origin[1] - thing->point[1] ) * ( ps->origin[1] - thing->point[1] ) < 64.0f * 64.0f)
++			{
++				thing->done = qtrue;
++				continue;
++			}
++
+ 			if (thing->done || thing->kind == ETA_THING_SWITCH || thing->kind == ETA_THING_SECRET
+ 			    || ( thing->entityNum < 0 && thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
+ 			    || !ETA_ThingNear(ps->origin, thing->point, ETA_THINGS_GONE) || ETA_ThingStillThere(thing))
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+new file mode 100644
+index 00000000..979a8888
+--- /dev/null
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -0,0 +1,405 @@
++/*
++ * name:	cg_accessibility_unlock.c
++ *
++ * desc:	[Accessibility]: what unlocks a door that no switch opens - a
++ *			place to walk to, another door to open - found from the map's
++ *			entities and its scripts, for T's list.
++ *
++ *			Only built with FEATURE_ACCESSIBILITY.
++ */
++
++#ifdef FEATURE_ACCESSIBILITY
++
++#include "cg_local.h"
++
++/**
++ * @brief "Spot that unlocks a door", on T's list.
++ *
++ * The tester, in the second level, found a door locked and looked on T's
++ * list for its switch: there was none. Many of the campaign's doors are
++ * not opened by a switch at all. A locked door is unlocked by a
++ * target_lock, fired by an invisible trigger the player walks into, or by
++ * a relay the level's script alerts when the player reaches a place - an
++ * ai_trigger calling one of the player's script events - or when another
++ * door is opened. A door with a name and no lock opens only when fired
++ * the same way. So the chain is followed back from each such door,
++ * through the entities that aim at one another and through the
++ * alertentity and trigger lines of maps/<map>.ai and .script, to the
++ * places the player can reach: those are T's.
++ */
++
++#define ETA_UNLOCK_RECORDS 2048
++#define ETA_UNLOCK_LINES   1024
++#define ETA_UNLOCK_SPOTS   32
++#define ETA_UNLOCK_DEPTH   6
++
++typedef struct
++{
++	char classname[24];
++	int  model;
++	char targetname[48];
++	char target[48];
++	char ainame[32];
++	int  lock;          /* a door's "key" -1 */
++} eta_unlockRecord_t;
++
++/* A script line that sets something going: "alertentity NAME", or
++   "trigger OWNER EVENT". */
++typedef struct
++{
++	char owner[32];
++	char event[48];     /* "spawn", or the name after "trigger" */
++	char verb;          /* 'a' alertentity, 't' trigger */
++	char what[48];      /* what is alerted, or the owner triggered */
++	char whatEvent[48]; /* the event triggered */
++} eta_unlockLine_t;
++
++static eta_unlockRecord_t eta_unlockRecords[ETA_UNLOCK_RECORDS];
++static int                eta_unlockRecordCount;
++static eta_unlockLine_t   eta_unlockLines[ETA_UNLOCK_LINES];
++static int                eta_unlockLineCount;
++
++static struct
++{
++	vec3_t at;
++	char   name[64];
++} eta_unlockSpots[ETA_UNLOCK_SPOTS];
++static int eta_unlockSpotCount;
++
++void CG_AccessibilityUnlockReset(void)
++{
++	eta_unlockRecordCount = eta_unlockLineCount = eta_unlockSpotCount = 0;
++}
++
++/* Each entity the map lays out, from ETA_ReadMapEntities: only those
++   aimed at something or named matter. */
++void CG_AccessibilityUnlockEntity(const char *classname, const char *model, const char *targetname,
++                                  const char *target, const char *ainame, const char *lock)
++{
++	eta_unlockRecord_t *r;
++
++	if (( !targetname[0] && !target[0] ) || eta_unlockRecordCount >= ETA_UNLOCK_RECORDS)
++	{
++		return;
++	}
++	r = &eta_unlockRecords[eta_unlockRecordCount++];
++	Q_strncpyz(r->classname, classname, sizeof(r->classname));
++	r->model = model[0] == '*' ? atoi(model + 1) : 0;
++	Q_strncpyz(r->targetname, targetname, sizeof(r->targetname));
++	Q_strncpyz(r->target, target, sizeof(r->target));
++	Q_strncpyz(r->ainame, ainame, sizeof(r->ainame));
++	r->lock = lock[0] && atoi(lock) == -1;
++}
++
++/* The script's lines that set things going, owner and event kept. A
++   script is a list of owners, each with its events in braces, each with
++   its lines in braces. */
++static void ETA_UnlockReadScript(const char *file)
++{
++	static char  text[65536];
++	fileHandle_t f;
++	int          length, depth = 0;
++	char         owner[32], event[48];
++	char         *p, *line;
++
++	length = trap_FS_FOpenFile(file, &f, FS_READ);
++	if (length <= 0 || !f)
++	{
++		if (f)
++		{
++			trap_FS_FCloseFile(f);
++		}
++		return;
++	}
++	if (length >= (int)sizeof(text))
++	{
++		length = sizeof(text) - 1;
++	}
++	trap_FS_Read(text, length, f);
++	trap_FS_FCloseFile(f);
++	text[length] = '\0';
++
++	owner[0] = event[0] = '\0';
++	for (line = text; line && *line; line = p)
++	{
++		char word[3][64];
++		int  words, k;
++		char *c;
++
++		p = strchr(line, '\n');
++		if (p)
++		{
++			*p++ = '\0';
++		}
++		c = strstr(line, "//");
++		if (c)
++		{
++			*c = '\0';
++		}
++
++		words = 0;
++		for (c = line; *c && words < 3; )
++		{
++			while (*c == ' ' || *c == '\t' || *c == '\r')
++			{
++				c++;
++			}
++			if (!*c)
++			{
++				break;
++			}
++			if (*c == '{' || *c == '}')
++			{
++				depth += *c == '{' ? 1 : -1;
++				depth  = depth < 0 ? 0 : depth;
++				c++;
++				continue;
++			}
++			for (k = 0; *c && *c != ' ' && *c != '\t' && *c != '\r' && *c != '{' && *c != '}' && k < 63; c++)
++			{
++				word[words][k++] = *c;
++			}
++			word[words++][k] = '\0';
++		}
++		if (!words)
++		{
++			continue;
++		}
++
++		/* An owner at the top, an event inside it, its lines inside that.
++		   An event is "spawn", "death" and the like, or "trigger NAME". */
++		if (depth == 0)
++		{
++			Q_strncpyz(owner, word[0], sizeof(owner));
++			event[0] = '\0';
++		}
++		else if (depth == 1)
++		{
++			Q_strncpyz(event, !Q_stricmp(word[0], "trigger") && words > 1 ? word[1] : word[0], sizeof(event));
++		}
++		else if (eta_unlockLineCount < ETA_UNLOCK_LINES)
++		{
++			eta_unlockLine_t *l = &eta_unlockLines[eta_unlockLineCount];
++
++			if (!Q_stricmp(word[0], "alertentity") && words > 1)
++			{
++				l->verb = 'a';
++				Q_strncpyz(l->what, word[1], sizeof(l->what));
++				l->whatEvent[0] = '\0';
++			}
++			else if (!Q_stricmp(word[0], "trigger") && words > 2)
++			{
++				l->verb = 't';
++				Q_strncpyz(l->what, word[1], sizeof(l->what));
++				Q_strncpyz(l->whatEvent, word[2], sizeof(l->whatEvent));
++			}
++			else
++			{
++				continue;
++			}
++			Q_strncpyz(l->owner, owner, sizeof(l->owner));
++			Q_strncpyz(l->event, event, sizeof(l->event));
++			eta_unlockLineCount++;
++		}
++	}
++}
++
++static void ETA_UnlockAddSpot(int model, const char *name)
++{
++	vec3_t   mins, maxs, at;
++	qboolean opens;
++	int      i;
++
++	if (model <= 0 || model >= MAX_MODELS || !cgs.inlineDrawModel[model] || eta_unlockSpotCount >= ETA_UNLOCK_SPOTS)
++	{
++		return;
++	}
++	/* A door turning round its hinge is built round its origin. */
++	if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens))
++	{
++		trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++	}
++	at[0] = ( mins[0] + maxs[0] ) * 0.5f;
++	at[1] = ( mins[1] + maxs[1] ) * 0.5f;
++	/* A trigger stands from the floor up: led to its foot, not its
++	   middle in the air. */
++	at[2] = mins[2] + 24.0f;
++	for (i = 0; i < eta_unlockSpotCount; i++)
++	{
++		if (Distance(eta_unlockSpots[i].at, at) < 64.0f)
++		{
++			return;
++		}
++	}
++	VectorCopy(at, eta_unlockSpots[eta_unlockSpotCount].at);
++	Q_strncpyz(eta_unlockSpots[eta_unlockSpotCount].name, name, sizeof(eta_unlockSpots[0].name));
++	eta_unlockSpotCount++;
++}
++
++static void ETA_UnlockFired(const char *name, int depth);
++
++/* A script event of an owner: where the player sets it going. */
++static void ETA_UnlockEvent(const char *owner, const char *event, int depth)
++{
++	int i;
++
++	if (depth > ETA_UNLOCK_DEPTH || !owner[0] || !event[0])
++	{
++		return;
++	}
++
++	/* The player's own event is called by an ai_trigger for the player,
++	   walked into, or by a script trigger something else fires. */
++	if (!Q_stricmp(owner, "player"))
++	{
++		for (i = 0; i < eta_unlockRecordCount; i++)
++		{
++			const eta_unlockRecord_t *r = &eta_unlockRecords[i];
++
++			if (Q_stricmp(r->target, event))
++			{
++				continue;
++			}
++			if (!Q_stricmp(r->classname, "ai_trigger") && !Q_stricmp(r->ainame, "player"))
++			{
++				ETA_UnlockAddSpot(r->model, "Spot that unlocks a door");
++			}
++			else if (!Q_stricmp(r->classname, "target_script_trigger") && r->targetname[0])
++			{
++				ETA_UnlockFired(r->targetname, depth + 1);
++			}
++		}
++	}
++
++	/* Another owner's event: called by a "trigger OWNER EVENT" line, or,
++	   for its spawn, by the line that alerts it into the level. */
++	for (i = 0; i < eta_unlockLineCount; i++)
++	{
++		const eta_unlockLine_t *l = &eta_unlockLines[i];
++
++		if (( l->verb == 't' && !Q_stricmp(l->what, owner) && !Q_stricmp(l->whatEvent, event) )
++		    || ( l->verb == 'a' && !Q_stricmp(event, "spawn") && !Q_stricmp(l->what, owner) ))
++		{
++			ETA_UnlockEvent(l->owner, l->event, depth + 1);
++		}
++	}
++}
++
++/* Something by name, fired: by what aims at it, or by the script. */
++static void ETA_UnlockFired(const char *name, int depth)
++{
++	int i;
++
++	if (depth > ETA_UNLOCK_DEPTH || !name[0])
++	{
++		return;
++	}
++	for (i = 0; i < eta_unlockRecordCount; i++)
++	{
++		const eta_unlockRecord_t *r = &eta_unlockRecords[i];
++
++		if (Q_stricmp(r->target, name))
++		{
++			continue;
++		}
++		/* Only for the soldiers: they open doors by these. */
++		if (!Q_stricmp(r->classname, "trigger_aidoor"))
++		{
++			continue;
++		}
++		if (r->model && ( !Q_stricmp(r->classname, "trigger_once") || !Q_stricmp(r->classname, "trigger_multiple")
++		                  || ( !Q_stricmp(r->classname, "ai_trigger") && !Q_stricmp(r->ainame, "player") ) ))
++		{
++			ETA_UnlockAddSpot(r->model, "Spot that unlocks a door");
++		}
++		else if (r->model && !Q_stricmpn(r->classname, "func_door", 9))
++		{
++			ETA_UnlockAddSpot(r->model, "Door that, opened, unlocks another");
++		}
++		else if (!r->model && r->targetname[0])
++		{
++			/* A relay, a delay, a script trigger: whatever fires it. */
++			ETA_UnlockFired(r->targetname, depth + 1);
++		}
++		/* A button or an invisible switch is on T's list already. */
++	}
++	for (i = 0; i < eta_unlockLineCount; i++)
++	{
++		const eta_unlockLine_t *l = &eta_unlockLines[i];
++
++		if (l->verb == 'a' && !Q_stricmp(l->what, name))
++		{
++			ETA_UnlockEvent(l->owner, l->event, depth + 1);
++		}
++	}
++}
++
++/* Once the map's entities are read: the places that unlock its doors. */
++void CG_AccessibilityUnlockResolve(void)
++{
++	char base[MAX_QPATH];
++	int  i, j;
++
++	Q_strncpyz(base, cgs.mapname, sizeof(base));
++	COM_StripExtension(base, base, sizeof(base));
++	ETA_UnlockReadScript(va("%s.ai", base));
++	ETA_UnlockReadScript(va("%s.script", base));
++
++	for (i = 0; i < eta_unlockRecordCount; i++)
++	{
++		const eta_unlockRecord_t *door = &eta_unlockRecords[i];
++		qboolean                 player = qfalse, soldiers = qfalse;
++
++		if (Q_stricmpn(door->classname, "func_door", 9) || !door->targetname[0])
++		{
++			continue;
++		}
++
++		/* A door with a name opens only when fired - unless it is the
++		   player's to open, by a switch (on T's list) or as a door. */
++		for (j = 0; j < eta_unlockRecordCount; j++)
++		{
++			const eta_unlockRecord_t *r = &eta_unlockRecords[j];
++
++			if (Q_stricmp(r->target, door->targetname))
++			{
++				continue;
++			}
++			if (!Q_stricmp(r->classname, "func_button") || !Q_stricmp(r->classname, "func_invisible_user"))
++			{
++				player = qtrue;
++			}
++			else if (!Q_stricmp(r->classname, "trigger_aidoor"))
++			{
++				soldiers = qtrue;   /* a door anyone opens, the player too */
++			}
++			else if (!Q_stricmp(r->classname, "target_lock") && r->targetname[0])
++			{
++				ETA_UnlockFired(r->targetname, 1);
++			}
++		}
++		if (!door->lock && !player && !soldiers)
++		{
++			ETA_UnlockFired(door->targetname, 1);
++		}
++	}
++	CG_Printf("eta: %d places unlock doors in %s\n", eta_unlockSpotCount, cgs.mapname);
++}
++
++int CG_AccessibilityUnlockCount(void)
++{
++	return eta_unlockSpotCount;
++}
++
++qboolean CG_AccessibilityUnlockSpot(int index, vec3_t at, char *name, size_t nameSize)
++{
++	if (index < 0 || index >= eta_unlockSpotCount)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_unlockSpots[index].at, at);
++	Q_strncpyz(name, eta_unlockSpots[index].name, nameSize);
++	return qtrue;
++}
++
++#endif
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index facf4669..6948f81f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3872,6 +3872,7 @@ static void ETA_ReadMapEntities(void)
+ 		VectorClear(eta_doorOrigins[i]);
+ 	}
+ 	eta_exitCount = 0;
++	CG_AccessibilityUnlockReset();
+ 
+ 	for (;;)
+ 	{
+@@ -3938,6 +3939,8 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock);
++
+ 		/* An item the map places. */
+ 		if (origin[0] && classname[0] && eta_mapItemCount < ETA_MAP_ITEMS)
+ 		{
+@@ -4228,6 +4231,8 @@ static void ETA_ReadMapEntities(void)
+ 		Q_strncpyz(eta_users[eta_userCount].name, name, sizeof(eta_users[0].name));
+ 		eta_userCount++;
+ 	}
++
++	CG_AccessibilityUnlockResolve();
+ }
+ 
+ /**
+@@ -5011,6 +5016,13 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		*kind = ETA_MAP_SECRET;
+ 		return qtrue;
+ 	}
++	index -= eta_secretCount;
++	/* What unlocks a door no switch opens: a place to walk to, a door. */
++	if (CG_AccessibilityUnlockSpot(index, at, name, nameSize))
++	{
++		*kind = ETA_MAP_SWITCH;
++		return qtrue;
++	}
+ 	return qfalse;
+ }
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index a6cea5a3..0414c26b 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2296,6 +2296,12 @@ int CG_AccessibilityThingsLeftIn( int area );
+ void CG_AccessibilityHealth_f( void );
+ void CG_AccessibilityAmmo_f( void );
+ qboolean CG_AccessibilityDoorBox( int model, vec3_t mins, vec3_t maxs, qboolean *opens );
++void CG_AccessibilityUnlockReset( void );
++void CG_AccessibilityUnlockEntity( const char *classname, const char *model, const char *targetname,
++								   const char *target, const char *ainame, const char *lock );
++void CG_AccessibilityUnlockResolve( void );
++int CG_AccessibilityUnlockCount( void );
++qboolean CG_AccessibilityUnlockSpot( int index, vec3_t at, char *name, size_t nameSize );
+ #define ETA_MAP_ITEM     0
+ #define ETA_MAP_SWITCH   1
+ #define ETA_MAP_TREASURE 2

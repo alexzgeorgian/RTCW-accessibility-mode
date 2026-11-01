@@ -34,6 +34,7 @@ typedef struct
 static ETA_AreaPlane *gPlanes;
 static ETA_AreaNode  *gNodes;
 static short         *gLeafArea;
+static int           *gLeafBox;     /* each leaf's mins and maxs, 6 to a leaf */
 static int            gPlaneCount, gNodeCount, gLeafCount, gAreaCount;
 static float          gAreaMins[ETA_MAX_AREAS][3], gAreaMaxs[ETA_MAX_AREAS][3];
 static unsigned char  gAreaHasLeaf[ETA_MAX_AREAS];
@@ -145,6 +146,10 @@ static int ETA_Area_Table(ETA_BspRead read, void *context, const ETA_AreaLump *l
             int area = ETA_Area_Int(record + 4);
 
             gLeafArea[i] = (short)(area >= 0 && area < ETA_MAX_AREAS ? area : -1);
+            for (k = 0; k < 6; k++)
+            {
+                gLeafBox[i * 6 + k] = ETA_Area_Int(record + 8 + 4 * k);
+            }
             if (gLeafArea[i] < 0 || ETA_Area_Int(record) < 0)
             {
                 gLeafArea[i] = -1;
@@ -215,7 +220,8 @@ int ETA_BspAreas_Load(ETA_BspRead read, ETA_BspRestart restart, void *context)
     gPlanes   = (ETA_AreaPlane *)calloc((size_t)gPlaneCount, sizeof(*gPlanes));
     gNodes    = (ETA_AreaNode *)calloc((size_t)gNodeCount, sizeof(*gNodes));
     gLeafArea = (short *)calloc((size_t)gLeafCount, sizeof(*gLeafArea));
-    if (!gPlanes || !gNodes || !gLeafArea)
+    gLeafBox  = (int *)calloc((size_t)gLeafCount * 6, sizeof(*gLeafBox));
+    if (!gPlanes || !gNodes || !gLeafArea || !gLeafBox)
     {
         ETA_BspAreas_Free();
         return 0;
@@ -231,6 +237,174 @@ int ETA_BspAreas_Load(ETA_BspRead read, ETA_BspRestart restart, void *context)
             return 0;
         }
     }
+    return gAreaCount;
+}
+
+static int *gRoot;
+
+static int ETA_Area_Root(int i)
+{
+    while (gRoot[i] != i)
+    {
+        gRoot[i] = gRoot[gRoot[i]];
+        i        = gRoot[i];
+    }
+    return i;
+}
+
+static int *gSortBox;
+
+static int ETA_Area_ByMinX(const void *a, const void *b)
+{
+    int ia = *(const int *)a, ib = *(const int *)b;
+
+    return gSortBox[ia * 6] - gSortBox[ib * 6];
+}
+
+int ETA_BspAreas_SplitAtDoors(const float (*boxes)[6], int count)
+{
+    int  *order, *size, *room, i, j, k, used = 0, rooms = 0;
+    char *door;
+
+    if (!gLeafArea || !gLeafBox || gLeafCount <= 0)
+    {
+        return gAreaCount;
+    }
+    order = (int *)calloc((size_t)gLeafCount, sizeof(*order));
+    size  = (int *)calloc((size_t)gLeafCount, sizeof(*size));
+    room  = (int *)calloc((size_t)gLeafCount, sizeof(*room));
+    door  = (char *)calloc((size_t)gLeafCount, sizeof(*door));
+    gRoot = (int *)calloc((size_t)gLeafCount, sizeof(*gRoot));
+    if (!order || !size || !room || !door || !gRoot)
+    {
+        free(order);
+        free(size);
+        free(room);
+        free(door);
+        free(gRoot);
+        gRoot = NULL;
+        return gAreaCount;
+    }
+
+    /* The leaves to join: open, of some size, and clear of the doors. */
+    for (i = 0; i < gLeafCount; i++)
+    {
+        const int *b = &gLeafBox[i * 6];
+
+        gRoot[i] = i;
+        if (gLeafArea[i] < 0 || ( b[0] == b[3] && b[1] == b[4] && b[2] == b[5] ))
+        {
+            continue;
+        }
+        for (k = 0; k < count; k++)
+        {
+            if (b[0] <= boxes[k][3] && boxes[k][0] <= b[3] && b[1] <= boxes[k][4] && boxes[k][1] <= b[4]
+                && b[2] <= boxes[k][5] && boxes[k][2] <= b[5])
+            {
+                door[i] = 1;
+                break;
+            }
+        }
+        if (!door[i])
+        {
+            order[used++] = i;
+        }
+    }
+
+    /* Touching leaves of the same area are one room: along x in order,
+       so each is held only against those that could reach it. */
+    gSortBox = gLeafBox;
+    qsort(order, (size_t)used, sizeof(*order), ETA_Area_ByMinX);
+    for (i = 0; i < used; i++)
+    {
+        const int *a = &gLeafBox[order[i] * 6];
+
+        for (j = i + 1; j < used; j++)
+        {
+            const int *b = &gLeafBox[order[j] * 6];
+
+            if (b[0] > a[3] + 1)
+            {
+                break;
+            }
+            if (gLeafArea[order[i]] != gLeafArea[order[j]])
+            {
+                continue;
+            }
+            if (b[1] <= a[4] + 1 && a[1] <= b[4] + 1 && b[2] <= a[5] + 1 && a[2] <= b[5] + 1)
+            {
+                gRoot[ETA_Area_Root(order[i])] = ETA_Area_Root(order[j]);
+            }
+        }
+    }
+    for (i = 0; i < used; i++)
+    {
+        size[ETA_Area_Root(order[i])]++;
+    }
+
+    /* Numbered in the order the leaves come, so the same map gives the
+       same rooms each time. */
+    for (i = 0; i < gLeafCount; i++)
+    {
+        room[i] = -1;
+    }
+    for (i = 0; i < gLeafCount; i++)
+    {
+        int r;
+
+        if (door[i] || gLeafArea[i] < 0)
+        {
+            continue;
+        }
+        r = ETA_Area_Root(i);
+        if (size[r] < 3)
+        {
+            continue;
+        }
+        if (room[r] < 0)
+        {
+            if (rooms >= ETA_MAX_AREAS)
+            {
+                continue;
+            }
+            room[r] = rooms++;
+        }
+        room[i] = room[r];
+    }
+
+    memset(gAreaHasLeaf, 0, sizeof(gAreaHasLeaf));
+    for (i = 0; i < gLeafCount; i++)
+    {
+        int r = gLeafArea[i] >= 0 && !door[i] ? room[ETA_Area_Root(i)] : -1;
+
+        gLeafArea[i] = (short)r;
+        if (r < 0)
+        {
+            continue;
+        }
+        for (k = 0; k < 3; k++)
+        {
+            float lo = (float)gLeafBox[i * 6 + k], hi = (float)gLeafBox[i * 6 + 3 + k];
+
+            if (!gAreaHasLeaf[r] || lo < gAreaMins[r][k])
+            {
+                gAreaMins[r][k] = lo;
+            }
+            if (!gAreaHasLeaf[r] || hi > gAreaMaxs[r][k])
+            {
+                gAreaMaxs[r][k] = hi;
+            }
+        }
+        gAreaHasLeaf[r] = 1;
+    }
+    gAreaCount = rooms;
+
+    free(order);
+    free(size);
+    free(room);
+    free(door);
+    free(gRoot);
+    gRoot = NULL;
     return gAreaCount;
 }
 
@@ -284,9 +458,11 @@ void ETA_BspAreas_Free(void)
     free(gPlanes);
     free(gNodes);
     free(gLeafArea);
+    free(gLeafBox);
     gPlanes     = NULL;
     gNodes      = NULL;
     gLeafArea   = NULL;
+    gLeafBox    = NULL;
     gPlaneCount = gNodeCount = gLeafCount = gAreaCount = 0;
     memset(gAreaHasLeaf, 0, sizeof(gAreaHasLeaf));
 }

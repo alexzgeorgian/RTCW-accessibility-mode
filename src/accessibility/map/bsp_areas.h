@@ -38,6 +38,17 @@ int ETA_BspAreas_Count(void);
 /* The box every leaf of an area fits in. 0 for an area with none. */
 int ETA_BspAreas_Bounds(int area, float mins[3], float maxs[3]);
 
+/*
+ * Cuts the areas again at every door, not only those the compiler was
+ * told close the way: count boxes, each mins then maxs, of the doors as
+ * they stand closed. A map's area can be a whole floor of rooms, which
+ * the tester found too much to go through as one. The map's leaves that
+ * touch, in the same area and clear of every door, are a room; a room of
+ * fewer than three is none, as the leaves in a doorway are. The rooms
+ * are the areas from then on. Returns how many there are.
+ */
+int ETA_BspAreas_SplitAtDoors(const float (*boxes)[6], int count);
+
 /* Lets go of the map read last. */
 void ETA_BspAreas_Free(void);
 

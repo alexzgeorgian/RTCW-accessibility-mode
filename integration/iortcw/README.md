@@ -1404,3 +1404,26 @@ Checked in the first level: F1, H, I and V said as above; through the
 door from the start's area, semicolon said "1 other area explored, 1
 with things left. 1 of 1, area 1, 9 things left, ahead, 61 meters, 24
 meters below you. O leads there", and O led there.
+
+## 0065: what unlocks a door with no switch; areas cut at every door
+
+In the second level the tester found a door locked and no switch for it
+on T's list - there is none: the door unlocks when the player reaches a
+place, or opens another door, through target_locks, relays and the
+level's scripts. And T's list there was most of the level, since one of
+the compiler's areas is most of the castle.
+
+- cg_accessibility_unlock.c follows each locked door's target_lock, and
+  each named door no button, switch or soldier's door trigger opens,
+  back through the entities that aim at one another and through the
+  alertentity and trigger lines of maps/<map>.ai and .script, to what
+  the player can reach: an ai_trigger for the player, a trigger_once or
+  trigger_multiple, or another door. Those are on T's list as "Spot
+  that unlocks a door" (done once walked onto) and "Door that, opened,
+  unlocks another". The second level has 7, the first 6.
+- ETA_BspAreas_SplitAtDoors cuts the areas again at every door: the
+  map's leaves that touch, in the same area and clear of every closed
+  door's box, are one room; a room of fewer than three leaves is none.
+  The second level has 16 areas and its start room 11 things, not 18;
+  the first 15 areas and its start room 3 things, not 7. The explored
+  file is marked "rooms", and one from before is not read.
