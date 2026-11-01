@@ -1,5 +1,6 @@
 #include "bsp_areas.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -408,10 +409,341 @@ int ETA_BspAreas_SplitAtDoors(const float (*boxes)[6], int count)
     return gAreaCount;
 }
 
+/* The bots' file: the header after its first eight bytes is scrambled
+   (be_aas_file.c, AAS_DData). */
+#define ETA_AAS_IDENT     (('S' << 24) + ('A' << 16) + ('A' << 8) + 'E')
+#define ETA_AAS_VERSION   8
+#define ETA_AAS_LUMPS     14
+#define ETA_AAS_PLANES    2
+#define ETA_AAS_AREAS     7
+#define ETA_AAS_SETTINGS  8
+#define ETA_AAS_NODES     10
+#define ETA_AAS_PORTALS   11
+
+typedef struct
+{
+    float mins[3], maxs[3], center[3];
+    int   cluster;      /* from 1; negative, a portal */
+} ETA_AasArea;
+
+static int            gAas;
+static ETA_AreaPlane *gAasPlanes;
+static int           *gAasNodes;    /* planenum and two children, 3 to a node */
+static ETA_AasArea   *gAasAreas;
+static int           *gAasPortals;  /* area, front and back cluster, 3 to a portal */
+static int            gAasPlaneCount, gAasNodeCount, gAasAreaCount, gAasPortalCount;
+
+static void ETA_Aas_Free(void)
+{
+    free(gAasPlanes);
+    free(gAasNodes);
+    free(gAasAreas);
+    free(gAasPortals);
+    gAasPlanes  = NULL;
+    gAasNodes   = NULL;
+    gAasAreas   = NULL;
+    gAasPortals = NULL;
+    gAasPlaneCount = gAasNodeCount = gAasAreaCount = gAasPortalCount = 0;
+    gAas = 0;
+}
+
+int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context)
+{
+    unsigned char header[12 + 8 * ETA_AAS_LUMPS];
+    int           offset[ETA_AAS_LUMPS], length[ETA_AAS_LUMPS], order[5], position = 0, i, j, k, settings = 0;
+    unsigned char record[48];
+
+    (void)restart;
+    ETA_Aas_Free();
+    if (!read || !ETA_Area_Read(read, context, header, (int)sizeof(header), &position))
+    {
+        return 0;
+    }
+    for (i = 8; i < (int)sizeof(header); i++)
+    {
+        header[i] ^= (unsigned char)((i - 8) * 119);
+    }
+    if (ETA_Area_Int(header) != ETA_AAS_IDENT || ETA_Area_Int(header + 4) != ETA_AAS_VERSION)
+    {
+        return 0;
+    }
+    for (i = 0; i < ETA_AAS_LUMPS; i++)
+    {
+        offset[i] = ETA_Area_Int(header + 12 + i * 8);
+        length[i] = ETA_Area_Int(header + 16 + i * 8);
+        if (offset[i] < 0 || length[i] < 0)
+        {
+            return 0;
+        }
+    }
+    gAasPlaneCount  = length[ETA_AAS_PLANES] / 20;
+    gAasAreaCount   = length[ETA_AAS_AREAS] / 48;
+    gAasNodeCount   = length[ETA_AAS_NODES] / 12;
+    gAasPortalCount = length[ETA_AAS_PORTALS] / 20;
+    if (gAasPlaneCount <= 0 || gAasAreaCount <= 1 || gAasNodeCount <= 1 || length[ETA_AAS_SETTINGS] / 32 != gAasAreaCount
+        || gAasPlaneCount > ETA_SANE_COUNT || gAasAreaCount > ETA_SANE_COUNT || gAasNodeCount > ETA_SANE_COUNT
+        || gAasPortalCount > ETA_SANE_COUNT)
+    {
+        ETA_Aas_Free();
+        return 0;
+    }
+    gAasPlanes  = (ETA_AreaPlane *)calloc((size_t)gAasPlaneCount, sizeof(*gAasPlanes));
+    gAasNodes   = (int *)calloc((size_t)gAasNodeCount * 3, sizeof(*gAasNodes));
+    gAasAreas   = (ETA_AasArea *)calloc((size_t)gAasAreaCount, sizeof(*gAasAreas));
+    gAasPortals = (int *)calloc((size_t)(gAasPortalCount ? gAasPortalCount : 1) * 3, sizeof(*gAasPortals));
+    if (!gAasPlanes || !gAasNodes || !gAasAreas || !gAasPortals)
+    {
+        ETA_Aas_Free();
+        return 0;
+    }
+
+    /* In whatever order the file has them. */
+    order[0] = ETA_AAS_PLANES;
+    order[1] = ETA_AAS_AREAS;
+    order[2] = ETA_AAS_SETTINGS;
+    order[3] = ETA_AAS_NODES;
+    order[4] = ETA_AAS_PORTALS;
+    for (i = 0; i < 5; i++)
+    {
+        for (j = i + 1; j < 5; j++)
+        {
+            if (offset[order[j]] < offset[order[i]])
+            {
+                int t = order[i];
+
+                order[i] = order[j];
+                order[j] = t;
+            }
+        }
+    }
+    for (i = 0; i < 5; i++)
+    {
+        int lump = order[i];
+        int size = lump == ETA_AAS_PLANES || lump == ETA_AAS_PORTALS ? 20 : lump == ETA_AAS_AREAS ? 48
+                   : lump == ETA_AAS_SETTINGS ? 32 : 12;
+        int count = length[lump] / size;
+
+        if (!ETA_Area_SkipTo(read, context, offset[lump], &position))
+        {
+            ETA_Aas_Free();
+            return 0;
+        }
+        for (j = 0; j < count; j++)
+        {
+            if (!ETA_Area_Read(read, context, record, size, &position))
+            {
+                ETA_Aas_Free();
+                return 0;
+            }
+            switch (lump)
+            {
+            case ETA_AAS_PLANES:
+                for (k = 0; k < 3; k++)
+                {
+                    gAasPlanes[j].normal[k] = ETA_Area_Float(record + 4 * k);
+                }
+                gAasPlanes[j].dist = ETA_Area_Float(record + 12);
+                break;
+            case ETA_AAS_AREAS:
+                for (k = 0; k < 3; k++)
+                {
+                    gAasAreas[j].mins[k]   = ETA_Area_Float(record + 12 + 4 * k);
+                    gAasAreas[j].maxs[k]   = ETA_Area_Float(record + 24 + 4 * k);
+                    gAasAreas[j].center[k] = ETA_Area_Float(record + 36 + 4 * k);
+                }
+                break;
+            case ETA_AAS_SETTINGS:
+                gAasAreas[j].cluster = ETA_Area_Int(record + 12);
+                break;
+            case ETA_AAS_NODES:
+                gAasNodes[j * 3]     = ETA_Area_Int(record);
+                gAasNodes[j * 3 + 1] = ETA_Area_Int(record + 4);
+                gAasNodes[j * 3 + 2] = ETA_Area_Int(record + 8);
+                break;
+            default:
+                gAasPortals[j * 3]     = ETA_Area_Int(record);
+                gAasPortals[j * 3 + 1] = ETA_Area_Int(record + 4);
+                gAasPortals[j * 3 + 2] = ETA_Area_Int(record + 8);
+                break;
+            }
+        }
+    }
+
+    /* The clusters are the areas, with their boxes. */
+    memset(gAreaHasLeaf, 0, sizeof(gAreaHasLeaf));
+    gAreaCount = 0;
+    for (j = 1; j < gAasAreaCount; j++)
+    {
+        int area = gAasAreas[j].cluster - 1;
+
+        if (area < 0 || area >= ETA_MAX_AREAS)
+        {
+            continue;
+        }
+        for (k = 0; k < 3; k++)
+        {
+            if (!gAreaHasLeaf[area] || gAasAreas[j].mins[k] < gAreaMins[area][k])
+            {
+                gAreaMins[area][k] = gAasAreas[j].mins[k];
+            }
+            if (!gAreaHasLeaf[area] || gAasAreas[j].maxs[k] > gAreaMaxs[area][k])
+            {
+                gAreaMaxs[area][k] = gAasAreas[j].maxs[k];
+            }
+        }
+        gAreaHasLeaf[area] = 1;
+        if (area + 1 > gAreaCount)
+        {
+            gAreaCount = area + 1;
+        }
+        settings++;
+    }
+    if (!settings)
+    {
+        ETA_Aas_Free();
+        return 0;
+    }
+    gAas = 1;
+    return gAreaCount;
+}
+
+/* The bots' area a point is in: their tree, as AAS_PointAreaNum walks it.
+   0 for solid. */
+static int ETA_Aas_AreaAt(const float point[3])
+{
+    int node = 1, depth = 0;
+
+    while (node > 0)
+    {
+        const ETA_AreaPlane *plane;
+        float                d;
+
+        if (node >= gAasNodeCount || ++depth > ETA_TREE_DEPTH)
+        {
+            return 0;
+        }
+        if (gAasNodes[node * 3] < 0 || gAasNodes[node * 3] >= gAasPlaneCount)
+        {
+            return 0;
+        }
+        plane = &gAasPlanes[gAasNodes[node * 3]];
+        d     = plane->normal[0] * point[0] + plane->normal[1] * point[1] + plane->normal[2] * point[2] - plane->dist;
+        node  = gAasNodes[node * 3 + (d > 0.0f ? 1 : 2)];
+    }
+    return node < 0 && -node < gAasAreaCount ? -node : 0;
+}
+
+/* A point's area by the bots' file: where a player standing there would
+   be - an item on the floor is lower than a player's middle - else the
+   nearest piece within two meters. A portal is between areas: -1. */
+static int ETA_Aas_At(const float point[3])
+{
+    static const float lift[] = { 0.0f, 24.0f, 40.0f, 8.0f, 56.0f, -16.0f };
+    float              best = 64.0f;
+    int                i, k, found = -1;
+
+    for (i = 0; i < (int)(sizeof(lift) / sizeof(lift[0])); i++)
+    {
+        float p[3];
+        int   a;
+
+        p[0] = point[0];
+        p[1] = point[1];
+        p[2] = point[2] + lift[i];
+        a    = ETA_Aas_AreaAt(p);
+        if (a > 0)
+        {
+            return gAasAreas[a].cluster > 0 ? gAasAreas[a].cluster - 1 : -1;
+        }
+    }
+    for (i = 1; i < gAasAreaCount; i++)
+    {
+        float d2 = 0.0f, d;
+
+        if (gAasAreas[i].cluster <= 0)
+        {
+            continue;
+        }
+        for (k = 0; k < 3; k++)
+        {
+            float out = point[k] < gAasAreas[i].mins[k] ? gAasAreas[i].mins[k] - point[k]
+                        : point[k] > gAasAreas[i].maxs[k] ? point[k] - gAasAreas[i].maxs[k] : 0.0f;
+
+            d2 += out * out;
+        }
+        d = d2 > 0.0f ? (float)sqrt(d2) : 0.0f;
+        if (d < best)
+        {
+            best  = d;
+            found = gAasAreas[i].cluster - 1;
+        }
+    }
+    return found;
+}
+
+int ETA_BspAreas_PortalCount(void)
+{
+    return gAas ? gAasPortalCount : 0;
+}
+
+int ETA_BspAreas_Portal(int index, float at[3], int *front, int *back)
+{
+    int area;
+
+    if (!gAas || index < 0 || index >= gAasPortalCount)
+    {
+        return 0;
+    }
+    area = gAasPortals[index * 3];
+    if (area <= 0 || area >= gAasAreaCount)
+    {
+        return 0;
+    }
+    memcpy(at, gAasAreas[area].center, sizeof(gAasAreas[area].center));
+    *front = gAasPortals[index * 3 + 1] - 1;
+    *back  = gAasPortals[index * 3 + 2] - 1;
+    return *front >= 0 && *back >= 0 && *front != *back;
+}
+
+int ETA_BspAreas_PointIn(int area, const float near[3], float out[3])
+{
+    float best = 0.0f;
+    int   i, k, found = 0;
+
+    if (!gAas)
+    {
+        return 0;
+    }
+    for (i = 1; i < gAasAreaCount; i++)
+    {
+        float d2 = 0.0f;
+
+        if (gAasAreas[i].cluster - 1 != area)
+        {
+            continue;
+        }
+        for (k = 0; k < 3; k++)
+        {
+            d2 += (gAasAreas[i].center[k] - near[k]) * (gAasAreas[i].center[k] - near[k]);
+        }
+        if (!found || d2 < best)
+        {
+            best  = d2;
+            found = 1;
+            memcpy(out, gAasAreas[i].center, sizeof(gAasAreas[i].center));
+        }
+    }
+    return found;
+}
+
 int ETA_BspAreas_At(const float point[3])
 {
     int index = 0, depth = 0;
 
+    if (gAas)
+    {
+        return ETA_Aas_At(point);
+    }
     if (!gNodes)
     {
         return -1;
@@ -455,6 +787,7 @@ int ETA_BspAreas_Bounds(int area, float mins[3], float maxs[3])
 
 void ETA_BspAreas_Free(void)
 {
+    ETA_Aas_Free();
     free(gPlanes);
     free(gNodes);
     free(gLeafArea);

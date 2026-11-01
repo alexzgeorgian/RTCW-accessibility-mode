@@ -1,0 +1,211 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 672637a1..a3ceedc1 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -70,6 +70,7 @@ static struct
+ 	/* Semicolon's list: the areas explored. */
+ 	int            backPressedAt, backArea, backPos, backCount;
+ 	int            back[ETA_AREAS_MAX];
++	qboolean       bots;    /* the areas are the bots' rooms */
+ } eta_areas;
+ 
+ /* The area a point is in: a point in a wall or in the floor - a switch,
+@@ -244,7 +245,7 @@ static void ETA_ExploredSave(void)
+ 	{
+ 		return;
+ 	}
+-	Com_sprintf(line, sizeof(line), "map %s rooms\n", cgs.mapname);
++	Com_sprintf(line, sizeof(line), "map %s %s\n", cgs.mapname, eta_areas.bots ? "bots" : "rooms");
+ 	trap_FS_Write(line, strlen(line), f);
+ 	for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
+ 	{
+@@ -296,7 +297,7 @@ static void ETA_ExploredLoad(void)
+ 
+ 	/* Another level's, or one from before the areas were cut at every
+ 	   door, numbered otherwise: nothing explored here yet. */
+-	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, "rooms"))
++	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, eta_areas.bots ? "bots" : "rooms"))
+ 	{
+ 		return;
+ 	}
+@@ -332,14 +333,61 @@ static void ETA_ExploredLoad(void)
+ 	}
+ }
+ 
++/* The ways between the bots' rooms with no door - a doorway, an arch, a
++   narrow passage - as exits with no model, led to the middle of the
++   nearest piece of the room beyond. */
++static void ETA_AreasOpenings(void)
++{
++	int i, k, f, b;
++
++	for (i = 0; i < ETA_BspAreas_PortalCount() && eta_areas.exitCount < ETA_AREA_EXITS_MAX; i++)
++	{
++		eta_areaExit_t *exit;
++		vec3_t         at;
++
++		if (!ETA_BspAreas_Portal(i, at, &f, &b) || f >= ETA_AREAS_MAX || b >= ETA_AREAS_MAX)
++		{
++			continue;
++		}
++		/* A door's own: its door is on the list. Another for the same two
++		   rooms close by: the same way. */
++		for (k = 0; k < eta_areas.exitCount; k++)
++		{
++			const eta_areaExit_t *other = &eta_areas.exits[k];
++
++			if (Distance(other->middle, at) < ( other->model ? 128.0f : 96.0f )
++			    && ( other->model || ( ( other->area[0] == f && other->area[1] == b ) || ( other->area[0] == b && other->area[1] == f ) ) ))
++			{
++				break;
++			}
++		}
++		if (k < eta_areas.exitCount)
++		{
++			continue;
++		}
++		exit          = &eta_areas.exits[eta_areas.exitCount];
++		exit->model   = 0;
++		exit->opens   = qtrue;
++		exit->area[0] = f;
++		exit->area[1] = b;
++		VectorCopy(at, exit->middle);
++		if (!ETA_BspAreas_PointIn(f, at, exit->side[0]) || !ETA_BspAreas_PointIn(b, at, exit->side[1]))
++		{
++			continue;
++		}
++		eta_areas.exitCount++;
++	}
++}
++
+ /* From cg_accessibility_world.c, once the map's areas are read. */
+-void CG_AccessibilityAreasLoaded(int count)
++void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+ 	eta_areas.current = eta_areas.pending = -1;
+-	/* Cut at every door, not only those the map counts: an area could
+-	   be a whole floor of rooms. */
+-	if (count >= 1)
++	eta_areas.bots    = bots;
++	/* Without the bots' rooms, cut at every door, not only those the map
++	   counts: an area could be a whole floor of rooms. */
++	if (count >= 1 && !bots)
+ 	{
+ 		static float boxes[ETA_AREA_EXITS_MAX][6];
+ 		vec3_t       mins, maxs;
+@@ -362,9 +410,14 @@ void CG_AccessibilityAreasLoaded(int count)
+ 	if (eta_areas.loaded)
+ 	{
+ 		ETA_AreasDoors();
++		if (bots)
++		{
++			ETA_AreasOpenings();
++		}
+ 	}
+ 	ETA_ExploredLoad();
+-	CG_Printf("eta: %s has %d areas, %d doors between them\n", cgs.mapname, count, eta_areas.exitCount);
++	CG_Printf("eta: %s has %d areas%s, %d ways between them\n", cgs.mapname, count, bots ? " from its bots' file" : "",
++	          eta_areas.exitCount);
+ }
+ 
+ /* Whether the level is told as areas: a map with more than one. */
+@@ -428,15 +481,15 @@ static void ETA_AreaDoorsText(int area, char *out, size_t size)
+ 
+ 	if (!count)
+ 	{
+-		Q_strncpyz(out, "No doors out", size);
++		Q_strncpyz(out, "No ways out", size);
+ 	}
+ 	else if (!toNew)
+ 	{
+-		Com_sprintf(out, size, "%d %s out, all to areas explored", count, count == 1 ? "door" : "doors");
++		Com_sprintf(out, size, "%d %s out, all to areas explored", count, count == 1 ? "way" : "ways");
+ 	}
+ 	else
+ 	{
+-		Com_sprintf(out, size, "%d %s out, %d to %s", count, count == 1 ? "door" : "doors", toNew,
++		Com_sprintf(out, size, "%d %s out, %d to %s", count, count == 1 ? "way" : "ways", toNew,
+ 		            toNew == 1 ? "a new area" : "new areas");
+ 	}
+ }
+@@ -771,11 +824,11 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (eta_areas.number[other])
+ 	{
+-		Com_sprintf(where, sizeof(where), "door back to area %d", eta_areas.number[other]);
++		Com_sprintf(where, sizeof(where), "%s back to area %d", exit->model ? "door" : "opening", eta_areas.number[other]);
+ 	}
+ 	else
+ 	{
+-		Q_strncpyz(where, "door to a new area", sizeof(where));
++		Q_strncpyz(where, exit->model ? "door to a new area" : "opening to a new area", sizeof(where));
+ 	}
+ 	if (other == wayOutArea && wayOutArea != area)
+ 	{
+@@ -796,11 +849,11 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (eta_areas.number[other])
+ 	{
+-		Com_sprintf(name, sizeof(name), "the door back to area %d", eta_areas.number[other]);
++		Com_sprintf(name, sizeof(name), "the %s back to area %d", exit->model ? "door" : "opening", eta_areas.number[other]);
+ 	}
+ 	else
+ 	{
+-		Q_strncpyz(name, "the door to a new area", sizeof(name));
++		Q_strncpyz(name, exit->model ? "the door to a new area" : "the opening to a new area", sizeof(name));
+ 	}
+ 	CG_AccessibilityChoose(exit->side[side], name);
+ }
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 071265a8..ae2d3650 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1382,7 +1382,33 @@ static void ETA_LoadAreas(void)
+ 	{
+ 		trap_FS_FCloseFile(file.handle);
+ 	}
+-	CG_AccessibilityAreasLoaded(count);
++
++	/* The rooms of the soldiers' own way-finding, where the level has
++	   its file: cut at every door and doorway. */
++	{
++		etaMapFile_t bots;
++		char         name[MAX_QPATH];
++		int          rooms = 0;
++
++		COM_StripExtension(cgs.mapname, name, sizeof(name));
++		Q_strcat(name, sizeof(name), "_b0.aas");
++		bots.handle = 0;
++		bots.left   = trap_FS_FOpenFile(name, &bots.handle, FS_READ);
++		if (bots.left > 0 && bots.handle)
++		{
++			rooms = ETA_BspAreas_LoadAas(ETA_MapFileRead, ETA_MapFileRestart, &bots);
++		}
++		if (bots.handle)
++		{
++			trap_FS_FCloseFile(bots.handle);
++		}
++		if (rooms > 1)
++		{
++			CG_AccessibilityAreasLoaded(rooms, qtrue);
++			return;
++		}
++	}
++	CG_AccessibilityAreasLoaded(count, qfalse);
+ }
+ 
+ int CG_AccessibilityLadderCount(void)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f83e86a0..19636438 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2283,7 +2283,7 @@ void CG_AccessibilityThingsReset( void );
+ void CG_AccessibilityThingsProgress( char *out, size_t size );
+ void CG_AccessibilityThingUsed( int entityNum, const vec3_t point );
+ void CG_AccessibilityThingsInArea( int area, char *out, size_t size );
+-void CG_AccessibilityAreasLoaded( int count );
++void CG_AccessibilityAreasLoaded( int count, qboolean bots );
+ qboolean CG_AccessibilityAreasOn( void );
+ int CG_AccessibilityAreaOf( const vec3_t at );
+ int CG_AccessibilityAreaHere( void );

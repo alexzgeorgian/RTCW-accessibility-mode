@@ -1438,3 +1438,25 @@ unlocked by anything - a target_lock nothing fires, or none - scenery,
 now said as "Door locked for good" by F and "locked for good" by X
 (CG_AccessibilityDoorNeverOpens). 28 remain, opened as the story goes on
 - an AI's own script, a scene - with no place for the player to go.
+
+## 0067: the areas are the soldiers' rooms
+
+Cut at every door, an area of the second level was still most of the
+castle - 60 meters across, several floors, eleven things - since much
+of it is joined by archways and corridors with no door; and the leaves'
+boxes, which overlap through walls, joined more. The tester: each area
+should have its own things.
+
+The game's bots already have the level cut into rooms: the clusters of
+maps/<map>_b0.aas, which their compiler divides at every door and every
+doorway or narrow opening, a portal between two clusters.
+ETA_BspAreas_LoadAas reads its planes, nodes, areas, area settings and
+portals (the header unscrambled as be_aas_file.c does); a point's area
+is its cluster, found by the bots' own tree, a player's middle above it
+for an item on the floor, or the nearest piece within 2 meters. The
+portals with no door near them are exits too, "opening to a new area",
+led to the middle of the nearest piece of the room beyond; "doors out"
+became "ways out". The second level has 37 areas, its start room none
+of its things and one opening out; the first level 33, its start cell
+the Luger alone. A map with no bots' file keeps 0065's areas. The
+explored file is marked "bots".

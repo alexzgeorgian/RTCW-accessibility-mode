@@ -49,6 +49,26 @@ int ETA_BspAreas_Bounds(int area, float mins[3], float maxs[3]);
  */
 int ETA_BspAreas_SplitAtDoors(const float (*boxes)[6], int count);
 
+/*
+ * The rooms the soldiers' own way-finding cuts the level into, read from
+ * its file (maps/<map>_b0.aas): the clusters, which the bot compiler
+ * divides at every door and every doorway or narrow opening - a portal
+ * between two clusters. Cutting the compiler's areas at the doors alone
+ * left most of a castle as one area. Once read, the clusters are the
+ * areas: area n is cluster n + 1. Returns how many there are, 0 for a
+ * file that is not one this engine's bots would load.
+ */
+int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context);
+
+/* The ways between two of those areas with no door: a portal's middle,
+   and the area on either side. 0 past the last, or with no file read. */
+int ETA_BspAreas_PortalCount(void);
+int ETA_BspAreas_Portal(int index, float at[3], int *front, int *back);
+
+/* Where to lead to, just into an area from a point: the middle of the
+   area's nearest piece. 0 with none. */
+int ETA_BspAreas_PointIn(int area, const float near[3], float out[3]);
+
 /* Lets go of the map read last. */
 void ETA_BspAreas_Free(void);
 
