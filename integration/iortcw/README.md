@@ -1540,3 +1540,12 @@ opening, three passes for pieces that open only onto other small ones,
 and numbers the areas again. The second level now has 31, its courtyard
 seven ways out instead of ten. The explored file is marked "rooms2", so
 it starts again once.
+
+### 0073 Explored areas carried over
+
+The tester, told the explored areas would start again with 0072: "but
+you have my game saved for that". So a "bots" explored file is no longer
+dropped: ETA_BspAreas_FromBefore gives the room each old piece is part
+of now, its area and spot lines are moved there (two joined: the first
+numbered keeps its number), and the areas are numbered again 1, 2, 3 in
+the order they were found. It is saved as "rooms2" from then on.

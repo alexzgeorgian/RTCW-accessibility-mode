@@ -433,6 +433,8 @@ static int           *gAasNodes;    /* planenum and two children, 3 to a node */
 static ETA_AasArea   *gAasAreas;
 static int           *gAasPortals;  /* area, front and back cluster, 3 to a portal */
 static int            gAasPlaneCount, gAasNodeCount, gAasAreaCount, gAasPortalCount;
+static int           *gAasBefore;     /* each cluster's area once small ones were joined */
+static int            gAasBeforeCount;
 
 static void ETA_Aas_Free(void)
 {
@@ -444,6 +446,9 @@ static void ETA_Aas_Free(void)
     gAasNodes   = NULL;
     gAasAreas   = NULL;
     gAasPortals = NULL;
+    free(gAasBefore);
+    gAasBefore      = NULL;
+    gAasBeforeCount = 0;
     gAasPlaneCount = gAasNodeCount = gAasAreaCount = gAasPortalCount = 0;
     gAas = 0;
 }
@@ -761,6 +766,16 @@ int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFlo
                     number[r] = ++next;
                 }
             }
+            free(gAasBefore);
+            gAasBefore = (int *)calloc((size_t)clusters, sizeof(*gAasBefore));
+            if (gAasBefore)
+            {
+                gAasBeforeCount = clusters;
+                for (j = 1; j <= clusters; j++)
+                {
+                    gAasBefore[j - 1] = number[ETA_Aas_Root(root, j)] - 1;
+                }
+            }
             for (i = 1; i < gAasAreaCount; i++)
             {
                 if (gAasAreas[i].cluster > 0 && gAasAreas[i].cluster <= clusters)
@@ -862,6 +877,15 @@ static int ETA_Aas_At(const float point[3])
         }
     }
     return found;
+}
+
+int ETA_BspAreas_FromBefore(int area)
+{
+    if (!gAasBefore)
+    {
+        return area;
+    }
+    return area >= 0 && area < gAasBeforeCount ? gAasBefore[area] : -1;
 }
 
 int ETA_BspAreas_PortalCount(void)

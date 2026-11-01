@@ -69,6 +69,10 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
  */
 int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFloor);
 
+/* An area as it was numbered before ETA_BspAreas_MergeSmall: the area it is
+   part of now, -1 for none. */
+int ETA_BspAreas_FromBefore(int area);
+
 /* The ways between two of those areas with no door: a portal's middle,
    and the area on either side. 0 past the last, or with no file read. */
 int ETA_BspAreas_PortalCount(void);

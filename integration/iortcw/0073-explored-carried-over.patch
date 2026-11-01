@@ -1,0 +1,103 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index e97b2f34..70bbded7 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -278,7 +278,8 @@ static void ETA_ExploredLoad(void)
+ 	static char  text[32768];
+ 	fileHandle_t f;
+ 	char         *line, *next, map[MAX_QPATH], kind[16];
+-	int          length;
++	int          length, i, j, order[ETA_AREAS_MAX];
++	qboolean     before;
+ 
+ 	eta_exploredDirty = qfalse;
+ 	length            = trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_READ);
+@@ -300,7 +301,14 @@ static void ETA_ExploredLoad(void)
+ 
+ 	/* Another level's, or one from before the areas were cut at every
+ 	   door, numbered otherwise: nothing explored here yet. */
+-	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname) || Q_stricmp(kind, eta_areas.bots ? "rooms2" : "rooms"))
++	if (sscanf(text, "map %63s %15s", map, kind) != 2 || Q_stricmp(map, cgs.mapname))
++	{
++		return;
++	}
++	/* One from before the pieces too small to be rooms were joined: its
++	   areas are carried over to the rooms they are part of now. */
++	before = (qboolean)( eta_areas.bots && !Q_stricmp(kind, "bots") );
++	if (!before && Q_stricmp(kind, eta_areas.bots ? "rooms2" : "rooms"))
+ 	{
+ 		return;
+ 	}
+@@ -308,14 +316,31 @@ static void ETA_ExploredLoad(void)
+ 	{
+ 		int    a, n, kind, tried;
+ 		vec3_t feature, lead;
++		char   moved[256];
+ 
+ 		next = strchr(line, '\n');
+ 		if (next)
+ 		{
+ 			*next++ = '\0';
+ 		}
++		if (before && ( !strncmp(line, "area ", 5) || !strncmp(line, "spot ", 5) ) && sscanf(line + 5, "%d", &a) == 1)
++		{
++			const char *after = strchr(line + 5, ' ');
++
++			a = ETA_BspAreas_FromBefore(a);
++			if (a < 0)
++			{
++				continue;
++			}
++			Com_sprintf(moved, sizeof(moved), "%.5s%d%s", line, a, after ? after : "");
++			line = moved;
++		}
+ 		if (sscanf(line, "area %d %d", &a, &n) == 2 && a >= 0 && a < ETA_AREAS_MAX && n > 0)
+ 		{
++			if (eta_areas.number[a] && eta_areas.number[a] < n)
++			{
++				continue;   /* two joined: the first found keeps its number */
++			}
+ 			eta_areas.number[a] = n;
+ 			if (n > eta_areas.numbered)
+ 			{
+@@ -334,6 +359,40 @@ static void ETA_ExploredLoad(void)
+ 			CG_AccessibilityFrontierPut(feature, lead, kind, (qboolean)(tried != 0));
+ 		}
+ 	}
++
++	/* Two areas joined leave a number out: numbered again, in the same
++	   order. */
++	if (before)
++	{
++		int count = 0;
++
++		for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
++		{
++			if (eta_areas.number[i])
++			{
++				order[count++] = i;
++			}
++		}
++		for (i = 0; i < count; i++)
++		{
++			for (j = i + 1; j < count; j++)
++			{
++				if (eta_areas.number[order[j]] < eta_areas.number[order[i]])
++				{
++					int t = order[i];
++
++					order[i] = order[j];
++					order[j] = t;
++				}
++			}
++		}
++		for (i = 0; i < count; i++)
++		{
++			eta_areas.number[order[i]] = i + 1;
++		}
++		eta_areas.numbered = count;
++		eta_exploredDirty  = qtrue;
++	}
+ }
+ 
+ /* The ways between the bots' rooms with no door - a doorway, an arch, a
