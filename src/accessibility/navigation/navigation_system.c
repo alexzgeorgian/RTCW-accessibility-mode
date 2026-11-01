@@ -369,6 +369,15 @@ static int ETA_Path_Floor(float v)
    the way are the better way up, and a missed jump is a fall. */
 #define ETA_PATH_EFFORT_SQUARES 4.0f
 
+/* A jump more: as much as two dozen squares, about 20 metres in the
+   campaign. The tester, led to "Jump up" onto a low wall at the top of
+   Castle Keep's stairs and down the far side, walked on into the wall;
+   the stairs were beside it. And a drop deeper than a stair's step, to be
+   walked off an edge: eight. */
+#define ETA_PATH_JUMP_SQUARES 24.0f
+#define ETA_PATH_DROP_SQUARES 8.0f
+#define ETA_PATH_DROP_DEEP    40.0f
+
 typedef struct
 {
     float pos[3];
@@ -653,9 +662,17 @@ static int ETA_Path_Reach(int current, const float to[3], int ix, int iy,
         /* Crouched, a player goes at about half the pace. */
         cost += flat;
     }
+    else if (kind == ETA_PATH_JUMP)
+    {
+        cost += ETA_PATH_JUMP_SQUARES * gPathCell;
+    }
     else if (kind != ETA_PATH_WALK)
     {
         cost += ETA_PATH_EFFORT_SQUARES * gPathCell;
+    }
+    else if (gPathNodes[current].pos[2] - to[2] > ETA_PATH_DROP_DEEP)
+    {
+        cost += ETA_PATH_DROP_SQUARES * gPathCell;
     }
     g = gPathNodes[current].g + cost;
 
