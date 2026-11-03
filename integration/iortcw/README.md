@@ -1691,3 +1691,16 @@ Two things in the way:
   F at one did nothing, and nothing was said. The game's configstring
   (0068) now has them too, 'U' working and 'u' switched off; F and T say
   "Switch, switched off for now" and F does not press it.
+
+### 0083 The tram
+
+The tester pressed the tram's button on the platform and the tram left
+without them: it moves, so the areas and the way have no part of it,
+and nothing said where it was. A script mover the level names "tram",
+big enough to ride, is now on F's list as "Tram, walk in" (or "Tram,
+moving") at its floor's middle - turned to, never pressed at, and not on
+T's; J says first "You are in the tram, standing" or "moving. Stay
+inside"; stepping in or out says "In the tram", "Out of the tram"; and
+its coming and going within 40 meters are said: "The tram has arrived,
+12 meters, ahead left. F turns you to it", "The tram is leaving", and
+inside, "The tram is moving. Stay inside", "The tram has stopped".
