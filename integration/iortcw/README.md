@@ -1713,3 +1713,11 @@ tram, a few meters off, was never reached, and F again on the button
 would send the tram back. Now within 15 seconds of F pressing something,
 and for half a minute after a tram stops near the player, F turns to the
 tram instead: "Tram. Walk in, and stay inside, ahead, 5 meters".
+
+### 0085 F stays on what was chosen, the tram or not
+
+The tester: the tram on F took away their key for being turned toward
+what they had chosen while walking, as 1428 has it. 0084 turned F to the
+tram after any press within 15 seconds, over a thing chosen with T or Y.
+Now only when nothing is chosen, and only after a press within 15 meters
+of the tram - its own button - or just after it came in.

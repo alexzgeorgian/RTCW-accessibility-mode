@@ -1,0 +1,29 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index cce4245d..4596325e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1598,14 +1598,21 @@ void CG_AccessibilityActivateDown_f(void)
+ 	   button sends it on in ten seconds, and pressing again would send it
+ 	   back - and just after it arrives. The tester pressed the button and
+ 	   the tram left without them. */
+-	if (( eta_use.usedAt && cg.time >= eta_use.usedAt && cg.time - eta_use.usedAt < ETA_RIDE_AFTER_MS )
+-	    || CG_AccessibilityRideJustArrived())
++	/* Never over what the player chose with T or Y, or with the
++	   brackets: F turns to that, as ever - the tester's way of being
++	   turned toward what they picked while walking. */
++	if (!ETA_UseThingChosen() && !( eta_choose.held && eta_choose.byPlayer ))
+ 	{
+ 		int j;
+ 
+ 		for (j = 0; j < count; j++)
+ 		{
+-			if (list[j].ride)
++			/* Just after a press at its own button, near it - not just
++			   any press - or just after it came in. */
++			if (list[j].ride
++			    && ( ( eta_use.usedAt && cg.time >= eta_use.usedAt && cg.time - eta_use.usedAt < ETA_RIDE_AFTER_MS
++			           && Distance(eta_use.usedPoint, list[j].point) < 600.0f )
++			         || CG_AccessibilityRideJustArrived() ))
+ 			{
+ 				index = j;
+ 				break;
