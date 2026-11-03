@@ -38,8 +38,11 @@ on:
       - '.github/workflows/rtcw-test.yml'
   workflow_dispatch:
 
+# Writing, to publish the test build on this repository's own releases
+# page: the workflow's own token does that, so no key of the owner's is
+# needed for it, and one that expires cannot stop the build.
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: rtcw-test-${{ github.ref }}
@@ -157,12 +160,15 @@ jobs:
         if: ${{ github.event_name != 'pull_request' }}
         working-directory: ${{ runner.temp }}/rtcw
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.RELEASES__TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          # Only for the old releases repository, where builds from before
+          # the move look for their updates: optional, and its failing
+          # does not stop the build.
+          OLD_TOKEN: ${{ secrets.RELEASES_TOKEN || secrets.RELEASES__TOKEN }}
         run: |
           set -e
           win="rtcw-accessibility-$TAG-windows.zip"
           mac="rtcw-accessibility-$TAG-mac.zip"
-          test -n "$GH_TOKEN" || { echo "::error::RELEASES_TOKEN is not set"; exit 1; }
           cat > notes.md <<NOTES
           **A test build of the Return to Castle Wolfenstein campaign with the accessibility mode.** Not a release: the ET: Legacy and No Quarter modes are unchanged by it.
 
@@ -214,17 +220,21 @@ jobs:
           gh release upload rtcw-updates rtcw-update.txt --repo "$PUBLIC_RELEASES" --clobber
 
           # The same file where builds from before the move look for it,
-          # naming the build here, so F12 there moves them on to it.
-          gh release view rtcw-updates --repo "$OLD_RELEASES" >/dev/null 2>&1 \
-            && gh release upload rtcw-updates rtcw-update.txt --repo "$OLD_RELEASES" --clobber
-
-          # The campaign's builds are no longer listed there.
-          for old in $(gh release list --repo "$OLD_RELEASES" --limit 200 \
-                         --json tagName,isPrerelease \
-                         --jq '.[] | select(.isPrerelease) | .tagName | select(startswith("rtcw-test-"))'); do
-            gh release delete "$old" --repo "$OLD_RELEASES" --cleanup-tag --yes
-            echo "moved off the old releases page: $old"
-          done
+          # naming the build here, so F12 there moves them on to it; and
+          # the campaign's builds no longer listed there. Best effort.
+          if [ -n "$OLD_TOKEN" ]; then
+            (
+              export GH_TOKEN="$OLD_TOKEN"
+              gh release view rtcw-updates --repo "$OLD_RELEASES" >/dev/null 2>&1 \
+                && gh release upload rtcw-updates rtcw-update.txt --repo "$OLD_RELEASES" --clobber
+              for old in $(gh release list --repo "$OLD_RELEASES" --limit 200 \
+                             --json tagName,isPrerelease \
+                             --jq '.[] | select(.isPrerelease) | .tagName | select(startswith("rtcw-test-"))'); do
+                gh release delete "$old" --repo "$OLD_RELEASES" --cleanup-tag --yes
+                echo "moved off the old releases page: $old"
+              done
+            ) || echo "::warning::The old releases repository could not be updated; its key may have expired"
+          fi
 
           # Only the newest RTCW test build is listed.
           for old in $(gh release list --repo "$PUBLIC_RELEASES" --limit 200 \
