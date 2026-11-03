@@ -1633,3 +1633,17 @@ when seen gone in plain view, kept it on the list. A thing first seen
 as a dropped item (otherEntityNum2 1) is now let go of 30 seconds after
 it was first seen, and said with the time it has left: "MP40, dropped,
 gone in 12 seconds".
+
+### 0079 The level's next step on T
+
+The tester, past the door toward the wine cellar, could not get anything
+to lead there: T lists the area's own things, and the cellar's spot was
+in another. T now ends its list - or, with nothing left in the area, is
+- the level's next step: the nearest place to walk onto, anywhere, that
+brings the soldiers the way on waits for or unlocks a door, working now
+(CS_ETA_TRIGGERS), not used, not one O found no way to, and not just
+through a locked door out of the area. "In another area, the level's
+next step: Spot where soldiers come in, ahead, 11 meters. O leads
+there". The far side of a door now counts from past its slab, 20 units
+(0074 had 48): the spot behind the keep's locked door, 40 units through
+it, was taken for this side's.

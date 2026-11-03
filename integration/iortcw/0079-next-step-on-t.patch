@@ -1,0 +1,167 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 54c43c7d..b893fcbb 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -511,8 +511,9 @@ int CG_AccessibilityAreaHere(void)
+ static qboolean ETA_AreaExitOpens(const eta_areaExit_t *exit);
+ 
+ /* Whether what opens a door, at a point, is on its far side from an area:
+-   well through the door, and not in the area. A switch set in the wall
+-   beside the door is on neither side, and counts as this one's. */
++   through the door - past its slab, a doorway's spot just behind it too -
++   and not in the area. A switch set in the wall beside the door is on
++   neither side, and counts as this one's. */
+ static qboolean ETA_AreaBeyondDoor(const eta_areaExit_t *exit, int area, const vec3_t at)
+ {
+ 	int    mine = exit->area[0] == area ? 0 : 1;
+@@ -526,7 +527,7 @@ static qboolean ETA_AreaBeyondDoor(const eta_areaExit_t *exit, int area, const v
+ 	}
+ 	VectorSubtract(at, exit->middle, off);
+ 	off[2] = 0.0f;
+-	return (qboolean)( DotProduct(off, through) > 48.0f && ETA_AreaOf(at) != area );
++	return (qboolean)( DotProduct(off, through) > 20.0f && ETA_AreaOf(at) != area );
+ }
+ 
+ /* Whether a point is the switch that opens a locked door out of an area. */
+@@ -556,6 +557,25 @@ static qboolean ETA_AreaDoorSwitch(int area, const vec3_t at)
+ 	return qfalse;
+ }
+ 
++/* Whether a point is just through a locked door out of an area: reached by
++   going round, if at all, not by the door. */
++qboolean CG_AccessibilityAreaBehindLockedDoor(int area, const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_areas.exitCount; i++)
++	{
++		const eta_areaExit_t *exit = &eta_areas.exits[i];
++
++		if (exit->model > 0 && ( exit->area[0] == area || exit->area[1] == area ) && !ETA_AreaExitOpens(exit)
++		    && Distance(at, exit->middle) < 256.0f && ETA_AreaBeyondDoor(exit, area, at))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ qboolean CG_AccessibilityAreaHolds(int area, const vec3_t at)
+ {
+ 	int there;
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 527c9ad8..7010bb7c 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -103,6 +103,7 @@ static struct
+ 	int         pressedAt;  /* T or Y last pressed */
+ 	int         list[ETA_THINGS_MAX];   /* T and Y's list, nearest first */
+ 	int         listCount, listPos, listArea;
++	int         nextStep;   /* on the list from another area: the level's next step, or -1 */
+ 	int         secrets;    /* found, as the mission's figures last said */
+ 
+ 	/* The fight. */
+@@ -459,7 +460,7 @@ static void ETA_ThingsStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                 count = 0, i, j, meters, hidden = 0, elsewhere = 0, area;
+-	char                progress[160], name[80], why[128];
++	char                progress[160], name[80], why[128], shown[128];
+ 	qboolean            fresh;
+ 	eta_thing_t         *thing;
+ 	vec3_t              delta;
+@@ -516,6 +517,49 @@ static void ETA_ThingsStep(int step)
+ 				}
+ 			}
+ 		}
++		/*
++		 * The level's next step, from wherever the player is: the nearest
++		 * place to walk onto that brings the soldiers the way on waits
++		 * for, or unlocks a door, and works now - in another area too.
++		 * The tester, past the door to the wine cellar, could not get T to
++		 * lead there: it lists only the area's own things.
++		 */
++		eta_things.nextStep = -1;
++		if (count < ETA_THINGS_MAX)
++		{
++			float best = 0.0f;
++
++			for (i = 0; i < eta_things.count; i++)
++			{
++				eta_thing_t *t = &eta_things.things[i];
++				int          spot, state;
++				float        far;
++
++				if (t->done || t->kind != ETA_THING_SWITCH || Q_stricmpn(t->name, "Spot ", 5)
++				    || CG_AccessibilityAreaHolds(area, t->point) || ETA_ThingNoWay(t, area)
++				    || CG_AccessibilityAreaBehindLockedDoor(area, t->point))
++				{
++					continue;
++				}
++				spot  = CG_AccessibilityUnlockSpotAt(t->point);
++				state = CG_AccessibilityUnlockState(spot);
++				if (state == 0 || state == 2)
++				{
++					continue;   /* not working yet, or used */
++				}
++				far = Distance(ps->origin, t->point) + fabsf(t->point[2] - ps->origin[2]);
++				if (eta_things.nextStep < 0 || far < best)
++				{
++					eta_things.nextStep = i;
++					best                = far;
++				}
++			}
++			if (eta_things.nextStep >= 0)
++			{
++				eta_things.list[count++] = eta_things.nextStep;
++				elsewhere--;
++			}
++		}
+ 		eta_things.listCount = count;
+ 		eta_things.listArea  = area;
+ 		eta_things.listPos   = -1;
+@@ -558,6 +602,14 @@ static void ETA_ThingsStep(int step)
+ 	}
+ 	eta_things.target = eta_things.list[eta_things.listPos];
+ 	thing             = &eta_things.things[eta_things.target];
++	if (eta_things.target == eta_things.nextStep)
++	{
++		Com_sprintf(shown, sizeof(shown), "In another area, the level's next step: %s", thing->name);
++	}
++	else
++	{
++		Q_strncpyz(shown, thing->name, sizeof(shown));
++	}
+ 
+ 	VectorSubtract(thing->point, ps->origin, delta);
+ 	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+@@ -604,7 +656,7 @@ static void ETA_ThingsStep(int step)
+ 			"Its way in is hidden close by"
+ 		};
+ 
+-		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, thing->name,
++		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, shown,
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+ 		                  why[0] ? "Walking onto it does nothing yet"
+@@ -614,7 +666,7 @@ static void ETA_ThingsStep(int step)
+ 	else
+ 	{
+ 		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. O leads there", eta_things.listPos + 1, eta_things.listCount,
+-		                  thing->name, why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
++		                  shown, why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
+ 		                  meters, meters == 1 ? "meter" : "meters"));
+ 	}
+ 	ETA_Speech_EndReport();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index bc18a148..cf4c6274 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2311,6 +2311,7 @@ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+ qboolean CG_AccessibilityMarkerUnreachable( void );
+ void CG_AccessibilityCrouch_f( void );
+ void CG_AccessibilityThingsNoWay( const vec3_t at );
++qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+ #define ETA_MAP_ITEM     0
