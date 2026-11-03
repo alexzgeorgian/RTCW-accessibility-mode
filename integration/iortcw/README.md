@@ -1674,3 +1674,20 @@ played last only, so a save of another level loaded even once lost the
 rest. Each level has its own now, accessibility_explored_<map>.txt; one
 with none yet takes the old file's if it was that level's, and saves it
 as its own straight away.
+
+### 0082 The tram's buttons
+
+The tester, on the last level of the first mission, rode the tram, fell,
+and back at its button could not press it again, even pressed quickly.
+Two things in the way:
+
+- F's "Just used" (0080 had kept it for buttons): the tram's buttons
+  send the tram each way in turn and are meant to be pressed again. It
+  now holds only for a switch that works a door
+  (CG_AccessibilitySwitchOpensDoorAt), which pressed twice works it
+  back.
+- The tram's buttons are invisible switches (func_invisible_user) the
+  level switches off while the tram is away or on its way, spawnflags 1:
+  F at one did nothing, and nothing was said. The game's configstring
+  (0068) now has them too, 'U' working and 'u' switched off; F and T say
+  "Switch, switched off for now" and F does not press it.

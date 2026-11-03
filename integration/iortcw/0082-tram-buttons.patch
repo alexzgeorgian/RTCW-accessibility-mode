@@ -1,0 +1,160 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 96991084..22948795 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1307,7 +1307,12 @@ void CG_AccessibilityActivateDown_f(void)
+ 		                            && CG_AccessibilityDoorModel(cg_entities[eta_use.usedEntity].currentState.modelindex,
+ 		                                                         &usedOpens) );
+ 
+-		if (!door && !doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
++		/* And only a switch that works a door: the tram's buttons send
++		   the tram each way in turn, and the tester, back at one after
++		   falling from the tram, could not press it again. */
++		qboolean doorSwitch = CG_AccessibilitySwitchOpensDoorAt(eta_use.usedPoint);
++
++		if (!door && doorSwitch && !doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
+ 		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
+ 		    && Distance(cg.predictedPlayerState.origin, eta_use.usedFrom) < ETA_USE_AGAIN_NEAR
+ 		    && (!(eta_choose.held && eta_choose.byPlayer) || ETA_UseJustUsed(&eta_choose.target))
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 51dff616..8a085f7a 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -577,6 +577,10 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
+ 
++	if (!why[0] && thing->kind == ETA_THING_SWITCH && CG_AccessibilitySwitchOffAt(thing->point))
++	{
++		Q_strncpyz(why, ", switched off for now", sizeof(why));
++	}
+ 	if (!why[0] && thing->goneAt && thing->goneAt > cg.time)
+ 	{
+ 		Com_sprintf(why, sizeof(why), ", dropped, gone in %d seconds", ( thing->goneAt - cg.time + 999 ) / 1000);
+@@ -617,7 +621,9 @@ static void ETA_ThingsStep(int step)
+ 		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, shown,
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+-		                  why[0] ? "Walking onto it does nothing yet"
++		                  why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
++		                  ? "F does nothing with it yet"
++		                  : why[0] ? "Walking onto it does nothing yet"
+ 		                  : Q_stristr(thing->name, "inside something to break") ? "Break what it is in first"
+ 		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind]));
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 697f4abc..93f0a7ad 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -615,6 +615,15 @@ qboolean CG_AccessibilityUnlockSpotForDoor(int model, vec3_t at, int *index)
+ 	return qfalse;
+ }
+ 
++/* Whether an invisible switch is switched off by the level now. */
++qboolean CG_AccessibilitySwitchOff(int model)
++{
++	const char *state = CG_ConfigString(CS_ETA_TRIGGERS);
++
++	return (qboolean)( model > 0 && model < MAX_MODELS && state[0] == '!' && model < (int)strlen(state)
++	                   && state[model] == 'u' );
++}
++
+ /* The spot T's list has at a point: -1 none. */
+ int CG_AccessibilityUnlockSpotAt(const vec3_t at)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b65cae36..f2d8aeac 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4302,6 +4302,41 @@ qboolean CG_AccessibilityDoorBox(int model, vec3_t mins, vec3_t maxs, qboolean *
+ 	return qtrue;
+ }
+ 
++static void ETA_WorldRead(void);
++
++/* Whether the invisible switch at a point is switched off by the level now. */
++qboolean CG_AccessibilitySwitchOffAt(const vec3_t point)
++{
++	int i;
++
++	ETA_WorldRead();
++	for (i = 0; i < eta_userCount; i++)
++	{
++		if (Distance(cgs.inlineModelMidpoints[eta_users[i].model], point) < 32.0f)
++		{
++			return CG_AccessibilitySwitchOff(eta_users[i].model);
++		}
++	}
++	return qfalse;
++}
++
++/* Whether a switch at a point works a door: pressed twice, it works the
++   door back. */
++qboolean CG_AccessibilitySwitchOpensDoorAt(const vec3_t point)
++{
++	int i;
++
++	ETA_WorldRead();
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		if (eta_opensDoor[i] && Distance(cgs.inlineModelMidpoints[i], point) < 48.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+ {
+ 	if (modelindex <= 0 || modelindex >= MAX_MODELS || eta_doorLocked[modelindex] < 0)
+@@ -5990,6 +6025,12 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 		{
+ 			Q_strncpyz(target.name, eta_users[i].name, sizeof(target.name));
+ 		}
++		/* Switched off by the level for now: said, not pressed at. */
++		if (CG_AccessibilitySwitchOff(eta_users[i].model))
++		{
++			Q_strcat(target.name, sizeof(target.name), ", switched off for now");
++			target.locked = qtrue;
++		}
+ 		target.meters = Distance(ps->origin, target.point) * ETA_QU_TO_METERS;
+ 		ETA_AimInsert(list, &count, max, &target);
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index cf4c6274..61c89db4 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2311,6 +2311,9 @@ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+ qboolean CG_AccessibilityMarkerUnreachable( void );
+ void CG_AccessibilityCrouch_f( void );
+ void CG_AccessibilityThingsNoWay( const vec3_t at );
++qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
++qboolean CG_AccessibilitySwitchOff( int model );
++qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index 98b00be3..a863ef12 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2470,6 +2470,9 @@ Advances the non-player objects in the world
+  * the story opens, was said and led through wrongly. 'L' locked, 'S'
+  * opened only by a switch or the story, 'd' one that opens by hand or
+  * stands open now.
++ *
++ * And an invisible switch's: 'U' it works, 'u' switched off - the tram's
++ * buttons are, while the tram is on its way, and F at one did nothing.
+  */
+ static void G_AccessibilityTriggers( void ) {
+ 	static int  next;
+@@ -2497,6 +2500,8 @@ static void G_AccessibilityTriggers( void ) {
+ 		}
+ 		if ( !Q_strncmp( ent->classname, "trigger_", 8 ) || !Q_stricmp( ent->classname, "ai_trigger" ) ) {
+ 			state[model] = ( ent->r.linked && ent->touch ) ? 'a' : 'o';
++		} else if ( !Q_stricmp( ent->classname, "func_invisible_user" ) ) {
++			state[model] = ( ent->spawnflags & 1 ) ? 'u' : 'U';
+ 		} else if ( !Q_strncmp( ent->classname, "func_door", 9 ) ) {
+ 			qboolean shut = ( ent->moverState == MOVER_POS1 || ent->moverState == MOVER_POS1ROTATE );
+ 
