@@ -1,0 +1,83 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index a7be3001..527c9ad8 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -65,8 +65,25 @@ typedef struct
+ 	qboolean        hinted;      /* a secret area: "near" said */
+ 	int             noWayArea;   /* the area O found no way to it from, +1; 0 none */
+ 	int             noWayAt;
++	int             goneAt;      /* dropped by someone: the game takes it away then; 0 never */
+ } eta_thing_t;
+ 
++/*
++ * What a soldier drops is taken out of the game 30 seconds after it fell
++ * (LaunchItem). T kept it on the list, out of sight, and the tester went
++ * to a weapon that was no longer there. It is let go of then, and said
++ * with the time it has left. It was first seen at most as long ago as it
++ * fell.
++ */
++#define ETA_THINGS_DROPPED_MS 30000
++
++static qboolean ETA_ThingDropped(int entityNum)
++{
++	return (qboolean)( entityNum >= 0 && entityNum < MAX_GENTITIES && cg_entities[entityNum].currentValid
++	                   && cg_entities[entityNum].currentState.eType == ET_ITEM
++	                   && cg_entities[entityNum].currentState.otherEntityNum2 == 1 );
++}
++
+ /* No way there found from this area for this long: listed last, said so. */
+ #define ETA_THINGS_NO_WAY_MS 180000
+ 
+@@ -202,6 +219,7 @@ static void ETA_ThingsSeed(void)
+ 		eta_things.things[j].done   = qfalse;
+ 		eta_things.things[j].hinted = qfalse;
+ 		eta_things.things[j].noWayArea = 0;
++		eta_things.things[j].goneAt    = 0;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -245,6 +263,10 @@ static void ETA_ThingsRecord(void)
+ 			{
+ 				eta_things.things[j].entityNum = list[i].entityNum;
+ 			}
++			if (!eta_things.things[j].goneAt && ETA_ThingDropped(list[i].entityNum))
++			{
++				eta_things.things[j].goneAt = cg.time + ETA_THINGS_DROPPED_MS;
++			}
+ 			continue;
+ 		}
+ 		if (eta_things.count >= ETA_THINGS_MAX)
+@@ -272,6 +294,7 @@ static void ETA_ThingsRecord(void)
+ 		eta_things.things[j].done   = qfalse;
+ 		eta_things.things[j].hinted = qfalse;
+ 		eta_things.things[j].noWayArea = 0;
++		eta_things.things[j].goneAt    = ETA_ThingDropped(list[i].entityNum) ? cg.time + ETA_THINGS_DROPPED_MS : 0;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -544,6 +567,10 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
+ 
++	if (!why[0] && thing->goneAt && thing->goneAt > cg.time)
++	{
++		Com_sprintf(why, sizeof(why), ", dropped, gone in %d seconds", ( thing->goneAt - cg.time + 999 ) / 1000);
++	}
+ 	if (!why[0] && ETA_ThingNoWay(thing, area))
+ 	{
+ 		Q_strncpyz(why, ", O found no way there from this area: it may be up high, behind a locked door, or reached "
+@@ -681,6 +708,14 @@ void CG_AccessibilityThingsFrame(void)
+ 		{
+ 			eta_thing_t *thing = &eta_things.things[i];
+ 
++			/* Dropped, and its time up: the game has taken it away. */
++			if (!thing->done && thing->goneAt
++			    && ( cg.time >= thing->goneAt || thing->goneAt - cg.time > ETA_THINGS_DROPPED_MS ))
++			{
++				thing->done = qtrue;
++				continue;
++			}
++
+ 			/* A spot that unlocks a door is done once used: the game says
+ 			   when its trigger has gone. One switched off does nothing
+ 			   walked onto, so stays until it works and is used. */

@@ -1622,3 +1622,14 @@ pressed use, and nothing was said. Now F says "You carry all you can of
 this, so the game leaves it here. Use some, and come back", and does not
 press. And the tester does not use the F keys: where they are (F1) is on
 J as well, bind generation 21, J having been let go of in the fifteenth.
+
+### 0078 What soldiers drop goes after 30 seconds
+
+The tester, on the weapon F would not pick up: it was likely no longer
+on the floor - its sound was not heard - and the ammo was not full. A
+weapon a soldier drops is taken out of the game 30 seconds after it
+falls (LaunchItem, G_FreeEntity), and T, which lets a thing go only
+when seen gone in plain view, kept it on the list. A thing first seen
+as a dropped item (otherEntityNum2 1) is now let go of 30 seconds after
+it was first seen, and said with the time it has left: "MP40, dropped,
+gone in 12 seconds".
