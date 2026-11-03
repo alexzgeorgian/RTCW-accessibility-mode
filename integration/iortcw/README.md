@@ -1704,3 +1704,12 @@ inside"; stepping in or out says "In the tram", "Out of the tram"; and
 its coming and going within 40 meters are said: "The tram has arrived,
 12 meters, ahead left. F turns you to it", "The tram is leaving", and
 inside, "The tram is moving. Stay inside", "The tram has stopped".
+
+### 0084 F turns to the tram after its button
+
+The tester: is the tram on the list, to follow with F as usual? It was,
+but F turns to the nearest, and at the station that is the button: the
+tram, a few meters off, was never reached, and F again on the button
+would send the tram back. Now within 15 seconds of F pressing something,
+and for half a minute after a tram stops near the player, F turns to the
+tram instead: "Tram. Walk in, and stay inside, ahead, 5 meters".

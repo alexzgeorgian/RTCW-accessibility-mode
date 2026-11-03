@@ -1,0 +1,124 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 22948795..cce4245d 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -276,6 +276,9 @@ static struct
+ #define ETA_USE_AGAIN_NEAR   96.0f
+ #define ETA_USE_DOUBLE_MS    1500
+ 
++/* After a press, this long F turns to a tram standing near. */
++#define ETA_RIDE_AFTER_MS 15000
++
+ static void ETA_UseRemember(int entityNum, const vec3_t point)
+ {
+ 	CG_AccessibilityThingUsed(entityNum, point);
+@@ -1591,9 +1594,37 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* The tram, over its button nearer by: just after a press - the
++	   button sends it on in ten seconds, and pressing again would send it
++	   back - and just after it arrives. The tester pressed the button and
++	   the tram left without them. */
++	if (( eta_use.usedAt && cg.time >= eta_use.usedAt && cg.time - eta_use.usedAt < ETA_RIDE_AFTER_MS )
++	    || CG_AccessibilityRideJustArrived())
++	{
++		int j;
++
++		for (j = 0; j < count; j++)
++		{
++			if (list[j].ride)
++			{
++				index = j;
++				break;
++			}
++		}
++	}
++
+ 	eta_aim.cycleIndex = index;
+ 	eta_aim.cycleAt    = cg.time;
+ 
++	/* The tram: turned to, and said what to do. */
++	if (list[index].ride)
++	{
++		/* Where it is follows the name, as for anything F turns to. */
++		ETA_AimStartSnap(&list[index], Q_stricmp(list[index].name, "Tram, moving") ? "Tram. Walk in, and stay inside"
++		                 : "Tram, moving");
++		return;
++	}
++
+ 	/* F is for what is close; further off, up to fifteen metres, is K's
+ 	   and J's - the tester asked for the two to be kept apart. Use is
+ 	   still pressed, as the plain key would. */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 34abc7e4..b12c0dd7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3772,6 +3772,7 @@ static struct
+ 	int model;
+ 	int state;    /* -1 not yet seen, 0 standing, 1 moving */
+ 	int playerIn; /* the player in it when last looked at */
++	int arrivedAt;
+ }          eta_rides[ETA_MAX_RIDES];
+ static int eta_rideCount;
+ 
+@@ -3824,6 +3825,23 @@ qboolean CG_AccessibilityInRide(char *out, size_t size)
+ 	return qfalse;
+ }
+ 
++/* Whether a tram stopped near the player in the last half minute, with
++   the player not in it: F turns to it then. */
++qboolean CG_AccessibilityRideJustArrived(void)
++{
++	int i;
++
++	for (i = 0; i < eta_rideCount; i++)
++	{
++		if (eta_rides[i].arrivedAt && !eta_rides[i].playerIn && eta_rides[i].state == 0
++		    && cg.time >= eta_rides[i].arrivedAt && cg.time - eta_rides[i].arrivedAt < 30000)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* Its coming and going, as it changes. */
+ void CG_AccessibilityRideFrame(void)
+ {
+@@ -3863,6 +3881,10 @@ void CG_AccessibilityRideFrame(void)
+ 		{
+ 			ETA_Speech_Say(in ? "In the tram" : "Out of the tram");
+ 		}
++		if (eta_rides[i].state == 1 && !moving)
++		{
++			eta_rides[i].arrivedAt = cg.time;
++		}
+ 		eta_rides[i].state    = moving;
+ 		eta_rides[i].playerIn = in;
+ 	}
+@@ -4096,8 +4118,10 @@ static void ETA_ReadMapEntities(void)
+ 				trap_R_ModelBounds(cgs.inlineDrawModel[index], mins, maxs);
+ 				if (maxs[0] - mins[0] >= 128.0f && maxs[1] - mins[1] >= 96.0f)
+ 				{
+-					eta_rides[eta_rideCount].model = index;
+-					eta_rides[eta_rideCount].state = -1;
++					eta_rides[eta_rideCount].model     = index;
++					eta_rides[eta_rideCount].state     = -1;
++					eta_rides[eta_rideCount].playerIn  = 0;
++					eta_rides[eta_rideCount].arrivedAt = 0;
+ 					eta_rideCount++;
+ 				}
+ 			}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index afd09b45..1985e8c1 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2316,6 +2316,7 @@ qboolean CG_AccessibilitySwitchOff( int model );
+ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
+ qboolean CG_AccessibilityInRide( char *out, size_t size );
+ void CG_AccessibilityRideFrame( void );
++qboolean CG_AccessibilityRideJustArrived( void );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
