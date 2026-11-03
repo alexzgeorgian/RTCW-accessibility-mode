@@ -411,6 +411,7 @@ static float         gPathOrigin[3];
 static int           gPathBest;        /* the node nearest the goal so far */
 static int           gPathEnd;         /* where the finished path ends */
 static ETA_PathState gPathState = ETA_PATH_IDLE;
+static int           gPathAllTried;   /* ended with every reachable square tried */
 static float         gPathPoints[ETA_PATH_MAX_POINTS][3];
 static ETA_PathKind  gPathPointKinds[ETA_PATH_MAX_POINTS];
 static int           gPathPointCount;
@@ -686,6 +687,7 @@ static int ETA_Path_Reach(int current, const float to[3], int ix, int iy,
         {
             /* Out of room: the way to the nearest square so far is the
                answer, and the caller searches again from further along. */
+            gPathAllTried = 0;
             ETA_Path_Build(gPathBest);
             gPathState = gPathBest == 0 ? ETA_PATH_FAILED : ETA_PATH_PARTIAL;
             return 0;
@@ -799,7 +801,13 @@ void ETA_PathFinder_Begin(const float start[3], const float goal[3],
     gPathBest               = first;
     ETA_Path_HeapPush(first);
 
-    gPathState = ETA_PATH_SEARCHING;
+    gPathState    = ETA_PATH_SEARCHING;
+    gPathAllTried = 0;
+}
+
+int ETA_PathFinder_AllTried(void)
+{
+    return gPathAllTried;
 }
 
 void ETA_PathFinder_BeginSearch(const float start[3], float cellSize, ETA_PathGoalFn isGoal, void *goalContext)
@@ -839,6 +847,7 @@ ETA_PathState ETA_PathFinder_Step(int budget, ETA_PathMoveFn move, void *context
         {
             /* Everywhere reachable has been tried. The nearest square is
                still where the way goes, unless it is where we started. */
+            gPathAllTried = 1;
             ETA_Path_Build(gPathBest);
             gPathState = gPathBest == 0 ? ETA_PATH_FAILED : ETA_PATH_PARTIAL;
             return gPathState;

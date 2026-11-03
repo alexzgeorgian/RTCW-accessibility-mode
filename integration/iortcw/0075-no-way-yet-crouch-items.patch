@@ -1,0 +1,272 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index e32d7805..5eb2203e 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -786,6 +786,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityThingsPrev" );
+ 	trap_AddCommand( "accessibilityAreaExits" );
+ 	trap_AddCommand( "accessibilityAreasBack" );
++	trap_AddCommand( "accessibilityCrouch" );
+ 	trap_AddCommand( "accessibilityHealth" );
+ 	trap_AddCommand( "accessibilityAmmo" );
+ 	trap_AddCommand( "+accessibilityTurnLeft" );
+@@ -843,6 +844,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityAreaExits();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityAreasBack" ) ) {
+ 		CG_AccessibilityAreasBack();
++	} else if ( !Q_stricmp( cmd, "accessibilityCrouch" ) ) {
++		CG_AccessibilityCrouch_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityHealth" ) ) {
+ 		if ( cg.snap ) {
+ 			CG_AccessibilityHealth_f();
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9728fdb6..86746d8b 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1941,6 +1941,71 @@ static void ETA_GuideCrouch(qboolean down)
+ 	eta_guide.crouchHeld = down;
+ }
+ 
++/*
++ * C crouches and C again stands, rather than crouching only while held:
++ * the tester, with one hand on the keys that move and one on those that
++ * say, could not hold it. Its own key number in the game's +movedown, so
++ * the walk guide's crouch and a held key of the player's own still work
++ * beside it. Whether the player is crouched or standing is said as it
++ * changes (ETA_CrouchFrame), whatever made it: this key, the walk guide
++ * under a low ceiling, or a ceiling too low to stand up under yet.
++ */
++#define ETA_CROUCH_KEY "991"
++
++static qboolean eta_crouchOn;
++static int      eta_crouchSaid = -1;   /* 1 crouched, 0 standing, as last said */
++static int      eta_crouchStandAt;     /* when C let go, to say if a ceiling keeps the player down */
++
++void CG_AccessibilityCrouch_f(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	eta_crouchOn = (qboolean)!eta_crouchOn;
++	trap_SendConsoleCommand(va("%smovedown " ETA_CROUCH_KEY "\n", eta_crouchOn ? "+" : "-"));
++	eta_crouchStandAt = eta_crouchOn ? 0 : cg.time;
++}
++
++static void ETA_CrouchFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 now;
++
++	if (ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0)
++	{
++		/* Dead or in a cutscene: the toggle let go, said fresh after. */
++		if (eta_crouchOn)
++		{
++			eta_crouchOn = qfalse;
++			trap_SendConsoleCommand("-movedown " ETA_CROUCH_KEY "\n");
++		}
++		eta_crouchSaid = -1;
++		return;
++	}
++	now = ( ps->pm_flags & PMF_DUCKED ) ? 1 : 0;
++	if (eta_crouchSaid < 0)
++	{
++		eta_crouchSaid = now;
++		return;
++	}
++	if (now != eta_crouchSaid)
++	{
++		eta_crouchSaid    = now;
++		eta_crouchStandAt = 0;
++		ETA_Speech_Say(now ? "Crouched" : "Standing");
++	}
++	/* Let go, and still down a moment later: a ceiling too low to stand
++	   under. Said once; "Standing" follows when there is room. */
++	else if (now && eta_crouchStandAt && ( cg.time - eta_crouchStandAt > 400 || cg.time < eta_crouchStandAt ))
++	{
++		eta_crouchStandAt = 0;
++		ETA_Speech_Say("Too low to stand here. You stand up once there is room");
++	}
++}
++
+ /* How near the switch the use key reaches it from the eyes: a little
+    inside the game's own CH_ACTIVATE_DIST. */
+ #define ETA_GUIDE_SWITCH_REACH 88.0f
+@@ -3156,6 +3221,21 @@ static void ETA_FaceTheWayNow(void)
+ 		return;
+ 	}
+ 
++	/* No way there at all from here yet: said so, and not turned into the
++	   wall nearest it. */
++	if (CG_AccessibilityMarkerUnreachable())
++	{
++		vec3_t      origin;
++		const char *name = NULL;
++		char        what[48];
++
++		Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
++		                  "yet. X says what opens the doors here, and T what is left to do", what));
++		return;
++	}
++
+ 	/* Turned toward the way, as 1428's N turns its player toward a
+ 	   waypoint - and, as there, always to an opening. The way's own
+ 	   direction once turned the tester into a wall; so it is tried as
+@@ -3381,6 +3461,10 @@ void CG_AccessibilityAimFrame(void)
+ 		ETA_FacePendingFrame();
+ 		ETA_EnemyCueFrame();
+ 	}
++	if (cg.snap)
++	{
++		ETA_CrouchFrame();
++	}
+ 
+ 	/* A climb has the keys to itself. */
+ 	if (eta_climb.active)
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 9a135585..f89f08a8 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2177,6 +2177,19 @@ qboolean CG_AccessibilityMarkerWayKnown(void)
+ 	return (qboolean)(eta_marker.active && eta_route.done);
+ }
+ 
++/*
++ * Whether the marker cannot be reached from here at all now: the search,
++ * jumps let in too, tried every square there is to reach and none was
++ * it. A locked door is in between, or a part of the level not open yet.
++ * The tester, led on from the wine cellar toward the way out beyond the
++ * locked doors, was turned into the wall nearest it, again and again.
++ */
++qboolean CG_AccessibilityMarkerUnreachable(void)
++{
++	return (qboolean)(eta_marker.active && eta_route.done && eta_route.jumps
++	                  && ETA_PathFinder_State() == ETA_PATH_PARTIAL && ETA_PathFinder_AllTried());
++}
++
+ /**
+  * @brief Whether the way needs a jump just ahead, for the walk guide to
+  * take: the player is at its edge, and the landing is ahead of them.
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 80d9d398..0e96530a 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -511,6 +511,17 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
+ 
++	/* Ammo or health the player is full of stays on the floor walked
++	   onto: the tester was told of ammo there, and found none to take. */
++	if (thing->kind == ETA_THING_ITEM && thing->entityNum >= 0 && thing->entityNum < MAX_GENTITIES
++	    && cg_entities[thing->entityNum].currentValid && cg_entities[thing->entityNum].currentState.eType == ET_ITEM
++	    && cg_entities[thing->entityNum].currentState.modelindex > 0
++	    && cg_entities[thing->entityNum].currentState.modelindex < bg_numItems
++	    && !BG_CanItemBeGrabbed(&cg_entities[thing->entityNum].currentState, ps))
++	{
++		Q_strncpyz(why, ", you carry all you can of this, so it stays here until you use some", sizeof(why));
++	}
++
+ 	ETA_Speech_BeginReport();
+ 	if (fresh)
+ 	{
+@@ -531,6 +542,7 @@ static void ETA_ThingsStep(int step)
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+ 		                  why[0] ? "Walking onto it does nothing yet"
++		                  : Q_stristr(thing->name, "inside something to break") ? "Break what it is in first"
+ 		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind]));
+ 	}
+ 	else
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b6d88870..676bd846 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3763,6 +3763,8 @@ static struct
+ {
+ 	vec3_t at;
+ 	int    item;
++	char   targetname[32];
++	char   hidden;   /* not there yet: 'b' inside something to break, 'l' brought later */
+ }          eta_mapItems[ETA_MAP_ITEMS];
+ static int eta_mapItemCount;
+ static int        eta_userCount;
+@@ -3982,6 +3984,12 @@ static void ETA_ReadMapEntities(void)
+ 					{
+ 						VectorCopy(at, eta_mapItems[eta_mapItemCount].at);
+ 						eta_mapItems[eta_mapItemCount].item = item;
++						/* One with a name is not in the level until
++						   something fires it (FinishSpawningItem): most
++						   often a crate broken open. */
++						Q_strncpyz(eta_mapItems[eta_mapItemCount].targetname, targetname,
++						           sizeof(eta_mapItems[0].targetname));
++						eta_mapItems[eta_mapItemCount].hidden = targetname[0] ? 'l' : 0;
+ 						eta_mapItemCount++;
+ 					}
+ 					break;
+@@ -4107,6 +4115,22 @@ static void ETA_ReadMapEntities(void)
+ 		}
+ 	}
+ 
++	/* An item not there yet: inside something to break, when that is what
++	   brings it. The tester walked to things T listed and found nothing. */
++	for (i = 0; i < eta_mapItemCount; i++)
++	{
++		int j;
++
++		for (j = 0; eta_mapItems[i].hidden && j < aimedCount; j++)
++		{
++			if (aimed[j].kind == 'b' && !Q_stricmp(aimed[j].target, eta_mapItems[i].targetname))
++			{
++				eta_mapItems[i].hidden = 'b';
++				break;
++			}
++		}
++	}
++
+ 	/* What opens each door that has a name: a button aimed at it - or the
+ 	   invisible trigger aimed at that button, which is what is pressed -
+ 	   or an invisible trigger aimed at the door itself. Whether it stands
+@@ -5021,6 +5045,11 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		VectorCopy(eta_mapItems[index].at, at);
+ 		Q_strncpyz(name, cgs.itemPrintNames[n][0] ? cgs.itemPrintNames[n] : it->pickup_name ? it->pickup_name : "Item",
+ 		           nameSize);
++		if (eta_mapItems[index].hidden)
++		{
++			Q_strcat(name, nameSize, eta_mapItems[index].hidden == 'b' ? ", inside something to break"
++			         : ", comes later in the level");
++		}
+ 		*kind = it->giType == IT_TREASURE ? ETA_MAP_TREASURE : ETA_MAP_ITEM;
+ 		return qtrue;
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 30030adb..655b9b6a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2308,6 +2308,8 @@ int CG_AccessibilityUnlockState( int index );
+ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
+ char CG_AccessibilityDoorLive( int model );
+ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
++qboolean CG_AccessibilityMarkerUnreachable( void );
++void CG_AccessibilityCrouch_f( void );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+ #define ETA_MAP_ITEM     0
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index c7466c1e..834a0885 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8419,6 +8419,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'i',          "accessibilityAmmo",          19, NULL },
+ 		{ 'v',          "accessibilityFacing",        19, NULL },
+ 		{ ';',          "accessibilityAreasBack",     19, NULL },
++		/* C crouches and C again stands, rather than only while held:
++		   taken over from the game's own crouch. */
++		{ 'c',          "accessibilityCrouch",        20, "+movedown" },
+ 	};
+ 
+ 	/*

@@ -1564,3 +1564,30 @@ another area - a door that unlocks once the player comes to it from
 there - is said "locked from this side: what opens it is on the other
 side, so find another way round", and not led to; a switch set in the
 wall beside the door is on neither side, and is this one's.
+
+### 0075 No way yet, crouch on a key, items not there
+
+Three from the tester, still in the second level:
+
+- Running in circles, with "Finding the way. A moment" again and again:
+  from the wine cellar O led to the way out, beyond doors still locked.
+  The search ended partial - every reachable square tried (the path
+  finder now says so, ETA_PathFinder_AllTried) - and the player was
+  turned toward the wall nearest the way out, and the search began again
+  every five seconds. CG_AccessibilityMarkerUnreachable: O now says "No
+  way to the way out from here yet: a locked door is in between, or a
+  part of the level not open yet. X says what opens the doors here, and
+  T what is left to do", and does not turn.
+- Crouch held could not be done with one hand on the keys that move:
+  C crouches and C again stands (accessibilityCrouch, its own key number
+  on +movedown, bind generation 20, taken over from +movedown).
+  "Crouched" and "Standing" are said as PMF_DUCKED changes, whatever
+  made it, and "Too low to stand here" when a ceiling keeps the player
+  down after C.
+- Ammo T listed that was not there: an item with a targetname is not in
+  the level until fired (FinishSpawningItem) - most often from a crate
+  broken open - so it is named "..., inside something to break" (or
+  "comes later in the level"), "Break what it is in first" within reach;
+  and ammo or health the player is full of stays where it is walked
+  onto (BG_CanItemBeGrabbed), so it is said "you carry all you can of
+  this, so it stays here until you use some".

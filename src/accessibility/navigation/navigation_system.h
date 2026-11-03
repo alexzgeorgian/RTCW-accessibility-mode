@@ -149,6 +149,11 @@ typedef int (*ETA_PathGoalFn)(void *context, const float at[3]);
 void ETA_PathFinder_BeginSearch(const float start[3], float cellSize, ETA_PathGoalFn isGoal, void *goalContext);
 ETA_PathState ETA_PathFinder_Step(int budget, ETA_PathMoveFn move, void *context);
 ETA_PathState ETA_PathFinder_State(void);
+
+/* After a search that ended ETA_PATH_PARTIAL: 1 when every square that can
+   be reached was tried - the goal cannot be reached from the start at
+   all - and 0 when it ran out of room first. */
+int ETA_PathFinder_AllTried(void);
 int  ETA_PathFinder_PointCount(void);
 void ETA_PathFinder_Point(int index, float out[3]);
 /* How the point is reached from the one before it; the first point,
