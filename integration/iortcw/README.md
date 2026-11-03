@@ -1732,3 +1732,18 @@ stands near, the player not in it, wherever the player is: "Tram, walk
 in, ahead, 5 meters. O leads there"; within reach, "Walk in, and stay
 inside". Not counted with the area's things. Its arrival says "T finds
 it".
+
+### 0087 T lists what was come across; F uses what is in reach ahead
+
+The tester, after 0086: the tram could no longer be called, and T listed
+things in places they could not reach - "findable items spoil the story,
+but what you can see when you are around it is closer to investigating".
+
+- The tram on T's list, chosen, took F over: F at the button led to the
+  tram (both the far and the near choice paths), and the button could
+  not be pressed. Something to use within 3.5 meters and in front, within
+  50 degrees (ETA_UseReachAhead), is now used by F whatever T has
+  chosen.
+- T's things, known from the map since 0049, are listed only once come
+  across: within 15 meters and in sight (a trace from the eyes), or seen
+  on K and J's list. The counts on F1 and J are of those too.

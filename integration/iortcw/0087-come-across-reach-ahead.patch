@@ -1,0 +1,163 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 22948795..a1e1f460 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1257,6 +1257,35 @@ static qboolean ETA_UseThingChosen(void)
+ 	                  && !(eta_use.usedAt && Distance(at, eta_use.usedPoint) < ETA_F_LED_NEAR));
+ }
+ 
++/*
++ * Something to use within reach, in front: F uses it, whatever T has
++ * chosen further off. The tester, the tram chosen on T's list, pressed F
++ * at the tram's button and was led to the tram instead: the button could
++ * not be pressed at all.
++ */
++static qboolean ETA_UseReachAhead(void)
++{
++	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++	int            count = CG_AccessibilityUseTargets(list, ETA_AIM_MAX_TARGETS), j;
++
++	for (j = 0; j < count; j++)
++	{
++		vec3_t to;
++
++		if (list[j].ladder || list[j].stairs || list[j].ride || list[j].enemy
++		    || list[j].meters > ETA_F_CLOSE_METERS - 0.5f)
++		{
++			continue;
++		}
++		VectorSubtract(list[j].point, cg.predictedPlayerState.origin, to);
++		if (fabsf(AngleSubtract(vectoyaw(to), cg.predictedPlayerState.viewangles[YAW])) < 50.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ void CG_AccessibilityActivateDown_f(void)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -1337,8 +1366,10 @@ void CG_AccessibilityActivateDown_f(void)
+ 
+ 		VectorCopy(cg.predictedPlayerState.origin, eyeAt);
+ 		eyeAt[2] += cg.predictedPlayerState.viewheight;
++		qboolean ahead = ETA_UseReachAhead();
++
+ 		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending)
+-		    && Distance(eyeAt, marker) * ETA_QU_TO_METERS > ETA_F_CLOSE_METERS)
++		    && Distance(eyeAt, marker) * ETA_QU_TO_METERS > ETA_F_CLOSE_METERS && !ahead)
+ 		{
+ 			vec3_t      markerAt;
+ 			const char *markerName;
+@@ -1363,7 +1394,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 			}
+ 			return;
+ 		}
+-		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending))
++		if (!ahead && CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending))
+ 		{
+ 			int   j, best = -1;
+ 			float bestFar = ETA_F_LED_NEAR;
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 198f05af..12bb6d18 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -67,8 +67,35 @@ typedef struct
+ 	int             noWayAt;
+ 	int             goneAt;      /* dropped by someone: the game takes it away then; 0 never */
+ 	qboolean        ride;        /* the tram, standing near: on the list wherever the player is */
++	qboolean        known;       /* come across: been near it, in sight */
+ } eta_thing_t;
+ 
++/*
++ * T lists only what the player has come across: within 15 meters and in
++ * sight, once. The tester: things T knew from the map, all over the level,
++ * spoiled the story and sent them where they could not go - "what you can
++ * see when you are around it is closer to investigating".
++ */
++#define ETA_THINGS_KNOWN_RANGE 600.0f
++
++static qboolean ETA_ThingInSight(const eta_thing_t *thing)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              eye, at;
++	trace_t             trace;
++
++	if (Distance(ps->origin, thing->point) > ETA_THINGS_KNOWN_RANGE)
++	{
++		return qfalse;
++	}
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++	VectorCopy(thing->point, at);
++	at[2] += 8.0f;
++	CG_Trace(&trace, eye, NULL, NULL, at, ps->clientNum, MASK_SOLID);
++	return (qboolean)( trace.fraction >= 0.99f || Distance(trace.endpos, at) < 40.0f );
++}
++
+ /*
+  * What a soldier drops is taken out of the game 30 seconds after it fell
+  * (LaunchItem). T kept it on the list, out of sight, and the tester went
+@@ -297,6 +324,7 @@ static void ETA_ThingsRecord(void)
+ 			{
+ 				eta_things.things[j].entityNum = list[i].entityNum;
+ 			}
++			eta_things.things[j].known = qtrue;   /* seen, as F sees it */
+ 			if (!eta_things.things[j].goneAt && ETA_ThingDropped(list[i].entityNum))
+ 			{
+ 				eta_things.things[j].goneAt = cg.time + ETA_THINGS_DROPPED_MS;
+@@ -329,6 +357,7 @@ static void ETA_ThingsRecord(void)
+ 		eta_things.things[j].hinted = qfalse;
+ 		eta_things.things[j].noWayArea = 0;
+ 		eta_things.things[j].goneAt    = ETA_ThingDropped(list[i].entityNum) ? cg.time + ETA_THINGS_DROPPED_MS : 0;
++		eta_things.things[j].known     = qtrue;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -374,7 +403,7 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 	*left = 0;
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+-		if (!eta_things.things[i].done && !eta_things.things[i].ride
++		if (!eta_things.things[i].done && !eta_things.things[i].ride && eta_things.things[i].known
+ 		    && CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
+ 		{
+ 			counts[eta_things.things[i].kind]++;
+@@ -477,7 +506,8 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+-	return (qboolean)(!thing->done && (thing->kind != ETA_THING_SECRET || eta_secretsLead.integer));
++	return (qboolean)(!thing->done && ( thing->known || thing->ride )
++	                  && (thing->kind != ETA_THING_SECRET || eta_secretsLead.integer));
+ }
+ 
+ /*
+@@ -514,6 +544,10 @@ static void ETA_ThingsStep(int step)
+ 	{
+ 		for (i = 0; i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
++			if (!eta_things.things[i].known && !eta_things.things[i].ride)
++			{
++				continue;   /* not come across yet */
++			}
+ 			if (!ETA_ThingLeadable(&eta_things.things[i]))
+ 			{
+ 				hidden += !eta_things.things[i].done;
+@@ -752,6 +786,15 @@ void CG_AccessibilityThingsFrame(void)
+ 		ETA_ThingsRecord();
+ 		ETA_SecretsFrame();
+ 
++		/* Come across: near, and in sight. */
++		for (i = 0; i < eta_things.count; i++)
++		{
++			if (!eta_things.things[i].known && !eta_things.things[i].done && ETA_ThingInSight(&eta_things.things[i]))
++			{
++				eta_things.things[i].known = qtrue;
++			}
++		}
++
+ 		/* Gone, seen gone: taken or broken. A switch is done once F has
+ 		   pressed it (CG_AccessibilityThingUsed). */
+ 		for (i = 0; i < eta_things.count; i++)
