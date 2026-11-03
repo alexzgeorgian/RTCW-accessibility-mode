@@ -1747,3 +1747,13 @@ but what you can see when you are around it is closer to investigating".
 - T's things, known from the map since 0049, are listed only once come
   across: within 15 meters and in sight (a trace from the eyes), or seen
   on K and J's list. The counts on F1 and J are of those too.
+
+### 0088 The tram's buttons on T
+
+The tester: easier if the button were on the list like the tram. At the
+station the button's trigger fell in the next area, so T did not list
+it. A switch within 256 units across, 400 up or down, of a path corner
+the level names "tram..." is the tram's button: named "Tram button",
+and listed by T within 30 meters wherever the areas take it to be, come
+across or not, as the tram is: "1 of 2, Tram button, switched off for
+now, ahead, 2 meters", "2 of 2, Tram, walk in, ahead, 5 meters".

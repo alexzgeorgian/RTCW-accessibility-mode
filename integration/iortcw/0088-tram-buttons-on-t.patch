@@ -1,0 +1,112 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 12bb6d18..b157685d 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -506,7 +506,7 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+-	return (qboolean)(!thing->done && ( thing->known || thing->ride )
++	return (qboolean)(!thing->done && ( thing->known || thing->ride || !Q_stricmpn(thing->name, "Tram button", 11) )
+ 	                  && (thing->kind != ETA_THING_SECRET || eta_secretsLead.integer));
+ }
+ 
+@@ -544,7 +544,9 @@ static void ETA_ThingsStep(int step)
+ 	{
+ 		for (i = 0; i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
+-			if (!eta_things.things[i].known && !eta_things.things[i].ride)
++			if (!eta_things.things[i].known && !eta_things.things[i].ride
++			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
++			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
+ 			{
+ 				continue;   /* not come across yet */
+ 			}
+@@ -552,8 +554,12 @@ static void ETA_ThingsStep(int step)
+ 			{
+ 				hidden += !eta_things.things[i].done;
+ 			}
+-			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride)
++			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride
++			         || ( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
++			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
+ 			{
++				/* The tram, and its button near: on the list wherever
++				   the area takes them to be. */
+ 				eta_things.list[count++] = i;
+ 			}
+ 			else
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index f929b5fc..33abdf93 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3776,6 +3776,28 @@ static struct
+ }          eta_rides[ETA_MAX_RIDES];
+ static int eta_rideCount;
+ 
++/* The corners of a tram's way, and the switches by them: its buttons, at
++   each station, which call it and send it on. */
++#define ETA_MAX_TRAM_CORNERS 64
++static vec3_t eta_tramCorners[ETA_MAX_TRAM_CORNERS];
++static int    eta_tramCornerCount;
++
++static qboolean ETA_ByTramWay(const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_tramCornerCount; i++)
++	{
++		float dx = at[0] - eta_tramCorners[i][0], dy = at[1] - eta_tramCorners[i][1];
++
++		if (dx * dx + dy * dy < 256.0f * 256.0f && fabsf(at[2] - eta_tramCorners[i][2]) < 400.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* A ride's box as it is now, and whether it is moving. qfalse when it is
+    not in the snapshot. */
+ static qboolean ETA_RideBox(int i, vec3_t mins, vec3_t maxs, qboolean *moving)
+@@ -4057,8 +4079,9 @@ static void ETA_ReadMapEntities(void)
+ 		eta_doorLocked[i] = -1;
+ 		VectorClear(eta_doorOrigins[i]);
+ 	}
+-	eta_exitCount = 0;
+-	eta_rideCount = 0;
++	eta_exitCount       = 0;
++	eta_rideCount       = 0;
++	eta_tramCornerCount = 0;
+ 	CG_AccessibilityUnlockReset();
+ 
+ 	for (;;)
+@@ -4132,6 +4155,15 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags);
+ 
++		/* The tram's way: the corners its cable runs by, for its buttons. */
++		if (!Q_stricmp(classname, "path_corner") && Q_stristr(targetname, "tram") && origin[0]
++		    && eta_tramCornerCount < ETA_MAX_TRAM_CORNERS)
++		{
++			sscanf(origin, "%f %f %f", &eta_tramCorners[eta_tramCornerCount][0],
++			       &eta_tramCorners[eta_tramCornerCount][1], &eta_tramCorners[eta_tramCornerCount][2]);
++			eta_tramCornerCount++;
++		}
++
+ 		/* A tram: a script mover the level names so, big enough to ride. */
+ 		if (!Q_stricmp(classname, "script_mover") && Q_stristr(scriptname, "tram") && model[0] == '*'
+ 		    && eta_rideCount < ETA_MAX_RIDES)
+@@ -4461,6 +4493,12 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* By the tram's way: its button. */
++		if (users[i].model > 0 && users[i].model < MAX_MODELS && ETA_ByTramWay(cgs.inlineModelMidpoints[users[i].model]))
++		{
++			name = "Tram button";
++		}
++
+ 		eta_users[eta_userCount].model = users[i].model;
+ 		Q_strncpyz(eta_users[eta_userCount].name, name, sizeof(eta_users[0].name));
+ 		eta_userCount++;
