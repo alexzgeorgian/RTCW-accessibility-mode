@@ -1,0 +1,244 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 4596325e..22948795 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -276,9 +276,6 @@ static struct
+ #define ETA_USE_AGAIN_NEAR   96.0f
+ #define ETA_USE_DOUBLE_MS    1500
+ 
+-/* After a press, this long F turns to a tram standing near. */
+-#define ETA_RIDE_AFTER_MS 15000
+-
+ static void ETA_UseRemember(int entityNum, const vec3_t point)
+ {
+ 	CG_AccessibilityThingUsed(entityNum, point);
+@@ -1594,44 +1591,9 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
+-	/* The tram, over its button nearer by: just after a press - the
+-	   button sends it on in ten seconds, and pressing again would send it
+-	   back - and just after it arrives. The tester pressed the button and
+-	   the tram left without them. */
+-	/* Never over what the player chose with T or Y, or with the
+-	   brackets: F turns to that, as ever - the tester's way of being
+-	   turned toward what they picked while walking. */
+-	if (!ETA_UseThingChosen() && !( eta_choose.held && eta_choose.byPlayer ))
+-	{
+-		int j;
+-
+-		for (j = 0; j < count; j++)
+-		{
+-			/* Just after a press at its own button, near it - not just
+-			   any press - or just after it came in. */
+-			if (list[j].ride
+-			    && ( ( eta_use.usedAt && cg.time >= eta_use.usedAt && cg.time - eta_use.usedAt < ETA_RIDE_AFTER_MS
+-			           && Distance(eta_use.usedPoint, list[j].point) < 600.0f )
+-			         || CG_AccessibilityRideJustArrived() ))
+-			{
+-				index = j;
+-				break;
+-			}
+-		}
+-	}
+-
+ 	eta_aim.cycleIndex = index;
+ 	eta_aim.cycleAt    = cg.time;
+ 
+-	/* The tram: turned to, and said what to do. */
+-	if (list[index].ride)
+-	{
+-		/* Where it is follows the name, as for anything F turns to. */
+-		ETA_AimStartSnap(&list[index], Q_stricmp(list[index].name, "Tram, moving") ? "Tram. Walk in, and stay inside"
+-		                 : "Tram, moving");
+-		return;
+-	}
+-
+ 	/* F is for what is close; further off, up to fifteen metres, is K's
+ 	   and J's - the tester asked for the two to be kept apart. Use is
+ 	   still pressed, as the plain key would. */
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 77c64c49..198f05af 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -66,6 +66,7 @@ typedef struct
+ 	int             noWayArea;   /* the area O found no way to it from, +1; 0 none */
+ 	int             noWayAt;
+ 	int             goneAt;      /* dropped by someone: the game takes it away then; 0 never */
++	qboolean        ride;        /* the tram, standing near: on the list wherever the player is */
+ } eta_thing_t;
+ 
+ /*
+@@ -104,6 +105,7 @@ static struct
+ 	int         list[ETA_THINGS_MAX];   /* T and Y's list, nearest first */
+ 	int         listCount, listPos, listArea;
+ 	int         nextStep;   /* on the list from another area: the level's next step, or -1 */
++	int         rideThing;  /* the tram's place among the things, +1; 0 none */
+ 	int         secrets;    /* found, as the mission's figures last said */
+ 
+ 	/* The fight. */
+@@ -230,11 +232,42 @@ static void ETA_ThingsRecord(void)
+ {
+ 	etaAimTarget_t list[32];
+ 	int            count, i, j;
++	vec3_t         rideAt;
+ 
+ 	if (!eta_things.seeded)
+ 	{
+ 		ETA_ThingsSeed();
+ 	}
++
++	/*
++	 * The tram, a thing to step into rather than to use: on T's list
++	 * while it stands near, wherever the player is, and off it while it
++	 * is away or moving, or the player is in it. The tester wanted it on
++	 * T, F left to turn to things as 1428 has it.
++	 */
++	if (CG_AccessibilityRideAt(rideAt))
++	{
++		if (!eta_things.rideThing && eta_things.count < ETA_THINGS_MAX)
++		{
++			eta_thing_t *t = &eta_things.things[eta_things.count];
++
++			memset(t, 0, sizeof(*t));
++			t->entityNum = -1;
++			t->kind      = ETA_THING_SWITCH;
++			t->ride      = qtrue;
++			Q_strncpyz(t->name, "Tram, walk in", sizeof(t->name));
++			eta_things.rideThing = ++eta_things.count;
++		}
++		if (eta_things.rideThing)
++		{
++			VectorCopy(rideAt, eta_things.things[eta_things.rideThing - 1].point);
++			eta_things.things[eta_things.rideThing - 1].done = qfalse;
++		}
++	}
++	else if (eta_things.rideThing)
++	{
++		eta_things.things[eta_things.rideThing - 1].done = qtrue;
++	}
+ 	count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list));
+ 
+ 	for (i = 0; i < count; i++)
+@@ -341,7 +374,8 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 	*left = 0;
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+-		if (!eta_things.things[i].done && CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
++		if (!eta_things.things[i].done && !eta_things.things[i].ride
++		    && CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
+ 		{
+ 			counts[eta_things.things[i].kind]++;
+ 			( *left )++;
+@@ -484,7 +518,7 @@ static void ETA_ThingsStep(int step)
+ 			{
+ 				hidden += !eta_things.things[i].done;
+ 			}
+-			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
++			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride)
+ 			{
+ 				eta_things.list[count++] = i;
+ 			}
+@@ -621,7 +655,8 @@ static void ETA_ThingsStep(int step)
+ 		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, shown,
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+-		                  why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
++		                  thing->ride ? "Walk in, and stay inside"
++		                  : why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
+ 		                  ? "F does nothing with it yet"
+ 		                  : why[0] ? "Walking onto it does nothing yet"
+ 		                  : Q_stristr(thing->name, "inside something to break") ? "Break what it is in first"
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b12c0dd7..f929b5fc 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3842,6 +3842,32 @@ qboolean CG_AccessibilityRideJustArrived(void)
+ 	return qfalse;
+ }
+ 
++/* A tram standing near, the player not in it: where its floor's middle
++   is, for T's list. qfalse with none. */
++qboolean CG_AccessibilityRideAt(vec3_t point)
++{
++	vec3_t   mins, maxs;
++	qboolean moving;
++	int      i;
++
++	for (i = 0; i < eta_rideCount; i++)
++	{
++		if (!ETA_RideBox(i, mins, maxs, &moving) || moving
++		    || ETA_RideHolds(mins, maxs, cg.predictedPlayerState.origin))
++		{
++			continue;
++		}
++		point[0] = ( mins[0] + maxs[0] ) * 0.5f;
++		point[1] = ( mins[1] + maxs[1] ) * 0.5f;
++		point[2] = mins[2] + 40.0f;
++		if (Distance(point, cg.predictedPlayerState.origin) <= 1600.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* Its coming and going, as it changes. */
+ void CG_AccessibilityRideFrame(void)
+ {
+@@ -3872,7 +3898,7 @@ void CG_AccessibilityRideFrame(void)
+ 			{
+ 				ETA_Speech_Say(moving ? va("The tram is leaving, %d meters, %s", meters,
+ 				                           ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle)))
+-				               : va("The tram has arrived, %d meters, %s. F turns you to it", meters,
++				               : va("The tram has arrived, %d meters, %s. T finds it", meters,
+ 				                    ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle))));
+ 			}
+ 		}
+@@ -6194,34 +6220,6 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 		ETA_AimInsert(list, &count, max, &target);
+ 	}
+ 
+-	/* A tram to get into, not one the player is in: turned to, at its
+-	   floor's middle, never pressed at. */
+-	for (i = 0; i < eta_rideCount; i++)
+-	{
+-		etaAimTarget_t target;
+-		vec3_t         mins, maxs;
+-		qboolean       moving;
+-
+-		if (!ETA_RideBox(i, mins, maxs, &moving) || ETA_RideHolds(mins, maxs, ps->origin))
+-		{
+-			continue;
+-		}
+-		memset(&target, 0, sizeof(target));
+-		target.entityNum = -1;
+-		target.ride      = qtrue;
+-		target.locked    = qtrue;
+-		target.point[0]  = ( mins[0] + maxs[0] ) * 0.5f;
+-		target.point[1]  = ( mins[1] + maxs[1] ) * 0.5f;
+-		target.point[2]  = mins[2] + 40.0f;
+-		if (Distance(ps->origin, target.point) > ETA_USE_RANGE)
+-		{
+-			continue;
+-		}
+-		Q_strncpyz(target.name, moving ? "Tram, moving" : "Tram, walk in", sizeof(target.name));
+-		target.meters = Distance(ps->origin, target.point) * ETA_QU_TO_METERS;
+-		ETA_AimInsert(list, &count, max, &target);
+-	}
+-
+ 	/* The map's ladders: turned to like anything else to use, so a
+ 	   ladder heard humming can be found with F - and once there, F climbs
+ 	   it. Aimed at the middle of the ladder, level with the player, and
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 1985e8c1..084d377f 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,7 @@ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
+ qboolean CG_AccessibilityInRide( char *out, size_t size );
+ void CG_AccessibilityRideFrame( void );
+ qboolean CG_AccessibilityRideJustArrived( void );
++qboolean CG_AccessibilityRideAt( vec3_t point );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );

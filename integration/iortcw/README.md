@@ -1721,3 +1721,14 @@ what they had chosen while walking, as 1428 has it. 0084 turned F to the
 tram after any press within 15 seconds, over a thing chosen with T or Y.
 Now only when nothing is chosen, and only after a press within 15 meters
 of the tram - its own button - or just after it came in.
+
+### 0086 The tram on T, not F
+
+The tester: the tram is a thing to step into, like an area, not one to
+use; F is for turning to things as 1428 has it, so leave it so, and put
+the tram on T's list - it is only for this level - when it comes. The
+tram is off F's list (0083-0085 undone there), and on T's while it
+stands near, the player not in it, wherever the player is: "Tram, walk
+in, ahead, 5 meters. O leads there"; within reach, "Walk in, and stay
+inside". Not counted with the area's things. Its arrival says "T finds
+it".
