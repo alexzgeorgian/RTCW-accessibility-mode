@@ -1,0 +1,40 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9dd6f07f..ad8f42da 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3627,6 +3627,20 @@ void CG_AccessibilityAimFrame(void)
+ 				}
+ 			}
+ 
++			/* Something on the ground the game will not let the player take:
++			   ammo, health, or a weapon carried already with all its ammo.
++			   The tester pressed F at a weapon on the floor and nothing
++			   happened, with nothing said. */
++			if (use && item && cg_entities[body].currentState.modelindex > 0
++			    && cg_entities[body].currentState.modelindex < bg_numItems
++			    && !BG_CanItemBeGrabbed(&cg_entities[body].currentState, &cg.predictedPlayerState))
++			{
++				ETA_AimStop();
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say("You carry all you can of this, so the game leaves it here. Use some, and come back");
++				return;
++			}
++
+ 			ETA_AimStop();
+ 
+ 			/* Used: what was chosen has done its job - a switch with no
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 834a0885..0512222b 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8422,6 +8422,10 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		/* C crouches and C again stands, rather than only while held:
+ 		   taken over from the game's own crouch. */
+ 		{ 'c',          "accessibilityCrouch",        20, "+movedown" },
++		/* Where the player is, on a letter as well as F1: the tester does
++		   not use the F keys. J was let go of in the fifteenth
++		   generation, so only where it is still empty. */
++		{ 'j',          "accessibilityStatus",        21, NULL },
+ 	};
+ 
+ 	/*

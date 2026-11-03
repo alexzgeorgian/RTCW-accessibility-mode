@@ -1612,3 +1612,13 @@ to a thing (0075), the thing is marked for that area for three minutes:
 T lists it after the rest, saying "O found no way there from this area:
 it may be up high, behind a locked door, or reached from somewhere
 else".
+
+### 0077 F at what cannot be taken; where on J
+
+The tester pressed F at a weapon on the floor and nothing happened. The
+game only lets a player take ammo, health, or a weapon already carried,
+when they are not full of it (BG_CanItemBeGrabbed): F turned to it,
+pressed use, and nothing was said. Now F says "You carry all you can of
+this, so the game leaves it here. Use some, and come back", and does not
+press. And the tester does not use the F keys: where they are (F1) is on
+J as well, bind generation 21, J having been let go of in the fifteenth.
