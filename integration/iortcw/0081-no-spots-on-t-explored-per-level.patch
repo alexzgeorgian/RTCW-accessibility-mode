@@ -1,0 +1,161 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index b893fcbb..7fbecc5b 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -223,7 +223,20 @@ static void ETA_AreasDoors(void)
+  * found, tried or not. Only for one level - the one last played: coming
+  * to another level, it starts again.
+  */
+-#define ETA_EXPLORED_FILE    "accessibility_explored.txt"
++#define ETA_EXPLORED_FILE    "accessibility_explored.txt"   /* before each level had its own */
++
++/* Each level's own file: one file for them all kept only the level played
++   last, and a save of another level, loaded once, lost what had been
++   explored of this one. */
++static const char *ETA_ExploredFile(void)
++{
++	static char file[MAX_QPATH];
++	char        base[MAX_QPATH];
++
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	Com_sprintf(file, sizeof(file), "accessibility_explored_%s.txt", base);
++	return file;
++}
+ #define ETA_EXPLORED_SAVE_MS 2000
+ 
+ static qboolean eta_exploredDirty;
+@@ -244,7 +257,7 @@ static void ETA_ExploredSave(void)
+ 
+ 	eta_exploredDirty   = qfalse;
+ 	eta_exploredSavedAt = cg.time;
+-	if (trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_WRITE) < 0 || !f)
++	if (trap_FS_FOpenFile(ETA_ExploredFile(), &f, FS_WRITE) < 0 || !f)
+ 	{
+ 		return;
+ 	}
+@@ -279,17 +292,28 @@ static void ETA_ExploredLoad(void)
+ 	fileHandle_t f;
+ 	char         *line, *next, map[MAX_QPATH], kind[16];
+ 	int          length, i, j, order[ETA_AREAS_MAX];
+-	qboolean     before;
++	qboolean     before, fromBefore = qfalse;
+ 
+ 	eta_exploredDirty = qfalse;
+-	length            = trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_READ);
++	length            = trap_FS_FOpenFile(ETA_ExploredFile(), &f, FS_READ);
+ 	if (length <= 0 || !f)
+ 	{
+ 		if (f)
+ 		{
+ 			trap_FS_FCloseFile(f);
+ 		}
+-		return;
++		/* None of its own yet: the one file of before, if it was this
++		   level's - saved into its own straight away. */
++		fromBefore = qtrue;
++		length     = trap_FS_FOpenFile(ETA_EXPLORED_FILE, &f, FS_READ);
++		if (length <= 0 || !f)
++		{
++			if (f)
++			{
++				trap_FS_FCloseFile(f);
++			}
++			return;
++		}
+ 	}
+ 	if (length >= (int)sizeof(text))
+ 	{
+@@ -360,6 +384,11 @@ static void ETA_ExploredLoad(void)
+ 		}
+ 	}
+ 
++	if (fromBefore)
++	{
++		eta_exploredDirty = qtrue;
++	}
++
+ 	/* Two areas joined leave a number out: numbered again, in the same
+ 	   order. */
+ 	if (before)
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 7010bb7c..51dff616 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -517,49 +517,7 @@ static void ETA_ThingsStep(int step)
+ 				}
+ 			}
+ 		}
+-		/*
+-		 * The level's next step, from wherever the player is: the nearest
+-		 * place to walk onto that brings the soldiers the way on waits
+-		 * for, or unlocks a door, and works now - in another area too.
+-		 * The tester, past the door to the wine cellar, could not get T to
+-		 * lead there: it lists only the area's own things.
+-		 */
+ 		eta_things.nextStep = -1;
+-		if (count < ETA_THINGS_MAX)
+-		{
+-			float best = 0.0f;
+-
+-			for (i = 0; i < eta_things.count; i++)
+-			{
+-				eta_thing_t *t = &eta_things.things[i];
+-				int          spot, state;
+-				float        far;
+-
+-				if (t->done || t->kind != ETA_THING_SWITCH || Q_stricmpn(t->name, "Spot ", 5)
+-				    || CG_AccessibilityAreaHolds(area, t->point) || ETA_ThingNoWay(t, area)
+-				    || CG_AccessibilityAreaBehindLockedDoor(area, t->point))
+-				{
+-					continue;
+-				}
+-				spot  = CG_AccessibilityUnlockSpotAt(t->point);
+-				state = CG_AccessibilityUnlockState(spot);
+-				if (state == 0 || state == 2)
+-				{
+-					continue;   /* not working yet, or used */
+-				}
+-				far = Distance(ps->origin, t->point) + fabsf(t->point[2] - ps->origin[2]);
+-				if (eta_things.nextStep < 0 || far < best)
+-				{
+-					eta_things.nextStep = i;
+-					best                = far;
+-				}
+-			}
+-			if (eta_things.nextStep >= 0)
+-			{
+-				eta_things.list[count++] = eta_things.nextStep;
+-				elsewhere--;
+-			}
+-		}
+ 		eta_things.listCount = count;
+ 		eta_things.listArea  = area;
+ 		eta_things.listPos   = -1;
+@@ -752,7 +710,6 @@ void CG_AccessibilityThingsFrame(void)
+ 		eta_things.lookedAt = cg.time;
+ 		ETA_ThingsRecord();
+ 		ETA_SecretsFrame();
+-		CG_AccessibilityUnlockFrame();
+ 
+ 		/* Gone, seen gone: taken or broken. A switch is done once F has
+ 		   pressed it (CG_AccessibilityThingUsed). */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 676bd846..b65cae36 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5086,12 +5086,9 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		return qtrue;
+ 	}
+ 	index -= eta_secretCount;
+-	/* What unlocks a door no switch opens: a place to walk to, a door. */
+-	if (CG_AccessibilityUnlockSpot(index, at, name, nameSize))
+-	{
+-		*kind = ETA_MAP_SWITCH;
+-		return qtrue;
+-	}
++	/* What unlocks a door no switch opens - a place to walk to, a door -
++	   is not on T's list: the tester did not want the story given away
++	   by spots to walk onto. X still says what opens a locked door. */
+ 	return qfalse;
+ }
+ 

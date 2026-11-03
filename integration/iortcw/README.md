@@ -1660,3 +1660,17 @@ five presses. The rule no longer holds for a door F used itself. And a
 door looked at or walked into is said "Door, F opens it"
 (hud_narrator.c), not "Door" alone, which the walker heard 55 times
 against a shut one.
+
+### 0081 No spots on T; each level its own explored file
+
+The tester: "Let's not spoil the story of the game with spots." The
+places to walk onto that unlock a door or bring soldiers (0066, 0069)
+and the level's next step (0079) are no longer on T's list, and a spot
+coming to work is no longer said: T is items, switches, things to break
+and secret areas again. X still says what opens a locked door.
+
+And the explored areas were lost: one file kept them for the level
+played last only, so a save of another level loaded even once lost the
+rest. Each level has its own now, accessibility_explored_<map>.txt; one
+with none yet takes the old file's if it was that level's, and saves it
+as its own straight away.
