@@ -1647,3 +1647,16 @@ next step: Spot where soldiers come in, ahead, 11 meters. O leads
 there". The far side of a door now counts from past its slab, 20 units
 (0074 had 48): the spot behind the keep's locked door, 40 units through
 it, was taken for this side's.
+
+### 0080 F opens a door that swung shut again
+
+The tester got to the wine cellar's door and was stuck there. F, within
+15 seconds and a meter of what it last used, says "Just used. F twice
+quickly uses it again" and presses nothing - made for a button, which
+pressed again works its door back. But the castle's doors swing shut on
+their own after a moment, and on a slow walk through, the door was shut
+again and F would not open it: a walker led there by speech alone took
+five presses. The rule no longer holds for a door F used itself. And a
+door looked at or walked into is said "Door, F opens it"
+(hud_narrator.c), not "Door" alone, which the walker heard 55 times
+against a shut one.

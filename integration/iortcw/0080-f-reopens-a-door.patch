@@ -1,0 +1,29 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index ad8f42da..96991084 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1291,6 +1291,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 	   said, and nothing pressed. A thing chosen with K or J is the
+ 	   player's to use, and goes ahead. */
+ 	{
++		qboolean usedOpens;
+ 		qboolean doubled = (qboolean)(eta_use.fAt && cg.time >= eta_use.fAt
+ 		                              && cg.time - eta_use.fAt < ETA_USE_DOUBLE_MS);
+ 
+@@ -1298,7 +1299,15 @@ void CG_AccessibilityActivateDown_f(void)
+ 		/* A thing chosen with K or J goes ahead - unless it is the one
+ 		   just used: the button, still the nearest thing, was what K chose
+ 		   next, and F pressed it again. */
+-		if (!doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
++		/* Not a door used itself: one swung shut again behind a slow
++		   walk to it is opened by F again. The tester, at the wine
++		   cellar's door, heard "Just used" and was stuck. */
++		qboolean door = (qboolean)( eta_use.usedEntity >= 0 && eta_use.usedEntity < MAX_GENTITIES
++		                            && cg_entities[eta_use.usedEntity].currentState.eType == ET_MOVER
++		                            && CG_AccessibilityDoorModel(cg_entities[eta_use.usedEntity].currentState.modelindex,
++		                                                         &usedOpens) );
++
++		if (!door && !doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
+ 		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
+ 		    && Distance(cg.predictedPlayerState.origin, eta_use.usedFrom) < ETA_USE_AGAIN_NEAR
+ 		    && (!(eta_choose.held && eta_choose.byPlayer) || ETA_UseJustUsed(&eta_choose.target))

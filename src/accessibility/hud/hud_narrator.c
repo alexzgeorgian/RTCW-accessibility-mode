@@ -1054,7 +1054,9 @@ const char *ETA_HudNarrator_InteractionName(ETA_Interaction what)
     case ETA_INTERACT_NOT_USABLE:
         return "Cannot use";
     case ETA_INTERACT_DOOR:
-        return "Door";
+        /* What to do with it: walked into again and again, "Door" by
+           itself left the tester stuck at the wine cellar's. */
+        return "Door, F opens it";
     case ETA_INTERACT_DOOR_LOCKED:
         return "Locked door";
     case ETA_INTERACT_BUTTON:
