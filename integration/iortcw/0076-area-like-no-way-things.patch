@@ -1,0 +1,208 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 9eeac04a..54c43c7d 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -667,10 +667,12 @@ static void ETA_AreaDoorsText(int area, char *out, size_t size)
+ }
+ 
+ /* Each frame: the area come into, said once the player is in it. */
++static void ETA_AreaLike(int area, char *out, size_t size);
++
+ void CG_AccessibilityAreasFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	char                doors[96], things[160];
++	char                doors[96], things[160], like[64];
+ 	qboolean            first;
+ 	int                 area;
+ 
+@@ -719,8 +721,10 @@ void CG_AccessibilityAreasFrame(void)
+ 		}
+ 		ETA_AreaDoorsText(area, doors, sizeof(doors));
+ 		CG_AccessibilityThingsInArea(area, things, sizeof(things));
++		ETA_AreaLike(area, like, sizeof(like));
+ 		ETA_Speech_BeginReport();
+-		ETA_Speech_Say(va("New area, area %d. %s. %s", eta_areas.number[area], doors, things));
++		ETA_Speech_Say(va("New area, area %d%s%s. %s. %s", eta_areas.number[area], like[0] ? ", " : "", like, doors,
++		                  things));
+ 		ETA_Speech_EndReport();
+ 		return;
+ 	}
+@@ -733,11 +737,54 @@ void CG_AccessibilityAreasFrame(void)
+ 	}
+ }
+ 
++/*
++ * What an area is like, as the level gives no names to its places: the
++ * tester asked where they were, beyond an area's number and coordinates.
++ * How big - by the floor the bots' file has to stand on - and how high up
++ * in the level the player is, between the lowest floor of all the areas
++ * and the highest. "a large room, high up in the level". Empty when not
++ * known.
++ */
++static void ETA_AreaLike(int area, char *out, size_t size)
++{
++	float        low = 0.0f, high = 0.0f;
++	qboolean     any = qfalse;
++	vec3_t       mins, maxs;
++	float        floor = ETA_BspAreas_Floor(area) / ( 39.37f * 39.37f ), rise;
++	const char  *big, *where;
++	int          i;
++
++	out[0] = '\0';
++	if (floor <= 0.0f || !ETA_BspAreas_Bounds(area, mins, maxs))
++	{
++		return;
++	}
++	for (i = 0; i < eta_areas.count; i++)
++	{
++		vec3_t a, b;
++
++		if (ETA_BspAreas_Floor(i) > 0.0f && ETA_BspAreas_Bounds(i, a, b))
++		{
++			low  = !any || a[2] < low ? a[2] : low;
++			high = !any || a[2] > high ? a[2] : high;
++			any  = qtrue;
++		}
++	}
++	big = floor < 25.0f ? "a small room" : floor < 100.0f ? "a room" : floor < 300.0f ? "a large room"
++	      : "a very large space";
++	/* Where the player stands, not the area's lowest floor: a courtyard
++	   runs from its cellar doors up to its walls. */
++	rise  = high - low > 128.0f ? ( cg.predictedPlayerState.origin[2] - 24.0f - low ) / ( high - low ) : 0.5f;
++	where = high - low <= 128.0f ? "" : rise < 0.34f ? ", low down in the level"
++	        : rise < 0.67f ? ", halfway up the level" : ", high up in the level";
++	Com_sprintf(out, size, "%s%s", big, where);
++}
++
+ /* For F1: "In area 3, of 5 explored. 2 doors out, 1 to a new area". */
+ void CG_AccessibilityAreaText(char *out, size_t size)
+ {
+ 	int  area = CG_AccessibilityAreaHere();
+-	char doors[96];
++	char doors[96], like[64];
+ 
+ 	if (area < 0 || !eta_areas.number[area])
+ 	{
+@@ -745,7 +792,9 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 		return;
+ 	}
+ 	ETA_AreaDoorsText(area, doors, sizeof(doors));
+-	Com_sprintf(out, size, "In area %d, of %d explored. %s", eta_areas.number[area], eta_areas.numbered, doors);
++	ETA_AreaLike(area, like, sizeof(like));
++	Com_sprintf(out, size, "In area %d%s%s, of %d explored. %s", eta_areas.number[area], like[0] ? ", " : "", like,
++	            eta_areas.numbered, doors);
+ }
+ 
+ /* X's list holds a door out as its number, a way not yet tried as -1
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 86746d8b..9dd6f07f 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3230,6 +3230,7 @@ static void ETA_FaceTheWayNow(void)
+ 		char        what[48];
+ 
+ 		Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
++		CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+ 		ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
+ 		                  "yet. X says what opens the doors here, and T what is left to do", what));
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 0e96530a..a7be3001 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -63,8 +63,19 @@ typedef struct
+ 	eta_thingKind_t kind;
+ 	qboolean        done;
+ 	qboolean        hinted;      /* a secret area: "near" said */
++	int             noWayArea;   /* the area O found no way to it from, +1; 0 none */
++	int             noWayAt;
+ } eta_thing_t;
+ 
++/* No way there found from this area for this long: listed last, said so. */
++#define ETA_THINGS_NO_WAY_MS 180000
++
++static qboolean ETA_ThingNoWay(const eta_thing_t *thing, int area)
++{
++	return (qboolean)( thing->noWayArea && thing->noWayArea == area + 1
++	                   && cg.time - thing->noWayAt < ETA_THINGS_NO_WAY_MS && cg.time >= thing->noWayAt );
++}
++
+ static struct
+ {
+ 	eta_thing_t things[ETA_THINGS_MAX];
+@@ -190,6 +201,7 @@ static void ETA_ThingsSeed(void)
+ 		}
+ 		eta_things.things[j].done   = qfalse;
+ 		eta_things.things[j].hinted = qfalse;
++		eta_things.things[j].noWayArea = 0;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -259,6 +271,7 @@ static void ETA_ThingsRecord(void)
+ 		}
+ 		eta_things.things[j].done   = qfalse;
+ 		eta_things.things[j].hinted = qfalse;
++		eta_things.things[j].noWayArea = 0;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -372,6 +385,21 @@ void CG_AccessibilityThingsInArea(int area, char *out, size_t size)
+ }
+ 
+ /* F pressed a switch: it is done. From cg_accessibility_keys.c. */
++/* From O: no way found to a point. A thing there is marked, for this area. */
++void CG_AccessibilityThingsNoWay(const vec3_t at)
++{
++	int i, area = CG_AccessibilityAreaHere();
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		if (ETA_ThingNear(eta_things.things[i].point, at, 48.0f))
++		{
++			eta_things.things[i].noWayArea = area + 1;
++			eta_things.things[i].noWayAt   = cg.time;
++		}
++	}
++}
++
+ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ {
+ 	int i;
+@@ -451,6 +479,11 @@ static void ETA_ThingsStep(int step)
+ 				float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
+ 				float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
+ 
++				/* One O found no way to from here: after those it can
++				   lead to. */
++				fa += ETA_ThingNoWay(&eta_things.things[eta_things.list[i]], area) ? 1.0e6f : 0.0f;
++				fb += ETA_ThingNoWay(&eta_things.things[eta_things.list[j]], area) ? 1.0e6f : 0.0f;
++
+ 				if (fb < fa)
+ 				{
+ 					int t = eta_things.list[i];
+@@ -511,6 +544,12 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
+ 
++	if (!why[0] && ETA_ThingNoWay(thing, area))
++	{
++		Q_strncpyz(why, ", O found no way there from this area: it may be up high, behind a locked door, or reached "
++		           "from somewhere else", sizeof(why));
++	}
++
+ 	/* Ammo or health the player is full of stays on the floor walked
+ 	   onto: the tester was told of ammo there, and found none to take. */
+ 	if (thing->kind == ETA_THING_ITEM && thing->entityNum >= 0 && thing->entityNum < MAX_GENTITIES
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 655b9b6a..bc18a148 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2310,6 +2310,7 @@ char CG_AccessibilityDoorLive( int model );
+ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+ qboolean CG_AccessibilityMarkerUnreachable( void );
+ void CG_AccessibilityCrouch_f( void );
++void CG_AccessibilityThingsNoWay( const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
+ #define ETA_MAP_ITEM     0

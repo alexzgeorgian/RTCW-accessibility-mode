@@ -1591,3 +1591,24 @@ Three from the tester, still in the second level:
   and ammo or health the player is full of stays where it is walked
   onto (BG_CanItemBeGrabbed), so it is said "you carry all you can of
   this, so it stays here until you use some".
+
+### 0076 What an area is like; things O cannot reach
+
+The tester: why does T show things that cannot be reached, and why is
+there no saying where one is but coordinates? No map of the campaign
+names its places (no target_location in any of the 26), so an area is
+now said as what it is like: how big, by the floor the bots' file has
+to stand on (ETA_BspAreas_Floor: "a small room" under 25 square meters,
+"a room", "a large room" under 300, "a very large space"), and how high
+up in the level the player is, between the lowest and highest floor of
+all its areas ("low down", "halfway up", "high up in the level"). F1:
+"In area 3, a large room, high up in the level, of 5 explored", and the
+same on coming into a new area.
+
+T lists what the map lays out in the area, some of it out of reach from
+where the player is: a health pack on a tower top of the courtyard, 8
+meters over the highest square the search reached. When O finds no way
+to a thing (0075), the thing is marked for that area for three minutes:
+T lists it after the rest, saying "O found no way there from this area:
+it may be up high, behind a locked door, or reached from somewhere
+else".

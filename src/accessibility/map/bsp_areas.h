@@ -69,6 +69,10 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
  */
 int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFloor);
 
+/* How much floor an area has to stand on, in square units: 0 when not
+   known, as without the bots' file. */
+float ETA_BspAreas_Floor(int area);
+
 /* An area as it was numbered before ETA_BspAreas_MergeSmall: the area it is
    part of now, -1 for none. */
 int ETA_BspAreas_FromBefore(int area);

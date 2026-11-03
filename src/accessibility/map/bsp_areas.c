@@ -39,6 +39,7 @@ static int           *gLeafBox;     /* each leaf's mins and maxs, 6 to a leaf */
 static int            gPlaneCount, gNodeCount, gLeafCount, gAreaCount;
 static float          gAreaMins[ETA_MAX_AREAS][3], gAreaMaxs[ETA_MAX_AREAS][3];
 static unsigned char  gAreaHasLeaf[ETA_MAX_AREAS];
+static float          gAreaFloor[ETA_MAX_AREAS];   /* square units to stand on, from the bots' file */
 
 typedef struct
 {
@@ -595,6 +596,7 @@ static int ETA_Aas_Boxes(void)
     int j, k, settings = 0;
 
     memset(gAreaHasLeaf, 0, sizeof(gAreaHasLeaf));
+    memset(gAreaFloor, 0, sizeof(gAreaFloor));
     gAreaCount = 0;
     for (j = 1; j < gAasAreaCount; j++)
     {
@@ -616,6 +618,11 @@ static int ETA_Aas_Boxes(void)
             }
         }
         gAreaHasLeaf[area] = 1;
+        if (gAasAreas[j].flags & 1)
+        {
+            gAreaFloor[area] += ( gAasAreas[j].maxs[0] - gAasAreas[j].mins[0] )
+                                * ( gAasAreas[j].maxs[1] - gAasAreas[j].mins[1] );
+        }
         if (area + 1 > gAreaCount)
         {
             gAreaCount = area + 1;
@@ -877,6 +884,11 @@ static int ETA_Aas_At(const float point[3])
         }
     }
     return found;
+}
+
+float ETA_BspAreas_Floor(int area)
+{
+    return gAas && area >= 0 && area < gAreaCount && area < ETA_MAX_AREAS ? gAreaFloor[area] : 0.0f;
 }
 
 int ETA_BspAreas_FromBefore(int area)
