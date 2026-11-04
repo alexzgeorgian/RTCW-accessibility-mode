@@ -1912,3 +1912,15 @@ the far end is in another area: both ends of a flight are often in one
 area, and the area alone said nothing. O leads to the near end. A place
 under two meters each way - a landing, a turn of the stairs - is no
 longer said as "Small room, 1 by 1 meters".
+
+### 0099 The first station, the last, and where the level began
+
+The tester: how to know the first building, the middle station, or the
+last place to go. J named the middle station, but not which end the
+others were, and nothing named where the level begins. The top station
+of the line is now "by the upper tram station, the first", the bottom
+"by the lower tram station, the last" - the level's way out is past it
+- and within 12 meters of the level's start, on its floor, "where the
+level began". "The way goes through something to break" was said as the
+way through a breakable was looked for, and at the lower station no way
+was found after it: it is said now only once that way has been found.

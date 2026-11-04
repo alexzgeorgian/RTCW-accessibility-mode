@@ -1,0 +1,121 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 4c1d7fb7..1a705c3c 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -672,6 +672,7 @@ static int eta_routeLockedCount;
+    way, and then said. */
+ static int      eta_routeBreakables;
+ static qboolean eta_routeOpenBreakables;
++static qboolean eta_routeBreakSay;
+ 
+ static void ETA_RouteLockedDoors(void)
+ {
+@@ -1650,15 +1651,7 @@ static void ETA_RouteFrame(void)
+ 	{
+ 		eta_routeOpenBreakables = qtrue;
+ 		ETA_RoutePlanWith(qtrue);
+-		{
+-			static int saidAt = -100000;
+-
+-			if (cg.time - saidAt > 20000 || cg.time < saidAt)
+-			{
+-				saidAt = cg.time;
+-				ETA_Speech_Say("The way goes through something to break. Break it to get through: T lists it");
+-			}
+-		}
++		eta_routeBreakSay = qtrue;   /* said once the way through is found */
+ 		state = ETA_PathFinder_State();
+ 	}
+ 	/* No way round the mines at all: the way goes through, and the
+@@ -1690,6 +1683,20 @@ static void ETA_RouteFrame(void)
+ 		}
+ 	}
+ 
++	/* Through something to break, and only when that way is found: at
++	   the lower station it was said, and then no way was found at all. */
++	if (eta_routeBreakSay && state != ETA_PATH_SEARCHING)
++	{
++		static int saidAt = -100000;
++
++		eta_routeBreakSay = qfalse;
++		if (state == ETA_PATH_FOUND && eta_routeOpenBreakables && ( cg.time - saidAt > 20000 || cg.time < saidAt ))
++		{
++			saidAt = cg.time;
++			ETA_Speech_Say("The way goes through something to break. Break it to get through: T lists it");
++		}
++	}
++
+ 	if (state == ETA_PATH_FAILED
+ 	    && (cg.time - eta_route.startedAt > ETA_ROUTE_RETRY_MS || cg.time < eta_route.startedAt))
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 20395542..b7077261 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3823,6 +3823,10 @@ static qboolean ETA_ByTramWay(const vec3_t at)
+    button by it between them. Named by height: upper, middle, lower. The
+    tester, at the middle station, could not tell where they were from
+    the area's number alone. */
++/* Where the level begins. */
++static vec3_t   eta_levelStart;
++static qboolean eta_levelStartSet;
++
+ #define ETA_MAX_TRAM_STATIONS 4
+ static vec3_t eta_tramStations[ETA_MAX_TRAM_STATIONS];
+ static int    eta_tramStationCount = -1;
+@@ -3880,12 +3884,18 @@ static void ETA_TramStationsMake(void)
+ 	}
+ }
+ 
+-/* ", by the middle tram station", or nothing: where the player is. */
++/* ", by the middle tram station", or nothing: where the player is. Or
++   ", where the level began", within 12 meters of it on the same floor. */
+ void CG_AccessibilityTramStationText(const vec3_t at, char *out, size_t size)
+ {
+ 	int i, best = -1, above, below;
+ 
+ 	out[0] = '\0';
++	if (eta_levelStartSet && Distance(at, eta_levelStart) < 480.0f && fabsf(at[2] - eta_levelStart[2]) < 96.0f)
++	{
++		Q_strncpyz(out, ", where the level began", size);
++		return;
++	}
+ 	if (eta_tramStationCount < 0)
+ 	{
+ 		ETA_TramStationsMake();
+@@ -3911,8 +3921,11 @@ void CG_AccessibilityTramStationText(const vec3_t at, char *out, size_t size)
+ 		above += eta_tramStations[i][2] > eta_tramStations[best][2] + 64.0f;
+ 		below += eta_tramStations[i][2] < eta_tramStations[best][2] - 64.0f;
+ 	}
+-	Com_sprintf(out, size, ", by the %stram station",
+-	            eta_tramStationCount == 1 ? "" : !above ? "upper " : !below ? "lower " : "middle ");
++	/* The level's start is by the top of the line, and its end past the
++	   bottom: the tester could not tell the first station from the last. */
++	Com_sprintf(out, size, ", by the %stram station%s",
++	            eta_tramStationCount == 1 ? "" : !above ? "upper " : !below ? "lower " : "middle ",
++	            eta_tramStationCount == 1 ? "" : !above ? ", the first" : !below ? ", the last" : "");
+ }
+ 
+ /* A ride's box as it is now, and whether it is moving. qfalse when it is
+@@ -4207,6 +4220,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
++	eta_levelStartSet    = qfalse;
+ 	CG_AccessibilityUnlockReset();
+ 
+ 	for (;;)
+@@ -4280,6 +4294,13 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags);
+ 
++		/* Where the level begins, for "where the level began". */
++		if (!Q_stricmp(classname, "info_player_start") && origin[0] && !eta_levelStartSet)
++		{
++			sscanf(origin, "%f %f %f", &eta_levelStart[0], &eta_levelStart[1], &eta_levelStart[2]);
++			eta_levelStartSet = qtrue;
++		}
++
+ 		/* The tram's way: the corners its cable runs by, for its buttons. */
+ 		if (!Q_stricmp(classname, "path_corner") && Q_stristr(targetname, "tram") && origin[0]
+ 		    && eta_tramCornerCount < ETA_MAX_TRAM_CORNERS)
