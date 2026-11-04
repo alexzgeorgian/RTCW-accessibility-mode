@@ -1860,3 +1860,23 @@ and stopping at a turn, a wall or a door - found, on the Tram level:
 
 All nine walks reach their target now; one, from the upper station down
 past the glass, still turns back and forth at an opening.
+
+### 0096 Turns said in time; past a turn said; open doors not shut
+
+Walk tests on the Tram level, nine ways of 20 to 73 meters, with a test
+player that stops the moment it hears a turn. A turn was said 2 meters
+before it - a quarter of a second at a run - and walking on past it the
+way said "back", then the next turn the other way: round in circles.
+
+- The turn is said half a second before the player reaches it at the
+  speed they walk, and never later than 2 meters before.
+- Walked on past it, still going the way they were - more than 2
+  meters, less than 8 - "Past the turn, 2 meters back. O turns you to
+  the way", once. Turned at the corner as told, nothing is said.
+- A door standing open, or swinging, is not "A door: F opens it" when O
+  turns the player to the way: F would shut it, and the test player
+  shut one door in its own face again and again. The crosshair says
+  "Open door" or "Door, moving" for them.
+
+All nine ways are reached; the slowest of them, past the upper
+station's glass, went from 192 seconds to 99.

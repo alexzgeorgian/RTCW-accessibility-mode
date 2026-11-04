@@ -1,0 +1,158 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 63369e2d..0e33e59f 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1421,6 +1421,27 @@ void CG_AccessibilityFrame( void ) {
+ 	if ( hint != eta.hint ) {
+ 		const char *name = CG_AccessibilityHintName( hint );
+ 
++		/* A door already open, or swinging: F would shut it. */
++		if ( hint == HINT_DOOR || hint == HINT_DOOR_ROTATING ) {
++			trace_t trace;
++			vec3_t  forward, end;
++
++			AngleVectors( cg.refdefViewAngles, forward, NULL, NULL );
++			VectorMA( cg.refdef.vieworg, 160.0f, forward, end );
++			CG_Trace( &trace, cg.refdef.vieworg, NULL, NULL, end, ps->clientNum, MASK_SHOT );
++			if ( trace.fraction < 1.0f && trace.entityNum < ENTITYNUM_WORLD
++				 && cg_entities[trace.entityNum].currentState.eType == ET_MOVER ) {
++				const entityState_t *es = &cg_entities[trace.entityNum].currentState;
++
++				if ( ( es->apos.trType != TR_STATIONARY && es->apos.trDuration )
++					 || ( es->pos.trType != TR_STATIONARY && es->pos.trDuration ) ) {
++					name = "Door, moving";
++				} else if ( VectorLength( es->apos.trBase ) > 5.0f ) {
++					name = "Open door";
++				}
++			}
++		}
++
+ 		/* The crosshair slipping off the edge of a door and back is the
+ 		   same door: said again only after a pause. By the word said: a
+ 		   door's handle and the door itself are two hints, both "Door",
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 871948f3..af215af1 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2968,6 +2968,9 @@ static struct
+ 	int    switchAt;
+ 	int    turnSide;  /* the turn ahead last said */
+ 	int    turnAt;
++	vec3_t turnCorner; /* where it was, to tell the player walked on past */
++	qboolean turnPending;
++	float  turnHeading; /* which way the player was going when it was said */
+ } eta_wayCue;
+ 
+ static void ETA_WayCueSwitch(void)
+@@ -3055,12 +3058,19 @@ static const char *ETA_TurnAheadText(void)
+    tester was already metres on. */
+ #define ETA_WAYCUE_TURN_AT 80.0f
+ 
++/* Said this long before the player gets there at the speed they walk:
++   at a run, two meters were a quarter of a second, and a test player
++   that stopped as soon as it heard "Left" was still metres past it. */
++#define ETA_WAYCUE_TURN_LEAD 0.5f
++
+ static void ETA_WayCueTurn(void)
+ {
+-	float distance;
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float distance, speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
+ 	int   side;
+ 
+-	if (!CG_AccessibilityMarkerTurn(&distance, &side) || distance > ETA_WAYCUE_TURN_AT)
++	if (!CG_AccessibilityMarkerTurn(&distance, &side)
++	    || distance > MAX(ETA_WAYCUE_TURN_AT, speed * ETA_WAYCUE_TURN_LEAD))
+ 	{
+ 		return;
+ 	}
+@@ -3070,10 +3080,62 @@ static void ETA_WayCueTurn(void)
+ 	}
+ 	eta_wayCue.turnSide = side;
+ 	eta_wayCue.turnAt   = cg.time;
++	eta_wayCue.turnPending = (qboolean)( side != 2 && CG_AccessibilityMarkerSteerPoint(eta_wayCue.turnCorner) );
++	eta_wayCue.turnHeading = cg.predictedPlayerState.viewangles[YAW];
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_Speech_Say(side == 2 ? "Back" : side < 0 ? "Left" : "Right");
+ }
+ 
++/* Walked on past the turn just said: said so, once, rather than "Way
++   goes back" - the tester, and the test player, went on, were sent back,
++   went past again the other way, and went round in circles. O turns the
++   player to the way from where they are. */
++static qboolean ETA_WayCuePast(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              forward, toCorner;
++	float               far;
++
++	if (!eta_wayCue.turnPending)
++	{
++		return qfalse;
++	}
++	if (cg.time - eta_wayCue.turnAt > 6000 || cg.time < eta_wayCue.turnAt)
++	{
++		eta_wayCue.turnPending = qfalse;
++		return qfalse;
++	}
++	VectorSubtract(eta_wayCue.turnCorner, ps->origin, toCorner);
++	toCorner[2] = 0.0f;
++	far         = VectorLength(toCorner);
++	AngleVectors(ps->viewangles, forward, NULL, NULL);
++	forward[2] = 0.0f;
++	VectorNormalize(forward);
++	/* Turned at the corner, as told: the corner is behind them too, but
++	   they face another way. Past it only going on the way they were. */
++	if (fabsf(AngleNormalize180(ps->viewangles[YAW] - eta_wayCue.turnHeading)) > 40.0f)
++	{
++		eta_wayCue.turnPending = qfalse;
++		return qfalse;
++	}
++	if (far < 88.0f || DotProduct(forward, toCorner) > 0.0f)
++	{
++		return qfalse;   /* not there yet */
++	}
++	eta_wayCue.turnPending = qfalse;
++	if (far > 320.0f)
++	{
++		return qfalse;   /* gone a long way on: the way has been found again */
++	}
++	eta_wayCue.saidAt   = cg.time;
++	eta_wayCue.saidSide = 2;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("Past the turn, %d %s back. O turns you to the way",
++	                  (int)( far * ETA_QU_TO_METERS + 0.5f ) < 1 ? 1 : (int)( far * ETA_QU_TO_METERS + 0.5f ),
++	                  (int)( far * ETA_QU_TO_METERS + 0.5f ) <= 1 ? "meter" : "meters"));
++	return qtrue;
++}
++
+ static void ETA_WayCueFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3099,6 +3161,7 @@ static void ETA_WayCueFrame(void)
+ 	}
+ 
+ 	ETA_WayCueTurn();
++	ETA_WayCuePast();
+ 
+ 	/* Positive is to the left: the engine's own sense. */
+ 	rel  = AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW]);
+@@ -3326,6 +3389,18 @@ static int ETA_DoorToward(float yaw)
+ 		return -1;
+ 	}
+ 	model = cg_entities[trace.entityNum].currentState.modelindex;
++	/* Moving, or a turning door already turned open: F would shut it.
++	   A test player, told "A door: F opens it" at a door standing open,
++	   shut it in its own face, again and again. */
++	{
++		const entityState_t *es = &cg_entities[trace.entityNum].currentState;
++
++		if (( es->apos.trType != TR_STATIONARY && es->apos.trDuration ) || ( es->pos.trType != TR_STATIONARY && es->pos.trDuration )
++		    || VectorLength(es->apos.trBase) > 5.0f)
++		{
++			return -1;
++		}
++	}
+ 	return CG_AccessibilityDoorModel(model, &opens) ? trace.entityNum : -1;
+ }
+ 

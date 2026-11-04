@@ -198,9 +198,14 @@ way is told as you go:
   with the arrows until it is the high ping, and walk. While you walk
   the way it is quiet; it comes back when the way turns off to a side,
   or when you stop. Backspace takes the marker away altogether.
-- "Left", "Right" or "Back" just before the way turns, a couple of
-  metres ahead, so you can turn at the corner; and "Way goes left", "Way
-  goes right", "Way goes back" if you have walked past it.
+- "Left", "Right" or "Back" just before the way turns - about half a
+  second before you get there at the speed you walk - so you can turn at
+  the corner. Walk on past it and you hear "Past the turn, 2 meters
+  back. O turns you to the way"; "Way goes left", "Way goes right", "Way
+  goes back" when the way is off to a side.
+- At a door: "Door, F opens it" when it is shut, "Open door" when it
+  stands open - walk through, as F would shut it - and "Door, moving"
+  while it swings.
   Or press O: you are turned toward the way, as N does in 1428 - never
   into a wall, always to an opening - and hear how far, and which way
   the way goes.
