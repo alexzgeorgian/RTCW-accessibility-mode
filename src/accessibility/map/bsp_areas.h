@@ -69,6 +69,14 @@ int ETA_BspAreas_LoadAas(ETA_BspRead read, ETA_BspRestart restart, void *context
  */
 int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFloor);
 
+/* After ETA_BspAreas_MergeSmall: a room of the bots' file far too big to
+   be one place - floor over maxFloor square units, or longer than maxSpan
+   units - is cut into pieces about radius units across, never through a
+   door, each its own area, with an opening between pieces that touch.
+   On the Tram level one room ran from the first building down the whole
+   line past the lower station. Returns the number of areas. */
+int ETA_BspAreas_SplitLarge(const float (*doors)[6], int doorCount, float maxFloor, float maxSpan, float radius);
+
 /* How much floor an area has to stand on, in square units: 0 when not
    known, as without the bots' file. */
 float ETA_BspAreas_Floor(int area);

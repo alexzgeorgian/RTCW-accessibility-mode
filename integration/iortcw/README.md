@@ -1924,3 +1924,23 @@ of the line is now "by the upper tram station, the first", the bottom
 level began". "The way goes through something to break" was said as the
 way through a breakable was looked for, and at the lower station no way
 was found after it: it is said now only once that way has been found.
+
+### 0100 Areas far too big are cut into places
+
+The tester, at the middle station: "area 4 was the first building with
+the big space; now I am in the middle of the station - another place".
+The areas are the bots' rooms (their file's clusters), and a cluster is
+cut only at doors the bots must open: on the Tram level one ran from the
+first building's yard down the whole line past the lower station, 5,400
+square meters. The middle station was the first building's area, and its
+doors - a door inside one area joins no two - were on no list.
+`ETA_BspAreas_SplitLarge` (src/accessibility/map/bsp_areas.c) now cuts a
+room over 600 square meters, or longer than 60 meters, into pieces:
+grown from the biggest floor not yet taken, out to 20 meters along the
+way, never through a door, again until all of it is in a piece; each
+piece is an area, with an opening where two touch. The Tram level has 73
+areas, not 24; at the middle station, "New area, area 3, a large room,
+halfway up the level, by the middle tram station. 11 ways out", and X
+lists its doors, openings, ladders and the hatch. The areas a level
+had before are numbered again where they were cut. `accessibilityNavSweep
+areas` prints each area's box, floor and ways, `ladders` each ladder.

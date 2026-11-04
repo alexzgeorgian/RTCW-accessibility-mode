@@ -1,0 +1,93 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 85b6f0f7..dae62131 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -42,6 +42,9 @@
+ /* The least floor an area of the bots' file is a room with: 16 square
+    meters, in square units. */
+ #define ETA_AREA_ROOM_FLOOR ( 16.0f * 39.37f * 39.37f )
++#define ETA_AREA_SPLIT_FLOOR  ( 600.0f * 39.37f * 39.37f )   /* a room bigger than this is cut */
++#define ETA_AREA_SPLIT_SPAN   ( 60.0f * 39.37f )             /* or longer than this */
++#define ETA_AREA_SPLIT_RADIUS ( 20.0f * 39.37f )             /* into pieces this far across */
+ #define ETA_AREA_THINGS_NEAR 400.0f /* a thing whose area is not known, this near: here */
+ #define ETA_AREA_THROUGH    224.0f  /* led this far through a door, where the floor goes on */
+ 
+@@ -500,6 +503,14 @@ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ 		}
+ 		count = bots ? ETA_BspAreas_MergeSmall((const float (*)[6])boxes, n, ETA_AREA_ROOM_FLOOR)
+ 		        : ETA_BspAreas_SplitAtDoors((const float (*)[6])boxes, n);
++		/* A room far too big to be one place - on the Tram level, the
++		   first building's yard, the whole line and the middle station
++		   were one area - cut into pieces of about 20 meters, at doors. */
++		if (bots)
++		{
++			count = ETA_BspAreas_SplitLarge((const float (*)[6])boxes, n, ETA_AREA_SPLIT_FLOOR, ETA_AREA_SPLIT_SPAN,
++			                                ETA_AREA_SPLIT_RADIUS);
++		}
+ 	}
+ 	eta_areas.count   = count;
+ 	eta_areas.loaded  = (qboolean)(count > 1);
+@@ -1525,6 +1536,35 @@ void CG_AccessibilityAreaExits(void)
+ 	CG_AccessibilityChoose(exit->side[side], name);
+ }
+ 
++/* For the test sweep's "areas": each area, its box, its floor, and how
++   many doors it has. */
++void CG_AccessibilityAreasDump(void)
++{
++	int a, i;
++
++	for (a = 0; a < eta_areas.count && a < ETA_AREAS_MAX; a++)
++	{
++		vec3_t mins, maxs;
++		int    doors = 0, ways = 0;
++
++		if (!ETA_BspAreas_Bounds(a, mins, maxs))
++		{
++			continue;
++		}
++		for (i = 0; i < eta_areas.exitCount; i++)
++		{
++			if (eta_areas.exits[i].area[0] == a || eta_areas.exits[i].area[1] == a)
++			{
++				ways++;
++				doors += eta_areas.exits[i].model > 0;
++			}
++		}
++		CG_Printf("ETASWEEP area %d box %.0f %.0f %.0f to %.0f %.0f %.0f floor %.0f m2 ways %d doors %d\n", a,
++		          mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], ETA_BspAreas_Floor(a) / ( 39.37f * 39.37f ),
++		          ways, doors);
++	}
++}
++
+ /* For the way-finder's test sweep: one place to stand in each area, just
+    through one of its doors that opens. qfalse past the last area. */
+ qboolean CG_AccessibilityAreaSweepPoint(int index, vec3_t out, int *area)
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 1a705c3c..caea9a8e 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1093,6 +1093,11 @@ void CG_AccessibilityNavSweep_f(void)
+ 	trap_Argv(1, arg, sizeof(arg));
+ 	most = atoi(arg) > 0 ? atoi(arg) : 400;
+ 	CG_AccessibilityWorldReadNow();
++	if (!Q_stricmp(arg, "areas"))
++	{
++		CG_AccessibilityAreasDump();
++		return;
++	}
+ 	/* "ladders": each of the map's ladders, its box and the floors it joins. */
+ 	if (!Q_stricmp(arg, "ladders"))
+ 	{
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index a15ecb8b..8209ed46 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2321,6 +2321,7 @@ qboolean CG_AccessibilityRideAt( vec3_t point );
+ qboolean CG_AccessibilityTramButtonNear( const vec3_t point, float range );
+ qboolean CG_AccessibilityTramWaitsHere( void );
+ void CG_AccessibilityNavSweep_f( void );
++void CG_AccessibilityAreasDump( void );
+ void CG_AccessibilityWorldReadNow( void );
+ qboolean CG_AccessibilityAreaSweepPoint( int index, vec3_t out, int *area );
+ void CG_AccessibilityTramStationText( const vec3_t at, char *out, size_t size );

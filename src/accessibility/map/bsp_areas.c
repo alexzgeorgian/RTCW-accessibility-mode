@@ -812,6 +812,205 @@ int ETA_BspAreas_MergeSmall(const float (*doors)[6], int doorCount, float minFlo
     return count;
 }
 
+/* Whether two pieces of the bots' file touch, and not at a door. */
+static int ETA_Aas_Touch(int a, int b, const float (*doors)[6], int doorCount)
+{
+    const ETA_AasArea *x = &gAasAreas[a], *y = &gAasAreas[b];
+    float              meet[3];
+    int                k, d;
+
+    for (k = 0; k < 3; k++)
+    {
+        float lo = x->mins[k] > y->mins[k] ? x->mins[k] : y->mins[k];
+        float hi = x->maxs[k] < y->maxs[k] ? x->maxs[k] : y->maxs[k];
+
+        if (lo > hi + 2.0f)
+        {
+            return 0;
+        }
+        meet[k] = ( lo + hi ) * 0.5f;
+    }
+    for (d = 0; d < doorCount; d++)
+    {
+        if (ETA_Aas_ToBox(meet, doors[d]) < 32.0f)
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int ETA_BspAreas_SplitLarge(const float (*doors)[6], int doorCount, float maxFloor, float maxSpan, float radius)
+{
+    int   clusters = 0, c, i, j, next, added = 0;
+    int  *members, *region, *queue;
+    float *dist, *floor;
+
+    if (!gAas)
+    {
+        return gAreaCount;
+    }
+    for (i = 1; i < gAasAreaCount; i++)
+    {
+        clusters = gAasAreas[i].cluster > clusters ? gAasAreas[i].cluster : clusters;
+    }
+    next    = clusters;
+    members = (int *)calloc((size_t)gAasAreaCount, sizeof(*members));
+    region  = (int *)calloc((size_t)gAasAreaCount, sizeof(*region));
+    queue   = (int *)calloc((size_t)gAasAreaCount, sizeof(*queue));
+    dist    = (float *)calloc((size_t)gAasAreaCount, sizeof(*dist));
+    floor   = (float *)calloc((size_t)gAasAreaCount + ETA_MAX_AREAS + 1, sizeof(*floor));
+    if (!members || !region || !queue || !dist || !floor)
+    {
+        free(members); free(region); free(queue); free(dist); free(floor);
+        return gAreaCount;
+    }
+
+    for (c = 1; c <= clusters && next < ETA_MAX_AREAS - 1; c++)
+    {
+        float mins[3] = { 1e9f, 1e9f, 1e9f }, maxs[3] = { -1e9f, -1e9f, -1e9f }, total = 0.0f;
+        int   n = 0, k, left, first = 1;
+
+        for (i = 1; i < gAasAreaCount; i++)
+        {
+            if (gAasAreas[i].cluster != c)
+            {
+                continue;
+            }
+            members[n++] = i;
+            region[i]    = 0;
+            for (k = 0; k < 3; k++)
+            {
+                mins[k] = gAasAreas[i].mins[k] < mins[k] ? gAasAreas[i].mins[k] : mins[k];
+                maxs[k] = gAasAreas[i].maxs[k] > maxs[k] ? gAasAreas[i].maxs[k] : maxs[k];
+            }
+            if (gAasAreas[i].flags & 1)
+            {
+                total += ( gAasAreas[i].maxs[0] - gAasAreas[i].mins[0] ) * ( gAasAreas[i].maxs[1] - gAasAreas[i].mins[1] );
+            }
+        }
+        if (n < 2 || ( total <= maxFloor && maxs[0] - mins[0] <= maxSpan && maxs[1] - mins[1] <= maxSpan ))
+        {
+            continue;
+        }
+
+        /* Grown from the biggest floor not yet taken, out to radius along
+           the way, never through a door; again until every piece is in
+           one. The first piece keeps the room's number. */
+        left = n;
+        while (left > 0 && next < ETA_MAX_AREAS - 1)
+        {
+            int   seed = -1, head = 0, tail = 0, id;
+            float best = -1.0f;
+
+            for (j = 0; j < n; j++)
+            {
+                int   a = members[j];
+                float f = ( gAasAreas[a].flags & 1 ) ? ( gAasAreas[a].maxs[0] - gAasAreas[a].mins[0] )
+                          * ( gAasAreas[a].maxs[1] - gAasAreas[a].mins[1] ) : 0.0f;
+
+                if (!region[a] && f > best)
+                {
+                    best = f;
+                    seed = a;
+                }
+            }
+            if (seed < 0)
+            {
+                break;
+            }
+            id = first ? c : ++next;
+            first = 0;
+            region[seed] = id;
+            dist[seed]   = 0.0f;
+            queue[tail++] = seed;
+            left--;
+            while (head < tail)
+            {
+                int a = queue[head++];
+
+                for (j = 0; j < n; j++)
+                {
+                    int   b = members[j];
+                    float dx, dy, dz, d;
+
+                    if (region[b] || !ETA_Aas_Touch(a, b, doors, doorCount))
+                    {
+                        continue;
+                    }
+                    dx = gAasAreas[b].center[0] - gAasAreas[a].center[0];
+                    dy = gAasAreas[b].center[1] - gAasAreas[a].center[1];
+                    dz = gAasAreas[b].center[2] - gAasAreas[a].center[2];
+                    d  = dist[a] + (float)sqrt(dx * dx + dy * dy + dz * dz);
+                    if (d > radius)
+                    {
+                        continue;
+                    }
+                    region[b]     = id;
+                    dist[b]       = d;
+                    queue[tail++] = b;
+                    left--;
+                }
+            }
+        }
+
+        /* Each piece its new number; an opening where two pieces touch -
+           one for each two, at a floor where they meet. */
+        for (j = 0; j < n; j++)
+        {
+            if (region[members[j]])
+            {
+                gAasAreas[members[j]].cluster = region[members[j]];
+            }
+        }
+        for (j = 0; j < n; j++)
+        {
+            int a = members[j], m;
+
+            for (m = j + 1; m < n; m++)
+            {
+                int b = members[m], p, have = 0;
+                int ra = gAasAreas[a].cluster, rb = gAasAreas[b].cluster;
+                int *grown;
+
+                if (ra == rb || !( ( gAasAreas[a].flags & 1 ) || ( gAasAreas[b].flags & 1 ) )
+                    || !ETA_Aas_Touch(a, b, doors, doorCount))
+                {
+                    continue;
+                }
+                for (p = gAasPortalCount; p < gAasPortalCount + added; p++)
+                {
+                    if (( gAasPortals[p * 3 + 1] == ra && gAasPortals[p * 3 + 2] == rb )
+                        || ( gAasPortals[p * 3 + 1] == rb && gAasPortals[p * 3 + 2] == ra ))
+                    {
+                        have = 1;
+                        break;
+                    }
+                }
+                if (have)
+                {
+                    continue;
+                }
+                grown = (int *)realloc(gAasPortals, (size_t)( gAasPortalCount + added + 1 ) * 3 * sizeof(*gAasPortals));
+                if (!grown)
+                {
+                    continue;
+                }
+                gAasPortals = grown;
+                p = gAasPortalCount + added;
+                gAasPortals[p * 3]     = ( gAasAreas[a].flags & 1 ) ? a : b;
+                gAasPortals[p * 3 + 1] = ra;
+                gAasPortals[p * 3 + 2] = rb;
+                added++;
+            }
+        }
+    }
+    gAasPortalCount += added;
+    free(members); free(region); free(queue); free(dist); free(floor);
+    ETA_Aas_Boxes();
+    return gAreaCount;
+}
+
 /* The bots' area a point is in: their tree, as AAS_PointAreaNum walks it.
    0 for solid. */
 static int ETA_Aas_AreaAt(const float point[3])
