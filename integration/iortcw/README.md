@@ -1944,3 +1944,23 @@ halfway up the level, by the middle tram station. 11 ways out", and X
 lists its doors, openings, ladders and the hatch. The areas a level
 had before are numbered again where they were cut. `accessibilityNavSweep
 areas` prints each area's box, floor and ways, `ladders` each ladder.
+
+### 0101 F stays on the thing chosen; a ladder's foot off its face
+
+The tester: F turns to the nearest thing instead of the one chosen, and
+O the same. Anything to use within 3.5 meters in front was used before
+the choice was looked at - added for the tram's button before the button
+was on T - and what O led to was F's for only two minutes. Now the thing
+in reach in front comes first only with nothing chosen, or the tram; and
+the choice is F's for fifteen minutes, until it is done or another is
+chosen.
+
+Below the middle station O said "No way to tram button from here", with
+two ladders between. A ladder's foot, where the way-finder steps on and
+off it, was 16 units out from its face: the way down the platform's
+ladder landed against it, where no step could be taken, and the search
+ran out. It is 28 units out now; the way up from below the station is
+found, and a test player climbed it to the platform in 35 seconds. The
+other walks on the level were reached as before, the one past the upper
+station's jump in 34 seconds rather than 180. `accessibilityNavSweep
+route x y z x y z` prints one search, its points and their kinds.

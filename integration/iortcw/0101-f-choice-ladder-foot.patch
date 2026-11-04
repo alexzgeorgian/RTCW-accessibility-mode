@@ -1,0 +1,100 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index af215af1..5ef5b517 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1379,6 +1379,21 @@ void CG_AccessibilityActivateDown_f(void)
+ 		eyeAt[2] += cg.predictedPlayerState.viewheight;
+ 		qboolean ahead = ETA_UseReachAhead();
+ 
++		/* Only with nothing chosen, or the tram chosen: the tester,
++		   with a thing chosen on T, was turned by F to whatever stood in
++		   reach in front instead. The tram's button is on T now. */
++		{
++			vec3_t   chosenAt;
++			char     chosenName[64];
++			qboolean chosenPending;
++
++			if (ahead && CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++			    && Q_stricmpn(chosenName, "Tram,", 5) && Q_stricmpn(chosenName, "the tram", 8))
++			{
++				ahead = qfalse;
++			}
++		}
++
+ 		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending)
+ 		    && Distance(eyeAt, marker) * ETA_QU_TO_METERS > ETA_F_CLOSE_METERS && !ahead)
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index caea9a8e..895582e8 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1093,6 +1093,41 @@ void CG_AccessibilityNavSweep_f(void)
+ 	trap_Argv(1, arg, sizeof(arg));
+ 	most = atoi(arg) > 0 ? atoi(arg) : 400;
+ 	CG_AccessibilityWorldReadNow();
++	/* "route x y z x y z": one search, its state and its points. */
++	if (!Q_stricmp(arg, "route"))
++	{
++		float         start[3], goal[3], from[3], point[3];
++		char          num[16];
++		int           k, began, count;
++		ETA_PathState state;
++
++		for (k = 0; k < 3; k++)
++		{
++			trap_Argv(2 + k, num, sizeof(num));
++			from[k] = (float)atof(num);
++			trap_Argv(5 + k, num, sizeof(num));
++			goal[k] = (float)atof(num);
++		}
++		ETA_RouteLockedDoors();
++		ETA_RouteStartAt(from, start);
++		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS, qfalse);
++		began = trap_Milliseconds();
++		do
++		{
++			state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP, ETA_RouteMove, NULL);
++		}
++		while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
++		count = ETA_PathFinder_PointCount();
++		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d\n", state,
++		          start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables, ETA_PathFinder_AllTried());
++		for (k = 0; k < count; k++)
++		{
++			ETA_PathFinder_Point(k, point);
++			CG_Printf("ETASWEEP point %d kind %d %.0f %.0f %.0f\n", k, ETA_PathFinder_PointKind(k), point[0], point[1], point[2]);
++		}
++		ETA_RouteForget();
++		return;
++	}
+ 	if (!Q_stricmp(arg, "areas"))
+ 	{
+ 		CG_AccessibilityAreasDump();
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b7077261..acb3486a 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1312,7 +1312,11 @@ static void ETA_LadderLinks(void)
+ 
+ 			VectorScale(ladder->normal, sign, face);
+ 
+-			VectorMA(centre, half + 16.0f, face, foot);
++			/* A body's width and a little out from the face: 16 units
++			   put the way's square against the ladder, where no step
++			   could be taken off it - the way down the middle station's
++			   ladder onto the platform went nowhere from its foot. */
++			VectorMA(centre, half + 28.0f, face, foot);
+ 			foot[2] = ladder->mins[2] + 24.0f + 8.0f;
+ 
+ 			if (!ETA_LadderFloor(foot, 56.0f))
+@@ -4959,7 +4963,9 @@ static qboolean eta_ledSet;
+ static int      eta_ledAt;
+ static vec3_t   eta_ledPoint;
+ 
+-#define ETA_LED_MS 120000
++/* What O led to stays F's until it is done or another is chosen: two
++   minutes was too short a walk for the tester. */
++#define ETA_LED_MS 900000
+ 
+ /* A thing T or Y chose: F turns to it there. Not a door X chose, whose
+    point is in the room beyond. */
