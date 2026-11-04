@@ -1,0 +1,14 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7aa2f664..6e54ef1a 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2584,7 +2584,8 @@ void CG_AccessibilitySurroundings(void)
+ 		{
+ 			Q_strncpyz(what, cover, sizeof(what));
+ 		}
+-		else if (kind.kind != ETA_PLACE_INDOORS && kind.kind != ETA_PLACE_UPPER_FLOOR)
++		else if (kind.kind != ETA_PLACE_INDOORS && kind.kind != ETA_PLACE_UPPER_FLOOR && kind.kind != ETA_PLACE_CORRIDOR
++		         && kind.kind != ETA_PLACE_ROOM && kind.kind != ETA_PLACE_HALL)
+ 		{
+ 			/* "Outdoors, street, ..." - the kind in the middle of the
+ 			   sentence, so in lower case. */

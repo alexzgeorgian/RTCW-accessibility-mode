@@ -1816,3 +1816,18 @@ F's reach, and a ladder is not climbed while something else chosen is
 within 4 meters. With nothing chosen, or a ladder chosen on X, F climbs
 as before. At the tram's middle-station ladder, the glass chosen on T
 four meters off: F turned to the glass.
+
+### 0094 Rooms, corridors and halls
+
+The tester, told only "Indoors" wherever they were inside, asked for
+rooms and corridors said as they walk into them, as the tram is. The
+place classifier (src/accessibility/navigation/place_classifier.c), made
+for Enemy Territory's streets, now reads a place under a roof by how far
+the floor runs each way through the player: long and narrow, a corridor
+with the way it runs; wider than 10 meters both ways, a hall; else a
+room, with its size: "Corridor, north to south", "Room, 4 by 4 meters",
+"Small room, 3 by 3 meters". Rooms and halls are one place for the vote,
+a corridor another; a room through a doorway of another size - by more
+than 40 per cent and 2 meters - is said too. The map survey still sees
+them all as a building, on an upper floor or not; the status no longer
+says "Outdoors" before them.

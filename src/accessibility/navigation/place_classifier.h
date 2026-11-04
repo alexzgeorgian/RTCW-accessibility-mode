@@ -37,6 +37,9 @@ typedef enum ETA_PlaceKind
     ETA_PLACE_BALCONY,
     ETA_PLACE_ROOFTOP,
     ETA_PLACE_LEDGE,          /* the edge of a drop, solid ground underfoot */
+    ETA_PLACE_CORRIDOR,       /* under a roof: a long narrow way */
+    ETA_PLACE_ROOM,           /* under a roof: walled round */
+    ETA_PLACE_HALL,           /* under a roof: a big space */
     ETA_PLACE_COUNT
 } ETA_PlaceKind;
 
@@ -62,6 +65,8 @@ typedef struct ETA_Place
                               south-east; -1 for anything else */
     int           widthMeters;
     int           dropMeters;  /* ledges: how far down the drop beside is */
+    int           lengthMeters; /* rooms and halls: the long way across */
+    int           upper;       /* under a roof, with a storey under the floor */
 } ETA_Place;
 
 /* How the measurements are read, in Quake units (one metre is 39.37). */
@@ -70,6 +75,10 @@ typedef struct ETA_Place
 #define ETA_PLACE_STREET_UNITS     480.0f   /* narrower than this: a street */
 #define ETA_PLACE_LONG_UNITS       480.0f   /* a street or alley runs at least this far */
 #define ETA_PLACE_BALCONY_UNITS    200.0f   /* a raised place this narrow: a balcony */
+#define ETA_PLACE_CORRIDOR_UNITS   200.0f   /* under a roof, narrower than this and long: a corridor */
+#define ETA_PLACE_CORRIDOR_LONG    320.0f   /* a corridor runs at least this far */
+#define ETA_PLACE_HALL_UNITS       400.0f   /* under a roof, wider than this both ways: a hall */
+#define ETA_PLACE_SMALL_ROOM_SQ    16.0f    /* square meters: under this a small room */
 
 ETA_Place   ETA_Place_Classify(const ETA_PlaceProbe *probe);
 

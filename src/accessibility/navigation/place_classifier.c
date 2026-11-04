@@ -14,7 +14,10 @@ static const char *const gKindNames[ETA_PLACE_COUNT] =
     "upper floor",
     "balcony",
     "rooftop",
-    "ledge"
+    "ledge",
+    "corridor",
+    "room",
+    "hall"
 };
 
 static const char *const gAxisNames[4] =
@@ -56,6 +59,8 @@ ETA_Place ETA_Place_Classify(const ETA_PlaceProbe *probe)
     place.axis        = -1;
     place.widthMeters = 0;
     place.dropMeters  = 0;
+    place.lengthMeters = 0;
+    place.upper       = 0;
 
     if (!probe)
     {
@@ -83,11 +88,23 @@ ETA_Place ETA_Place_Classify(const ETA_PlaceProbe *probe)
         walls += probe->wall[d] ? 1 : 0;
     }
 
-    /* A roof over the head is a building, whatever else: on its upper
-       floor when there is a storey's worth of space under the floor. */
+    /* A roof over the head is a building, whatever else: a corridor, a
+       room or a hall, by how far the floor runs each way. The tester,
+       told only "Indoors" wherever they were, asked for rooms and
+       corridors, said as the tram is when they got into it. */
     if (!probe->skyAbove)
     {
-        place.kind = probe->airBelow ? ETA_PLACE_UPPER_FLOOR : ETA_PLACE_INDOORS;
+        place.upper = probe->airBelow ? 1 : 0;
+        if (along >= ETA_PLACE_CORRIDOR_LONG && along >= 2.5f * across && across < ETA_PLACE_CORRIDOR_UNITS)
+        {
+            place.kind        = ETA_PLACE_CORRIDOR;
+            place.axis        = (narrow + 2) % 4;
+            place.widthMeters = (int)(across * 0.0254f + 0.5f);
+            return place;
+        }
+        place.kind         = across >= ETA_PLACE_HALL_UNITS ? ETA_PLACE_HALL : ETA_PLACE_ROOM;
+        place.widthMeters  = (int)(across * 0.0254f + 0.5f);
+        place.lengthMeters = (int)(along * 0.0254f + 0.5f);
         return place;
     }
 
@@ -191,6 +208,21 @@ void ETA_Place_Text(const ETA_Place *place, char *out, size_t outSize)
     case ETA_PLACE_ROOFTOP:
         snprintf(out, outSize, "Rooftop");
         break;
+    case ETA_PLACE_CORRIDOR:
+        snprintf(out, outSize, ETA_Place_AxisName(place->axis) ? "Corridor, %s" : "Corridor",
+                 ETA_Place_AxisName(place->axis));
+        break;
+    case ETA_PLACE_ROOM:
+    case ETA_PLACE_HALL:
+    {
+        int w = place->widthMeters < 1 ? 1 : place->widthMeters;
+        int l = place->lengthMeters < w ? w : place->lengthMeters;
+
+        snprintf(out, outSize, "%s, %d by %d meters",
+                 place->kind == ETA_PLACE_HALL ? "Hall"
+                 : (float)(w * l) < ETA_PLACE_SMALL_ROOM_SQ ? "Small room" : "Room", w, l);
+        break;
+    }
     case ETA_PLACE_LEDGE:
         if (place->dropMeters >= 25)
         {
@@ -220,9 +252,23 @@ static int ETA_Place_Family(ETA_PlaceKind kind)
     case ETA_PLACE_SQUARE:
     case ETA_PLACE_OPEN:
         return 2;
+    case ETA_PLACE_ROOM:
+    case ETA_PLACE_HALL:
+        return 3;
+    case ETA_PLACE_CORRIDOR:
+        return 4;
     default:
         return 10 + (int)kind;
     }
+}
+
+/* Two sizes far enough apart to be another room: by more than 40 per
+   cent and 2 meters. */
+static int ETA_Place_OtherSize(int a, int b)
+{
+    int big = a > b ? a : b, small = a > b ? b : a;
+
+    return big - small > 2 && (float)small < 0.6f * (float)big;
 }
 
 /* Whether two places are the same, as far as news goes. */
@@ -235,7 +281,7 @@ static int ETA_Place_Same(ETA_PlaceKind kindA, int axisA, ETA_PlaceKind kindB, i
 
     /* A way that bends by one compass point is the same way; one that
        crosses it is another. */
-    if (ETA_Place_Family(kindA) == 1 && axisA >= 0 && axisB >= 0)
+    if ((ETA_Place_Family(kindA) == 1 || ETA_Place_Family(kindA) == 4) && axisA >= 0 && axisB >= 0)
     {
         return ((axisA - axisB + 4) % 4) != 2;
     }
@@ -333,7 +379,8 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
         switch (ETA_Place_Family(sample->place.kind))
         {
         case 1:
-            family[ETA_PLACE_STREET]++;
+        case 4:
+            family[ETA_Place_Family(sample->place.kind) == 1 ? ETA_PLACE_STREET : ETA_PLACE_CORRIDOR]++;
             if (sample->place.axis >= 0 && sample->place.axis < 4)
             {
                 /* A street read one compass point off still counts
@@ -345,6 +392,9 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
             break;
         case 2:
             family[ETA_PLACE_SQUARE]++;
+            break;
+        case 3:
+            family[ETA_PLACE_ROOM]++;
             break;
         default:
             family[sample->place.kind]++;
@@ -383,6 +433,10 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
     {
         best = counts[ETA_PLACE_OPEN] > counts[ETA_PLACE_SQUARE] ? ETA_PLACE_OPEN : ETA_PLACE_SQUARE;
     }
+    else if (bestFamily == ETA_PLACE_ROOM)
+    {
+        best = counts[ETA_PLACE_HALL] > counts[ETA_PLACE_ROOM] ? ETA_PLACE_HALL : ETA_PLACE_ROOM;
+    }
     else
     {
         best = bestFamily;
@@ -392,7 +446,7 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
     winner.kind = (ETA_PlaceKind)best;
     winner.axis = -1;
 
-    if (bestFamily == ETA_PLACE_STREET)
+    if (bestFamily == ETA_PLACE_STREET || bestFamily == ETA_PLACE_CORRIDOR)
     {
         for (k = 0; k < 4; k++)
         {
@@ -409,13 +463,20 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
 
         if (sample->place.kind == winner.kind)
         {
-            winner.widthMeters = sample->place.widthMeters;
-            winner.dropMeters  = sample->place.dropMeters;
+            winner.widthMeters  = sample->place.widthMeters;
+            winner.dropMeters   = sample->place.dropMeters;
+            winner.lengthMeters = sample->place.lengthMeters;
+            winner.upper        = sample->place.upper;
             break;
         }
     }
 
-    if (gSpokenSet && ETA_Place_Same(winner.kind, winner.axis, gSpoken.kind, gSpoken.axis))
+    /* Through a doorway from one room into another of a different
+       size: news, though both are rooms. */
+    if (gSpokenSet && ETA_Place_Same(winner.kind, winner.axis, gSpoken.kind, gSpoken.axis)
+        && !(ETA_Place_Family(winner.kind) == 3
+             && (ETA_Place_OtherSize(winner.widthMeters, gSpoken.widthMeters)
+                 || ETA_Place_OtherSize(winner.lengthMeters, gSpoken.lengthMeters))))
     {
         return 0;
     }
@@ -474,6 +535,12 @@ int ETA_PlaceSurvey_Add(ETA_PlaceSurvey *survey, int row, int column, const ETA_
     }
 
     survey->place[row][column][n] = *place;
+    /* The survey tells buildings from streets: a corridor, a room or a
+       hall is inside one, on an upper floor or not. */
+    if (place->kind == ETA_PLACE_CORRIDOR || place->kind == ETA_PLACE_ROOM || place->kind == ETA_PLACE_HALL)
+    {
+        survey->place[row][column][n].kind = place->upper ? ETA_PLACE_UPPER_FLOOR : ETA_PLACE_INDOORS;
+    }
     survey->floors[row][column]   = (unsigned char)(n + 1);
     return 1;
 }

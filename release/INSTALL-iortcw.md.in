@@ -258,7 +258,10 @@ While you move, you hear:
 - A wall or a thing in your way, when you are walking into it, and a
   thud or a knock as you bump into it. A step up or down, stairs, a
   drop ahead and how bad a fall it would be, and water and how deep.
-- What kind of place you are in: a room, a corridor, the open, a ledge.
+- What kind of place you walk into, under a roof: "Corridor, north to
+  south", "Room, 4 by 6 meters", "Small room, 3 by 3 meters", "Hall, 12
+  by 20 meters"; a room of another size, through a doorway, is said
+  too. Outside: a street, an alley, a square, the open, a ledge.
   And the ways that open and close to the sides as you walk.
 - Furniture, as you come up to it: a table, a bookcase, a crate.
 - Each enemy in sight within 25 meters, as a low soft double pulse,
