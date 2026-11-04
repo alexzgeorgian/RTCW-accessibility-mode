@@ -1880,3 +1880,19 @@ way said "back", then the next turn the other way: round in circles.
 
 All nine ways are reached; the slowest of them, past the upper
 station's glass, went from 192 seconds to 99.
+
+### 0097 A hatch shut over a ladder; every switch of a door
+
+The tester, at the tram's middle station: the power is down below, and
+another button opens the way down. Under the station a turning door lies
+flat over the last ladder down - a hatch - and two switches open it: one
+under it, one by the foot of the ladder above. X said that ladder as "F
+climbs it" with the hatch shut. Now a door shut across a ladder's top or
+foot is said with it: "ladder down, ahead left, 2 meters, a hatch shut
+over it: a switch opens it. O leads to the switch, then F presses it",
+and the switch is chosen as a thing, so F at it presses it rather than
+climbing the ladder beside it; a door's switch chosen by X is a thing
+for F too. Only the first thing that opened a door was kept, and the
+switch under the hatch was passed over as its own handle: now up to
+four are kept, and of those standing apart from the door the nearest
+the player is the one. Pressed, the crosshair says "Open door".

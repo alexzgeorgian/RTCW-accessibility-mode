@@ -1,0 +1,206 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 2714f486..9fa22fa0 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -879,6 +879,43 @@ static qboolean ETA_AreaLadderEnd(int entry, vec3_t at, vec3_t to)
+ 	return qtrue;
+ }
+ 
++/* A door shut over a ladder - a hatch at its top, or at its foot: its
++   model, or 0. Below the tram's middle station a hatch closes the last
++   ladder down to the power, and a switch by the ladder above opens it;
++   X said "F climbs it" with the hatch shut. */
++static int ETA_AreaLadderHatch(int entry)
++{
++	vec3_t foot, top, mins, maxs;
++	int    model;
++
++	if (!CG_AccessibilityLadderEnds(ETA_AREA_LADDER_OF(entry), foot, top))
++	{
++		return 0;
++	}
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		qboolean opens;
++		int      k;
++
++		if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens) || opens)
++		{
++			continue;
++		}
++		for (k = 0; k < 2; k++)
++		{
++			const float *end = k ? top : foot;
++
++			if (end[0] > mins[0] - 48.0f && end[0] < maxs[0] + 48.0f && end[1] > mins[1] - 48.0f
++			    && end[1] < maxs[1] + 48.0f && maxs[2] > MIN(foot[2], top[2]) - 8.0f
++			    && mins[2] < MAX(foot[2], top[2]) + 8.0f && fabsf(end[2] - ( mins[2] + maxs[2] ) * 0.5f) < 72.0f)
++			{
++				return model;
++			}
++		}
++	}
++	return 0;
++}
++
+ /* Whether a ladder's end is in the area, or by the player when the
+    areas do not reach it. */
+ static qboolean ETA_AreaLadderHere(int area, const vec3_t at)
+@@ -1192,6 +1229,37 @@ void CG_AccessibilityAreaExits(void)
+ 		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 		meters = meters < 1 ? 1 : meters;
+ 		ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++		{
++			int    hatch = ETA_AreaLadderHatch(entry);
++			vec3_t hmins, hmaxs, hmid, opener;
++			qboolean hopens;
++
++			if (hatch && CG_AccessibilityDoorBox(hatch, hmins, hmaxs, &hopens))
++			{
++				qboolean bySwitch;
++
++				VectorAdd(hmins, hmaxs, hmid);
++				VectorScale(hmid, 0.5f, hmid);
++				bySwitch = CG_AccessibilityDoorOpener(hatch, hmid, opener);
++				ETA_Speech_Say(va("%d of %d, ladder %s%s%s, %s, %d %s%s%s, a hatch shut over it%s. %s", eta_areas.listPos + 1,
++				                  eta_areas.listCount, ETA_AREA_LADDER_TOP(entry) ? "down" : "up", where[0] ? " " : "", where,
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)), meters,
++				                  meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height,
++				                  bySwitch ? ": a switch opens it" : ", opened by what happens",
++				                  bySwitch ? "O leads to the switch, then F presses it" : "O leads there"));
++				ETA_Speech_EndReport();
++				if (bySwitch)
++				{
++					CG_AccessibilityChoose(opener, "the switch that opens the hatch");
++					CG_AccessibilityChosenIsThing();   /* F presses it there, not the ladder by it */
++				}
++				else
++				{
++					CG_AccessibilityChoose(at, ETA_AREA_LADDER_TOP(entry) ? "the ladder down" : "the ladder up");
++				}
++				return;
++			}
++		}
+ 		ETA_Speech_Say(va("%d of %d, ladder %s%s%s, %s, %d %s%s%s. %s", eta_areas.listPos + 1, eta_areas.listCount,
+ 		                  ETA_AREA_LADDER_TOP(entry) ? "down" : "up", where[0] ? " " : "", where,
+ 		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)), meters,
+@@ -1282,6 +1350,10 @@ void CG_AccessibilityAreaExits(void)
+ 		if (bySwitch || bySpot)
+ 		{
+ 			CG_AccessibilityChoose(opener, bySwitch ? "the switch that opens the door" : "the spot that unlocks the door");
++			if (bySwitch)
++			{
++				CG_AccessibilityChosenIsThing();
++			}
+ 			return;
+ 		}
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index cfa530bd..4c1d7fb7 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1092,6 +1092,22 @@ void CG_AccessibilityNavSweep_f(void)
+ 	trap_Argv(1, arg, sizeof(arg));
+ 	most = atoi(arg) > 0 ? atoi(arg) : 400;
+ 	CG_AccessibilityWorldReadNow();
++	/* "ladders": each of the map's ladders, its box and the floors it joins. */
++	if (!Q_stricmp(arg, "ladders"))
++	{
++		for (i = 0; i < CG_AccessibilityLadderCount(); i++)
++		{
++			vec3_t lmins, lmaxs, foot, top;
++			qboolean joins = CG_AccessibilityLadderEnds(i, foot, top);
++
++			CG_AccessibilityMapLadder(i, lmins, lmaxs);
++			CG_Printf("ETASWEEP ladder %d box %.0f %.0f %.0f to %.0f %.0f %.0f %s %.0f %.0f %.0f to %.0f %.0f %.0f\n", i,
++			          lmins[0], lmins[1], lmins[2], lmaxs[0], lmaxs[1], lmaxs[2], joins ? "joins" : "joins nothing",
++			          joins ? foot[0] : 0, joins ? foot[1] : 0, joins ? foot[2] : 0, joins ? top[0] : 0, joins ? top[1] : 0,
++			          joins ? top[2] : 0);
++		}
++		return;
++	}
+ 	while (points < 64 && CG_AccessibilityAreaSweepPoint(points, at[points], &area[points]))
+ 	{
+ 		points++;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 81844ea8..20395542 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4072,6 +4072,12 @@ static int        eta_userCount;
+    model of the button, or of the invisible trigger wrapped round it,
+    which is what the player presses. 0 for a door opened by using it. */
+ static int eta_doorOpener[MAX_MODELS];
++/* Every thing that opens each door, up to four: a hatch below the tram's
++   middle station has a switch under it and one by the ladder above, and
++   only the first, under it, was kept - then passed over as the hatch's
++   own handle. */
++#define ETA_DOOR_OPENERS 4
++static int eta_doorOpeners[MAX_MODELS][ETA_DOOR_OPENERS];
+ 
+ /* The other way round: the door a button or a switch works, by the
+    switch's brush model. 0 for none. */
+@@ -4471,16 +4477,17 @@ static void ETA_ReadMapEntities(void)
+ 	   or an invisible trigger aimed at the door itself. Whether it stands
+ 	   apart from the door is weighed when it is asked for, once the
+ 	   models' places are known. */
++	memset(eta_doorOpeners, 0, sizeof(eta_doorOpeners));
+ 	for (i = 0; i < linkCount; i++)
+ 	{
+-		int j, k, opener = 0;
++		int j, k, opener = 0, found = 0;
+ 
+ 		if (links[i].kind != 'd' || !links[i].targetname[0] || links[i].model <= 0 || links[i].model >= MAX_MODELS)
+ 		{
+ 			continue;
+ 		}
+ 
+-		for (j = 0; j < linkCount && !opener; j++)
++		for (j = 0; j < linkCount && found < ETA_DOOR_OPENERS; j++)
+ 		{
+ 			if (links[j].kind == 'd' || Q_stricmp(links[j].target, links[i].targetname))
+ 			{
+@@ -4506,11 +4513,15 @@ static void ETA_ReadMapEntities(void)
+ 					}
+ 				}
+ 			}
++			if (opener > 0 && opener < MAX_MODELS)
++			{
++				eta_doorOpeners[links[i].model][found++] = opener;
++			}
+ 		}
+ 
+-		if (opener > 0 && opener < MAX_MODELS)
++		if (found)
+ 		{
+-			eta_doorOpener[links[i].model] = opener;
++			eta_doorOpener[links[i].model] = eta_doorOpeners[links[i].model][0];   /* the first, as before */
+ 		}
+ 	}
+ 
+@@ -6605,6 +6616,26 @@ qboolean CG_AccessibilityDoorOpener(int model, const vec3_t doorAt, vec3_t out)
+ 		return qfalse;
+ 	}
+ 
++	/* Of those that stand apart from the door, the nearest the player. */
++	{
++		int   k, best = 0;
++		float bestFar = 1.0e9f;
++
++		for (k = 0; k < ETA_DOOR_OPENERS && eta_doorOpeners[model][k]; k++)
++		{
++			const float *at = cgs.inlineModelMidpoints[eta_doorOpeners[model][k]];
++
++			if (Distance(at, doorAt) > 64.0f && Distance(at, cg.predictedPlayerState.origin) < bestFar)
++			{
++				best    = eta_doorOpeners[model][k];
++				bestFar = Distance(at, cg.predictedPlayerState.origin);
++			}
++		}
++		if (best)
++		{
++			opener = best;
++		}
++	}
+ 	VectorCopy(cgs.inlineModelMidpoints[opener], out);
+ 
+ 	return (qboolean)(Distance(out, doorAt) > 64.0f);
