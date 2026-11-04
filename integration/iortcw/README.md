@@ -1777,3 +1777,15 @@ tram's button was taken for the button: it was never listed, and as a
 dropped thing goes after 30 seconds, the button went with it. A dropped
 weapon now matches only the thing with its own entity, and nothing
 matches one that has been dropped but that very weapon, still there.
+
+### 0091 Get in the tram first, then press its button
+
+The tester found the button on the platform, pressed it, and the tram
+left without them: it goes a moment after the button is pressed, and
+the button is in reach from inside the tram. With the tram stopped by
+its button and the player not in it, T says of the button "get in the
+tram first and press it from inside: the tram leaves a moment after",
+the tram's arrival says "Get in first, then press its button from
+inside", and F at the button says so and presses nothing; F twice
+quickly presses it from the platform all the same, as calling the tram
+from there needs.

@@ -1,0 +1,108 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index a1e1f460..bea2e2ef 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1351,6 +1351,17 @@ void CG_AccessibilityActivateDown_f(void)
+ 			ETA_Speech_Say("Just used. F twice quickly uses it again");
+ 			return;
+ 		}
++
++		/* The tram's button pressed from the platform with the tram
++		   there: it would leave without the player. */
++		if (hint && !doubled && CG_AccessibilityTramWaitsHere()
++		    && CG_AccessibilityTramButtonNear(cg.predictedPlayerState.origin, 160.0f))
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("Get in the tram first, then press the button from inside: the tram leaves a moment after. "
++			               "F twice quickly presses it from here");
++			return;
++		}
+ 	}
+ 
+ 	/* A thing chosen with T or Y: F turns to that thing, not to
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index a946dcdf..a1f1fbd2 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -679,6 +679,11 @@ static void ETA_ThingsStep(int step)
+ 	{
+ 		Q_strncpyz(why, ", switched off for now", sizeof(why));
+ 	}
++	if (!why[0] && !Q_stricmpn(thing->name, "Tram button", 11) && CG_AccessibilityTramWaitsHere()
++	    && Distance(thing->point, ps->origin) < 1000.0f)
++	{
++		Q_strncpyz(why, ", get in the tram first and press it from inside: the tram leaves a moment after", sizeof(why));
++	}
+ 	if (!why[0] && thing->goneAt && thing->goneAt > cg.time)
+ 	{
+ 		Com_sprintf(why, sizeof(why), ", dropped, gone in %d seconds", ( thing->goneAt - cg.time + 999 ) / 1000);
+@@ -720,6 +725,8 @@ static void ETA_ThingsStep(int step)
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+ 		                  thing->ride ? "Walk in, and stay inside"
++		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
++		                  ? "F uses it"
+ 		                  : why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
+ 		                  ? "F does nothing with it yet"
+ 		                  : why[0] ? "Walking onto it does nothing yet"
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 33abdf93..2a261378 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3920,7 +3920,8 @@ void CG_AccessibilityRideFrame(void)
+ 			{
+ 				ETA_Speech_Say(moving ? va("The tram is leaving, %d meters, %s", meters,
+ 				                           ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle)))
+-				               : va("The tram has arrived, %d meters, %s. T finds it", meters,
++				               : va("The tram has arrived, %d meters, %s. T finds it. Get in first, then press its button "
++				                    "from inside", meters,
+ 				                    ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle))));
+ 			}
+ 		}
+@@ -4526,6 +4527,33 @@ qboolean CG_AccessibilityDoorBox(int model, vec3_t mins, vec3_t maxs, qboolean *
+ 
+ static void ETA_WorldRead(void);
+ 
++/* Whether one of the tram's buttons is this near a point. */
++qboolean CG_AccessibilityTramButtonNear(const vec3_t point, float range)
++{
++	int i;
++
++	for (i = 0; i < eta_userCount; i++)
++	{
++		if (!Q_stricmpn(eta_users[i].name, "Tram button", 11)
++		    && Distance(cgs.inlineModelMidpoints[eta_users[i].model], point) < range)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* The tram stopped by its button, and the player not in it: pressed from
++   outside, the tram leaves a moment later without them. The tester,
++   pressing it on the platform, was left behind. */
++qboolean CG_AccessibilityTramWaitsHere(void)
++{
++	vec3_t at;
++
++	return (qboolean)( CG_AccessibilityRideAt(at) && Distance(at, cg.predictedPlayerState.origin) < 800.0f
++	                   && CG_AccessibilityTramButtonNear(at, 500.0f) );
++}
++
+ /* Whether the invisible switch at a point is switched off by the level now. */
+ qboolean CG_AccessibilitySwitchOffAt(const vec3_t point)
+ {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 084d377f..f1fbf672 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2318,6 +2318,8 @@ qboolean CG_AccessibilityInRide( char *out, size_t size );
+ void CG_AccessibilityRideFrame( void );
+ qboolean CG_AccessibilityRideJustArrived( void );
+ qboolean CG_AccessibilityRideAt( vec3_t point );
++qboolean CG_AccessibilityTramButtonNear( const vec3_t point, float range );
++qboolean CG_AccessibilityTramWaitsHere( void );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
