@@ -1,0 +1,294 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index a3851d34..63369e2d 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -283,8 +283,10 @@ static const char *CG_AccessibilityAmmoText( playerState_t *ps, int weapon ) {
+ static const char *CG_AccessibilityHintName( int hint ) {
+ 	switch ( hint ) {
+ 	case HINT_ACTIVATE:             return "Something to use";
+-	case HINT_DOOR:                 return "Door";
+-	case HINT_DOOR_ROTATING:        return "Door";
++	/* With what to do: a test player walking into a closed door heard
++	   only "Door", thirty times over, and stood there. */
++	case HINT_DOOR:                 return "Door, F opens it";
++	case HINT_DOOR_ROTATING:        return "Door, F opens it";
+ 	case HINT_DOOR_LOCKED:          return "Locked door";
+ 	case HINT_DOOR_ROTATING_LOCKED: return "Locked door";
+ 	case HINT_MG42:                 return "Mounted gun";
+@@ -780,6 +782,7 @@ void CG_AccessibilityInit( void ) {
+ 	}
+ 
+ 	trap_AddCommand( "accessibilityStatus" );
++	trap_AddCommand( "accessibilityNavSweep" );
+ 	trap_AddCommand( "accessibilityObjectives" );
+ 	trap_AddCommand( "accessibilityRepeat" );
+ 	trap_AddCommand( "accessibilityStopSpeech" );
+@@ -825,6 +828,10 @@ void CG_AccessibilityShutdown( void ) {
+ 
+ /* The commands this module answers; qtrue if it did. */
+ qboolean CG_AccessibilityCommand( const char *cmd ) {
++	if ( !Q_stricmp( cmd, "accessibilityNavSweep" ) ) {
++		CG_AccessibilityNavSweep_f();
++		return qtrue;
++	}
+ 	if ( !Q_stricmp( cmd, "accessibilityStatus" ) ) {
+ 		CG_AccessibilityStatus_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilitySurroundings" ) ) {
+@@ -1420,7 +1427,7 @@ void CG_AccessibilityFrame( void ) {
+ 		   and walking through doors once said "Door" eight times over. */
+ 		const char *spoken = CG_AccessibilityHintName( eta.spokenHint );
+ 
+-		if ( name && ( !spoken || Q_stricmp( name, spoken ) || cg.time - eta.spokenHintTime > 2000 ) ) {
++		if ( name && ( !spoken || Q_stricmp( name, spoken ) || cg.time - eta.spokenHintTime > 5000 ) ) {
+ 			/* The exit shows the mission's figures as it comes in view. */
+ 			if ( hint >= HINT_EXIT && hint <= HINT_NOEXIT_FAR && CG_AccessibilityMissionStatsText()[0] ) {
+ 				CG_AccessibilitySay( va( "%s. %s", name, CG_AccessibilityMissionStatsText() ) );
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 00d28f68..2714f486 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1297,6 +1297,37 @@ void CG_AccessibilityAreaExits(void)
+ 	CG_AccessibilityChoose(exit->side[side], name);
+ }
+ 
++/* For the way-finder's test sweep: one place to stand in each area, just
++   through one of its doors that opens. qfalse past the last area. */
++qboolean CG_AccessibilityAreaSweepPoint(int index, vec3_t out, int *area)
++{
++	int a, i, n = 0;
++
++	for (a = 0; a < eta_areas.count && a < ETA_AREAS_MAX; a++)
++	{
++		for (i = 0; i < eta_areas.exitCount; i++)
++		{
++			const eta_areaExit_t *exit = &eta_areas.exits[i];
++
++			if ((exit->area[0] == a || exit->area[1] == a) && ETA_AreaExitOpens(exit))
++			{
++				break;
++			}
++		}
++		if (i == eta_areas.exitCount)
++		{
++			continue;
++		}
++		if (n++ == index)
++		{
++			VectorCopy(eta_areas.exits[i].side[eta_areas.exits[i].area[0] == a ? 0 : 1], out);
++			*area = a;
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* Where to lead to an area: where the player stood on coming into it,
+    else just through a door into it. */
+ static qboolean ETA_AreaSpot(int area, vec3_t out)
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index f89f08a8..cfa530bd 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -665,6 +665,13 @@ static struct
+ 	vec3_t       mins, maxs;   /* where it stands, and a body's width round it */
+ } eta_routeLocked[ETA_ROUTE_LOCKED_MAX];
+ static int eta_routeLockedCount;
++/* Things to break - glass, crates, boards - are in the way too, until
++   they are broken: the traces see only the map's own walls, so the way
++   went through a window, and the test player was turned to it 96 times
++   and walked into the glass. Gone through only when there is no other
++   way, and then said. */
++static int      eta_routeBreakables;
++static qboolean eta_routeOpenBreakables;
+ 
+ static void ETA_RouteLockedDoors(void)
+ {
+@@ -703,6 +710,31 @@ static void ETA_RouteLockedDoors(void)
+ 		}
+ 		eta_routeLockedCount++;
+ 	}
++
++	eta_routeBreakables = 0;
++	for (n = 0; !eta_routeOpenBreakables && cg.snap && n < cg.snap->numEntities
++	     && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++
++		if (es->eType != ET_EXPLOSIVE || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++		    || !cgs.inlineDrawModel[es->modelindex] || !es->solid)
++		{
++			continue;
++		}
++		model = es->modelindex;
++		VectorCopy(cg_entities[es->number].lerpOrigin, origin);
++		trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++		eta_routeLocked[eta_routeLockedCount].clip = trap_CM_InlineModel(model);
++		VectorCopy(origin, eta_routeLocked[eta_routeLockedCount].origin);
++		for (k = 0; k < 3; k++)
++		{
++			eta_routeLocked[eta_routeLockedCount].mins[k] = origin[k] + mins[k] - 32.0f;
++			eta_routeLocked[eta_routeLockedCount].maxs[k] = origin[k] + maxs[k] + 32.0f;
++		}
++		eta_routeLockedCount++;
++		eta_routeBreakables++;
++	}
+ }
+ 
+ /* Whether a walk from one point to another goes into a door locked shut. */
+@@ -1003,6 +1035,10 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ {
+ 	float start[3], goal[3];
+ 
++	if (!jumps)
++	{
++		eta_routeOpenBreakables = qfalse;
++	}
+ 	ETA_RouteLockedDoors();
+ 	ETA_RouteStartAt(cg.predictedPlayerState.origin, start);
+ 	goal[0]  = eta_marker.origin[0];
+@@ -1039,6 +1075,85 @@ static void ETA_RouteForget(void)
+ 	memset(&eta_route, 0, sizeof(eta_route));
+ }
+ 
++/*
++ * accessibilityNavSweep [max pairs]: for testing the way-finder. From a
++ * place in each area to a place in every other, the way is searched as O
++ * searches it, and each search printed: found, or only to the nearest
++ * square, or not at all; how long the way is against the straight line;
++ * and how long the search took. Printed "ETASWEEP" for the test harness.
++ */
++void CG_AccessibilityNavSweep_f(void)
++{
++	char     arg[16];
++	int      most, points = 0, i, j, pairs = 0, found = 0, partial = 0, failed = 0, slow = 0, detour = 0;
++	vec3_t   at[64];
++	int      area[64];
++
++	trap_Argv(1, arg, sizeof(arg));
++	most = atoi(arg) > 0 ? atoi(arg) : 400;
++	CG_AccessibilityWorldReadNow();
++	while (points < 64 && CG_AccessibilityAreaSweepPoint(points, at[points], &area[points]))
++	{
++		points++;
++	}
++	ETA_RouteLockedDoors();
++	/* "open": every door taken as open, for the way the map itself has. */
++	trap_Argv(2, arg, sizeof(arg));
++	if (!Q_stricmp(arg, "open"))
++	{
++		eta_routeLockedCount = 0;
++	}
++	trap_Argv(3, arg, sizeof(arg));
++	for (i = arg[0] ? atoi(arg) : 0; i < points && pairs < most; i++)
++	{
++		for (j = 0; j < points && pairs < most; j++)
++		{
++			float         start[3], goal[3], length = 0.0f, prev[3], point[3];
++			int           began, ms, k, count;
++			ETA_PathState state;
++
++			if (i == j)
++			{
++				continue;
++			}
++			ETA_RouteStartAt(at[i], start);
++			VectorCopy(at[j], goal);
++			ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS, qfalse);
++			began = trap_Milliseconds();
++			do
++			{
++				state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP, ETA_RouteMove, NULL);
++			}
++			while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
++			ms    = trap_Milliseconds() - began;
++			count = ETA_PathFinder_PointCount();
++			for (k = 0; k < count; k++)
++			{
++				ETA_PathFinder_Point(k, point);
++				if (k)
++				{
++					length += Distance(prev, point);
++				}
++				VectorCopy(point, prev);
++			}
++			pairs++;
++			found   += state == ETA_PATH_FOUND;
++			partial += state == ETA_PATH_PARTIAL;
++			failed  += state == ETA_PATH_FAILED || state == ETA_PATH_SEARCHING;
++			slow    += ms > 1000;
++			detour  += state == ETA_PATH_FOUND && length > 2.5f * Distance(at[i], at[j]) + 400.0f;
++			CG_Printf("ETASWEEP %s area %d (%.0f %.0f %.0f) to area %d (%.0f %.0f %.0f) way %.0f line %.0f ms %d gap %.0f\n",
++			          state == ETA_PATH_FOUND ? "found" : state == ETA_PATH_PARTIAL ? "partial"
++			          : state == ETA_PATH_FAILED ? "failed" : "timeout",
++			          area[i], at[i][0], at[i][1], at[i][2], area[j], at[j][0], at[j][1], at[j][2],
++			          length, Distance(at[i], at[j]), ms, count ? Distance(prev, at[j]) : -1.0f);
++		}
++	}
++	CG_Printf("ETASWEEP done %s: %d places, %d searches, %d found, %d partial, %d failed, %d slow, %d long detours\n",
++	          cgs.mapname, points, pairs, found, partial, failed, slow, detour);
++	ETA_RouteForget();
++}
++
+ /**
+  * @brief ", press space": the key the player jumps with, for the jump
+  * callout. Nothing when jump is on no key.
+@@ -1513,6 +1628,23 @@ static void ETA_RouteFrame(void)
+ 		ETA_RoutePlanWith(qtrue);
+ 		state = ETA_PathFinder_State();
+ 	}
++	/* No way but through something to break: through it, and said. */
++	else if (eta_route.jumps && !eta_routeOpenBreakables && eta_routeBreakables > 0
++	         && (state == ETA_PATH_FAILED || state == ETA_PATH_PARTIAL))
++	{
++		eta_routeOpenBreakables = qtrue;
++		ETA_RoutePlanWith(qtrue);
++		{
++			static int saidAt = -100000;
++
++			if (cg.time - saidAt > 20000 || cg.time < saidAt)
++			{
++				saidAt = cg.time;
++				ETA_Speech_Say("The way goes through something to break. Break it to get through: T lists it");
++			}
++		}
++		state = ETA_PathFinder_State();
++	}
+ 	/* No way round the mines at all: the way goes through, and the
+ 	   warning says where they are. */
+ 	else if (eta_route.jumps && !eta_route.throughMines && eta_routeAvoidCount > 0
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6e54ef1a..81844ea8 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5711,6 +5711,7 @@ void CG_AccessibilityWorldInit(void)
+ 	CG_AccessibilityThingsReset();
+ }
+ 
++void CG_AccessibilityWorldReadNow(void);
+ static void ETA_WorldRead(void)
+ {
+ 	if (eta_worldRead)
+@@ -6694,3 +6695,9 @@ qboolean CG_AccessibilityDoorAhead(void)
+ }
+ 
+ #endif
++
++/* The map read now, for a test command typed before the first frame. */
++void CG_AccessibilityWorldReadNow(void)
++{
++	ETA_WorldRead();
++}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index a9f75abb..a15ecb8b 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2320,6 +2320,9 @@ qboolean CG_AccessibilityRideJustArrived( void );
+ qboolean CG_AccessibilityRideAt( vec3_t point );
+ qboolean CG_AccessibilityTramButtonNear( const vec3_t point, float range );
+ qboolean CG_AccessibilityTramWaitsHere( void );
++void CG_AccessibilityNavSweep_f( void );
++void CG_AccessibilityWorldReadNow( void );
++qboolean CG_AccessibilityAreaSweepPoint( int index, vec3_t out, int *area );
+ void CG_AccessibilityTramStationText( const vec3_t at, char *out, size_t size );
+ qboolean CG_AccessibilityLadderEnds( int index, vec3_t foot, vec3_t top );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );

@@ -95,7 +95,12 @@ ETA_Place ETA_Place_Classify(const ETA_PlaceProbe *probe)
     if (!probe->skyAbove)
     {
         place.upper = probe->airBelow ? 1 : 0;
-        if (along >= ETA_PLACE_CORRIDOR_LONG && along >= 2.5f * across && across < ETA_PLACE_CORRIDOR_UNITS)
+        /* Long for its width: a corridor. One only two meters across is
+           a corridor already at twice as long as wide - "Small room, 1
+           by 8 meters" was a passage. */
+        if (across < ETA_PLACE_CORRIDOR_UNITS
+            && ((along >= ETA_PLACE_CORRIDOR_LONG && along >= 2.5f * across)
+                || (across < 80.0f && along >= 2.0f * across && along >= 160.0f)))
         {
             place.kind        = ETA_PLACE_CORRIDOR;
             place.axis        = (narrow + 2) % 4;
@@ -312,11 +317,21 @@ static int             gSampleNext;
 static ETA_Place       gSpoken;
 static int             gSpokenSet;
 
+/* The places said lately: one said again within this long is not said.
+   The tester's way along a passage between two rooms said "Room, 4 by
+   10 meters" thirty times, back and forth. */
+#define ETA_PLACE_RECENT     3
+#define ETA_PLACE_RECENT_MS  20000
+static ETA_Place       gRecent[ETA_PLACE_RECENT];
+static int             gRecentAt[ETA_PLACE_RECENT];
+static int             gRecentCount;
+
 void ETA_Place_Reset(void)
 {
     gSampleCount = 0;
     gSampleNext  = 0;
     gSpokenSet   = 0;
+    gRecentCount = 0;
 }
 
 int ETA_Place_Update(const ETA_Place *place, int nowMs)
@@ -483,6 +498,33 @@ int ETA_Place_Update(const ETA_Place *place, int nowMs)
 
     gSpoken    = winner;
     gSpokenSet = 1;
+
+    /* Said within the last little while: kept as the place, not said. */
+    for (k = 0; k < gRecentCount; k++)
+    {
+        const ETA_Place *was = &gRecent[k];
+
+        if (nowMs >= gRecentAt[k] && nowMs - gRecentAt[k] < ETA_PLACE_RECENT_MS
+            && ETA_Place_Same(winner.kind, winner.axis, was->kind, was->axis)
+            && !(ETA_Place_Family(winner.kind) == 3
+                 && (ETA_Place_OtherSize(winner.widthMeters, was->widthMeters)
+                     || ETA_Place_OtherSize(winner.lengthMeters, was->lengthMeters))))
+        {
+            gRecentAt[k] = nowMs;
+            return 0;
+        }
+    }
+    if (gRecentCount < ETA_PLACE_RECENT)
+    {
+        gRecentCount++;
+    }
+    for (k = gRecentCount - 1; k > 0; k--)
+    {
+        gRecent[k]   = gRecent[k - 1];
+        gRecentAt[k] = gRecentAt[k - 1];
+    }
+    gRecent[0]   = winner;
+    gRecentAt[0] = nowMs;
     return 1;
 }
 

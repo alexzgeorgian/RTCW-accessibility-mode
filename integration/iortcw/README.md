@@ -1831,3 +1831,32 @@ a corridor another; a room through a doorway of another size - by more
 than 40 per cent and 2 meters - is said too. The map survey still sees
 them all as a building, on an upper floor or not; the status no longer
 says "Outdoors" before them.
+
+### 0095 Walk tests: glass kept out of the way, doors said with F, places not repeated
+
+Step 1 of the navigation plan: measuring before changing.
+`accessibilityNavSweep [pairs] [open] [first]` searches the way from a
+place in each area to a place in every other, as O does, and prints an
+ETASWEEP line for each: found, partial or failed, the way's length
+against the straight line, and the time taken. On Escape1, with every
+door taken as open, all 600 ways were found, none over a quarter of a
+second: the search is sound, and what goes wrong is on the walk. Walk
+tests - a test player that follows only the speech, walking with W held
+and stopping at a turn, a wall or a door - found, on the Tram level:
+
+- The way went through breakable glass: the traces see only the map's
+  own walls. The player was turned to the window 96 times. Now every
+  solid thing to break in sight is in the way, as a door locked shut is;
+  only when there is no way round does the way go through it, said "The
+  way goes through something to break. Break it to get through: T lists
+  it", at most every 20 seconds.
+- Walking into a closed door said only "Door", thirty times, and the
+  player stood there. The crosshair's door is now "Door, F opens it",
+  and the same word again only after 5 seconds.
+- Between two rooms of different sizes, "Room, 4 by 10 meters" was said
+  thirty times. A place said in the last 20 seconds is not said again.
+- "Small room, 1 by 8 meters" was a passage: a place under two meters
+  across and at least twice as long is a corridor.
+
+All nine walks reach their target now; one, from the upper station down
+past the glass, still turns back and forth at an opening.
