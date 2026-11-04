@@ -1896,3 +1896,19 @@ for F too. Only the first thing that opened a door was kept, and the
 switch under the hatch was passed over as its own handle: now up to
 four are kept, and of those standing apart from the door the nearest
 the player is the one. Pressed, the crosshair says "Open door".
+
+### 0098 Stairs that say where they go
+
+The tester: stairs have no numbers, and which one leads where is not
+known. X listed stairs only until they were tried, as "new stairs down",
+and from the bottom of a flight walked down still said "stairs down".
+Now stairs found stay on X once tried, as the ladders do, and each is
+followed a step at a time from where it starts until the floor runs
+level, or to a wall where it turns. From the end the player is nearer
+it says which way it goes, how far, and what kind of place is at the
+other end - "stairs up, 4 meters up, to a corridor, north-east to
+south-west, right, 5 meters" - with "in area 3" or "in a new area" when
+the far end is in another area: both ends of a flight are often in one
+area, and the area alone said nothing. O leads to the near end. A place
+under two meters each way - a landing, a turn of the stairs - is no
+longer said as "Small room, 1 by 1 meters".

@@ -107,6 +107,12 @@ ETA_Place ETA_Place_Classify(const ETA_PlaceProbe *probe)
             place.widthMeters = (int)(across * 0.0254f + 0.5f);
             return place;
         }
+        /* Less than two meters each way: a landing, a turn of the stairs,
+           a corner - not a room to say. */
+        if (across < 80.0f && along < 80.0f)
+        {
+            return place;
+        }
         place.kind         = across >= ETA_PLACE_HALL_UNITS ? ETA_PLACE_HALL : ETA_PLACE_ROOM;
         place.widthMeters  = (int)(across * 0.0254f + 0.5f);
         place.lengthMeters = (int)(along * 0.0254f + 0.5f);
