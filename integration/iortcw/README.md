@@ -1757,3 +1757,13 @@ the level names "tram..." is the tram's button: named "Tram button",
 and listed by T within 30 meters wherever the areas take it to be, come
 across or not, as the tram is: "1 of 2, Tram button, switched off for
 now, ahead, 2 meters", "2 of 2, Tram, walk in, ahead, 5 meters".
+
+### 0089 The tram button stays; T made again when something new is found
+
+The tester: the button was gone from T in the tram, and the weapons of
+the soldiers taken down on the tram were not on T. A pressed switch was
+taken as done and left off T, and the tram's button is pressed again and
+again, each way: it is never taken as done now. T's list was kept for
+30 seconds unless the area changed, so things come across after T was
+pressed were left off it; a count of things come across now makes the
+list again whenever it goes up.

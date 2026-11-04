@@ -1,0 +1,68 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index b157685d..9898ba25 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -133,6 +133,8 @@ static struct
+ 	int         listCount, listPos, listArea;
+ 	int         nextStep;   /* on the list from another area: the level's next step, or -1 */
+ 	int         rideThing;  /* the tram's place among the things, +1; 0 none */
++	int         found;      /* goes up as things are come across: T's list made again */
++	int         listFound;  /* as it was when T's list was made */
+ 	int         secrets;    /* found, as the mission's figures last said */
+ 
+ 	/* The fight. */
+@@ -324,6 +326,7 @@ static void ETA_ThingsRecord(void)
+ 			{
+ 				eta_things.things[j].entityNum = list[i].entityNum;
+ 			}
++			eta_things.found += !eta_things.things[j].known;
+ 			eta_things.things[j].known = qtrue;   /* seen, as F sees it */
+ 			if (!eta_things.things[j].goneAt && ETA_ThingDropped(list[i].entityNum))
+ 			{
+@@ -358,6 +361,7 @@ static void ETA_ThingsRecord(void)
+ 		eta_things.things[j].noWayArea = 0;
+ 		eta_things.things[j].goneAt    = ETA_ThingDropped(list[i].entityNum) ? cg.time + ETA_THINGS_DROPPED_MS : 0;
+ 		eta_things.things[j].known     = qtrue;
++		eta_things.found++;
+ 		eta_things.count++;
+ 	}
+ }
+@@ -495,7 +499,8 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	{
+ 		eta_thing_t *thing = &eta_things.things[i];
+ 
+-		if (thing->kind == ETA_THING_SWITCH && !thing->done
++		/* Not the tram's button: pressed again and again, each way. */
++		if (thing->kind == ETA_THING_SWITCH && !thing->done && Q_stricmpn(thing->name, "Tram button", 11)
+ 		    && ( ( entityNum >= 0 && thing->entityNum == entityNum ) || ETA_ThingNear(thing->point, point, 64.0f) ))
+ 		{
+ 			thing->done = qtrue;
+@@ -536,8 +541,11 @@ static void ETA_ThingsStep(int step)
+ 	ETA_ThingsRecord();
+ 
+ 	area  = CG_AccessibilityAreaHere();
++	/* Made again too once something new has been come across: weapons
++	   the soldiers dropped in a fight, after T was pressed. */
+ 	fresh = (qboolean)(cg.time < eta_things.pressedAt || cg.time - eta_things.pressedAt >= ETA_THINGS_LIST_MS
+-	                   || area != eta_things.listArea || !eta_things.listCount);
++	                   || area != eta_things.listArea || !eta_things.listCount
++	                   || eta_things.found != eta_things.listFound);
+ 	eta_things.pressedAt = cg.time;
+ 
+ 	if (fresh)
+@@ -593,6 +601,7 @@ static void ETA_ThingsStep(int step)
+ 		}
+ 		eta_things.nextStep = -1;
+ 		eta_things.listCount = count;
++		eta_things.listFound = eta_things.found;
+ 		eta_things.listArea  = area;
+ 		eta_things.listPos   = -1;
+ 
+@@ -798,6 +807,7 @@ void CG_AccessibilityThingsFrame(void)
+ 			if (!eta_things.things[i].known && !eta_things.things[i].done && ETA_ThingInSight(&eta_things.things[i]))
+ 			{
+ 				eta_things.things[i].known = qtrue;
++				eta_things.found++;
+ 			}
+ 		}
+ 
