@@ -1805,3 +1805,14 @@ these ladders is not listed twice. X's list is made again after a climb
 of a floor in the same area. The tram's stations - the two ends of its
 way and a corner with a button by it - are named by height, and J and a
 new area say "by the middle tram station" within about 20 meters.
+
+### 0093 F goes to the thing chosen, not the ladder beside it
+
+The tester: whatever was chosen on T, F did something else - by a
+ladder, F climbed it. A ladder in reach and nearer than anything else
+was climbed before F looked at what T, Y or O had chosen. Now a thing
+chosen (other than a ladder) is turned to and used first when it is in
+F's reach, and a ladder is not climbed while something else chosen is
+within 4 meters. With nothing chosen, or a ladder chosen on X, F climbs
+as before. At the tram's middle-station ladder, the glass chosen on T
+four meters off: F turned to the glass.

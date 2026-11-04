@@ -1,0 +1,83 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index bea2e2ef..871948f3 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1546,6 +1546,56 @@ void CG_AccessibilityActivateDown_f(void)
+ 	count = (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && !hint)
+ 	        ? CG_AccessibilityUseTargets(list, ETA_AIM_MAX_TARGETS) : 0;
+ 
++	/* What the player chose with T or Y, before a ladder close by: the
++	   tester, by a ladder, chose a switch with T, and F climbed the ladder
++	   instead. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && !hint && count > 0)
++	{
++		vec3_t   chosenAt;
++		char     chosenName[64];
++		qboolean chosenPending;
++		qboolean chosen = (qboolean)( CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		                              && Q_stricmpn(chosenName, "the ladder", 10) );
++		int      j, pick = -1;
++		float    best = 1.0e9f;
++
++		for (j = 0; j < count; j++)
++		{
++			float score;
++
++			if (list[j].ladder || list[j].stairs || list[j].ride || list[j].enemy
++			    || list[j].meters > ETA_F_CLOSE_METERS - 0.5f)
++			{
++				continue;
++			}
++			score = chosen ? Distance(list[j].point, chosenAt) : 1.0e9f;
++			if (score > ETA_F_LED_NEAR)
++			{
++				continue;
++			}
++			if (score < best)
++			{
++				best = score;
++				pick = j;
++			}
++		}
++		if (pick >= 0)
++		{
++			eta_aim.cycleIndex = pick;
++			eta_aim.cycleAt    = cg.time;
++			if (ETA_UseInReach(&list[pick]) || list[pick].locked)
++			{
++				ETA_AimStartSnap(&list[pick], list[pick].name);
++				eta_use.pending = (qboolean)( !list[pick].locked && ETA_UseInReach(&list[pick]) );
++			}
++			else
++			{
++				ETA_AimStartFollow(&list[pick], NULL);
++			}
++			return;
++		}
++	}
++
+ 	/* A ladder within reach, nearer than anything else to use: climb it.
+ 	   The ladders on the list are the same ladders seen from further
+ 	   off, so it is weighed against the nearest thing that is not one. */
+@@ -1558,7 +1608,20 @@ void CG_AccessibilityActivateDown_f(void)
+ 		{
+ 		}
+ 
+-		if (CG_AccessibilityLadderNear(&ladder) && (other >= count || ladder.meters < list[other].meters))
++		vec3_t   chosenAt;
++		char     chosenName[64];
++		qboolean chosenPending;
++
++		/* Something else chosen close by, even one not in sight from
++		   here: not the ladder. */
++		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		    && Q_stricmpn(chosenName, "the ladder", 10)
++		    && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
++		{
++			other = -1;
++		}
++
++		if (other >= 0 && CG_AccessibilityLadderNear(&ladder) && (other >= count || ladder.meters < list[other].meters))
+ 		{
+ 			ETA_ClimbStart(&ladder);
+ 			return;
