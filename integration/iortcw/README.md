@@ -1789,3 +1789,19 @@ the tram's arrival says "Get in first, then press its button from
 inside", and F at the button says so and presses nothing; F twice
 quickly presses it from the platform all the same, as calling the tram
 from there needs.
+
+### 0092 Ladders on X; the tram's stations named
+
+The tester, at the tram's middle station, had a ladder to climb up and
+another down, and found neither on a list; nor could they tell where
+they were from "area 4". X had a ladder only as a way not yet tried,
+gone from the list once passed by. Now each ladder that joins two
+floors (its foot and top, as the way-finder links them) is on X from
+whichever end is in the area, or within 15 meters on the player's
+floor, with what is new, nearest first: "1 of 15, ladder up to a new
+area, behind left, 8 meters. O leads there, then F climbs it", "ladder
+down, ahead, 1 meter. F climbs it". A way not yet tried that is one of
+these ladders is not listed twice. X's list is made again after a climb
+of a floor in the same area. The tram's stations - the two ends of its
+way and a corner with a button by it - are named by height, and J and a
+new area say "by the middle tram station" within about 20 meters.

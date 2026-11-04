@@ -1,0 +1,410 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 7fbecc5b..00d28f68 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -66,6 +66,7 @@ static struct
+ 	int            pressedAt;
+ 	int            list[ETA_AREA_LIST_MAX];   /* X's list: what is new, then the doors back */
+ 	int            listCount, listPos, listArea, listWays;
++	float          listZ;   /* the height X's list was made at: made again a floor up or down */
+ 	/* Where the player stood on coming into each area, for the way back
+ 	   to it. */
+ 	vec3_t         spot[ETA_AREAS_MAX];
+@@ -721,7 +722,7 @@ static void ETA_AreaLike(int area, char *out, size_t size);
+ void CG_AccessibilityAreasFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	char                doors[96], things[160], like[64];
++	char                doors[96], things[160], like[128];
+ 	qboolean            first;
+ 	int                 area;
+ 
+@@ -826,14 +827,19 @@ static void ETA_AreaLike(int area, char *out, size_t size)
+ 	rise  = high - low > 128.0f ? ( cg.predictedPlayerState.origin[2] - 24.0f - low ) / ( high - low ) : 0.5f;
+ 	where = high - low <= 128.0f ? "" : rise < 0.34f ? ", low down in the level"
+ 	        : rise < 0.67f ? ", halfway up the level" : ", high up in the level";
+-	Com_sprintf(out, size, "%s%s", big, where);
++	{
++		char station[64];
++
++		CG_AccessibilityTramStationText(cg.predictedPlayerState.origin, station, sizeof(station));
++		Com_sprintf(out, size, "%s%s%s", big, where, station);
++	}
+ }
+ 
+ /* For F1: "In area 3, of 5 explored. 2 doors out, 1 to a new area". */
+ void CG_AccessibilityAreaText(char *out, size_t size)
+ {
+ 	int  area = CG_AccessibilityAreaHere();
+-	char doors[96], like[64];
++	char doors[96], like[128];
+ 
+ 	if (area < 0 || !eta_areas.number[area])
+ 	{
+@@ -849,6 +855,61 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ /* X's list holds a door out as its number, a way not yet tried as -1
+    less its number, and the nearest way in another area as this. */
+ #define ETA_AREA_ELSEWHERE  (-100000)
++/* A ladder's foot or top: this less twice its number, and one more for
++   the top. */
++#define ETA_AREA_LADDER     (-200000)
++#define ETA_AREA_IS_LADDER(e) ( (e) <= ETA_AREA_LADDER )
++#define ETA_AREA_LADDER_OF(e) ( ( ETA_AREA_LADDER - (e) ) / 2 )
++#define ETA_AREA_LADDER_TOP(e) ( ( ETA_AREA_LADDER - (e) ) % 2 )
++
++/* Where a ladder's end in X's list is, and where it goes. */
++static qboolean ETA_AreaLadderEnd(int entry, vec3_t at, vec3_t to)
++{
++	vec3_t foot, top;
++
++	if (!CG_AccessibilityLadderEnds(ETA_AREA_LADDER_OF(entry), foot, top))
++	{
++		return qfalse;
++	}
++	VectorCopy(ETA_AREA_LADDER_TOP(entry) ? top : foot, at);
++	if (to)
++	{
++		VectorCopy(ETA_AREA_LADDER_TOP(entry) ? foot : top, to);
++	}
++	return qtrue;
++}
++
++/* Whether a ladder's end is in the area, or by the player when the
++   areas do not reach it. */
++static qboolean ETA_AreaLadderHere(int area, const vec3_t at)
++{
++	const float *me = cg.predictedPlayerState.origin;
++
++	return (qboolean)( ETA_AreaOf(at) == area
++	                   || ( Distance(at, me) < 600.0f && fabsf(at[2] - me[2]) < 64.0f ) );
++}
++
++/* A way not yet tried that is one of the map's ladders, which X has as
++   ladders already. */
++static qboolean ETA_AreaWayIsLadder(const vec3_t feature, const char *word)
++{
++	int    i;
++	vec3_t foot, top;
++
++	if (Q_stricmpn(word, "Ladder", 6))
++	{
++		return qfalse;
++	}
++	for (i = 0; i < CG_AccessibilityLadderCount(); i++)
++	{
++		if (CG_AccessibilityLadderEnds(i, foot, top)
++		    && ( Distance(foot, feature) < 160.0f || Distance(top, feature) < 160.0f ))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
+ 
+ /* Whether a way not yet tried starts in the area, and is not one of its
+    doors out, which the list has already. */
+@@ -883,6 +944,10 @@ static qboolean ETA_AreaEntryAt(int entry, vec3_t at)
+ 		VectorCopy(eta_areas.exits[entry].middle, at);
+ 		return qtrue;
+ 	}
++	if (ETA_AREA_IS_LADDER(entry))
++	{
++		return ETA_AreaLadderEnd(entry, at, NULL);
++	}
+ 	return CG_AccessibilityNewWayAt(-1 - entry, at, lead, &word);
+ }
+ 
+@@ -930,7 +995,8 @@ void CG_AccessibilityAreaExits(void)
+ 	}
+ 
+ 	fresh = (qboolean)(cg.time < eta_areas.pressedAt || cg.time - eta_areas.pressedAt >= ETA_AREA_LIST_MS
+-	                   || area != eta_areas.listArea || !eta_areas.listCount);
++	                   || area != eta_areas.listArea || !eta_areas.listCount
++	                   || fabsf(ps->origin[2] - eta_areas.listZ) > 96.0f);
+ 	eta_areas.pressedAt = cg.time;
+ 
+ 	if (fresh)
+@@ -950,20 +1016,50 @@ void CG_AccessibilityAreaExits(void)
+ 		}
+ 		for (i = 0; i < CG_AccessibilityNewWayCount() && count < ETA_AREA_LIST_MAX; i++)
+ 		{
+-			if (CG_AccessibilityNewWayAt(i, at, lead, &word) && ETA_AreaNewWayHere(area, at, lead))
++			if (CG_AccessibilityNewWayAt(i, at, lead, &word) && ETA_AreaNewWayHere(area, at, lead)
++			    && !ETA_AreaWayIsLadder(at, word))
+ 			{
+ 				eta_areas.list[count++] = -1 - i;
+ 				ways++;
+ 			}
+ 		}
+-		newCount = count;
+-		for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
++		/* The ladders, up from their foot here or down from their top:
++		   always on the list, as the doors are. The tester, at the tram's
++		   middle station, had a ladder to climb and could find it on no
++		   list: one passed by had been taken as tried. */
++		for (side = 0; side < 2; side++)
+ 		{
+-			exit = &eta_areas.exits[i];
+-			if ((exit->area[0] == area || exit->area[1] == area)
+-			    && eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
++			for (i = 0; i < CG_AccessibilityLadderCount() * 2 && count < ETA_AREA_LIST_MAX; i++)
+ 			{
+-				eta_areas.list[count++] = i;
++				vec3_t to;
++				int    there;
++
++				if (!ETA_AreaLadderEnd(ETA_AREA_LADDER - i, at, to) || !ETA_AreaLadderHere(area, at))
++				{
++					continue;
++				}
++				/* With what is new, nearest first, wherever it goes: the
++				   tester, at the top of one ladder, needed the next one
++				   down, and it came after a dozen doors. */
++				there = ETA_AreaOf(to);
++				(void)there;
++				if (side == 0)
++				{
++					eta_areas.list[count++] = ETA_AREA_LADDER - i;
++				}
++			}
++			if (!side)
++			{
++				newCount = count;
++				for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
++				{
++					exit = &eta_areas.exits[i];
++					if ((exit->area[0] == area || exit->area[1] == area)
++					    && eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
++					{
++						eta_areas.list[count++] = i;
++					}
++				}
+ 			}
+ 		}
+ 		if (!newCount && count < ETA_AREA_LIST_MAX
+@@ -1006,6 +1102,7 @@ void CG_AccessibilityAreaExits(void)
+ 		}
+ 		eta_areas.listCount = count;
+ 		eta_areas.listArea  = area;
++		eta_areas.listZ     = ps->origin[2];
+ 		eta_areas.listPos   = -1;
+ 		eta_areas.listWays  = ways;
+ 		fresh_new           = newCount;
+@@ -1070,6 +1167,41 @@ void CG_AccessibilityAreaExits(void)
+ 		return;
+ 	}
+ 
++	/* A ladder: up from its foot, or down from its top. */
++	if (ETA_AREA_IS_LADDER(entry))
++	{
++		vec3_t to;
++		int    there;
++
++		VectorClear(to);
++		ETA_AreaLadderEnd(entry, at, to);
++		there = ETA_AreaOf(to);
++		if (there >= 0 && there != area && eta_areas.number[there])
++		{
++			Com_sprintf(where, sizeof(where), "back to area %d", eta_areas.number[there]);
++		}
++		else if (there >= 0 && there != area)
++		{
++			Q_strncpyz(where, "to a new area", sizeof(where));
++		}
++		else
++		{
++			where[0] = '\0';
++		}
++		VectorSubtract(at, ps->origin, delta);
++		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++		meters = meters < 1 ? 1 : meters;
++		ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++		ETA_Speech_Say(va("%d of %d, ladder %s%s%s, %s, %d %s%s%s. %s", eta_areas.listPos + 1, eta_areas.listCount,
++		                  ETA_AREA_LADDER_TOP(entry) ? "down" : "up", where[0] ? " " : "", where,
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)), meters,
++		                  meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height,
++		                  meters <= 3 ? "F climbs it" : "O leads there, then F climbs it"));
++		ETA_Speech_EndReport();
++		CG_AccessibilityChoose(at, ETA_AREA_LADDER_TOP(entry) ? "the ladder down" : "the ladder up");
++		return;
++	}
++
+ 	/* A way not yet tried, in this area. */
+ 	if (entry < 0)
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2a261378..7aa2f664 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1203,6 +1203,9 @@ static void ETA_BeaconDoors(void)
+ #define ETA_MAP_LADDERS 128
+ 
+ static ETA_BspLadder eta_mapLadders[ETA_MAP_LADDERS];
++/* Each ladder's foot and top, where it joins two floors: for X. */
++static vec3_t        eta_ladderFoot[ETA_MAP_LADDERS], eta_ladderTop[ETA_MAP_LADDERS];
++static qboolean      eta_ladderJoins[ETA_MAP_LADDERS];
+ static int           eta_mapLadderCount;
+ 
+ typedef struct
+@@ -1286,6 +1289,7 @@ static void ETA_LadderLinks(void)
+ 	int i, linked = 0;
+ 
+ 	ETA_PathFinder_ClearLinks();
++	memset(eta_ladderJoins, 0, sizeof(eta_ladderJoins));
+ 
+ 	for (i = 0; i < eta_mapLadderCount; i++)
+ 	{
+@@ -1334,6 +1338,9 @@ static void ETA_LadderLinks(void)
+ 			{
+ 				ETA_PathFinder_AddLink(foot, top, ETA_PATH_LADDER_UP);
+ 				ETA_PathFinder_AddLink(top, foot, ETA_PATH_LADDER_DOWN);
++				VectorCopy(foot, eta_ladderFoot[i]);
++				VectorCopy(top, eta_ladderTop[i]);
++				eta_ladderJoins[i] = qtrue;
+ 				linked++;
+ 				break;
+ 			}
+@@ -1411,6 +1418,19 @@ static void ETA_LoadAreas(void)
+ 	CG_AccessibilityAreasLoaded(count, qfalse);
+ }
+ 
++/* A ladder's foot and top, where it joins two floors; qfalse for one
++   that ends in mid air. */
++qboolean CG_AccessibilityLadderEnds(int index, vec3_t foot, vec3_t top)
++{
++	if (index < 0 || index >= eta_mapLadderCount || !eta_ladderJoins[index])
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_ladderFoot[index], foot);
++	VectorCopy(eta_ladderTop[index], top);
++	return qtrue;
++}
++
+ int CG_AccessibilityLadderCount(void)
+ {
+ 	return eta_mapLadderCount;
+@@ -3798,6 +3818,102 @@ static qboolean ETA_ByTramWay(const vec3_t at)
+ 	return qfalse;
+ }
+ 
++/* The tram's stations: the two ends of its way, and a corner with a
++   button by it between them. Named by height: upper, middle, lower. The
++   tester, at the middle station, could not tell where they were from
++   the area's number alone. */
++#define ETA_MAX_TRAM_STATIONS 4
++static vec3_t eta_tramStations[ETA_MAX_TRAM_STATIONS];
++static int    eta_tramStationCount = -1;
++
++static void ETA_TramStationAdd(const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_tramStationCount; i++)
++	{
++		if (Distance(eta_tramStations[i], at) < 512.0f)
++		{
++			return;
++		}
++	}
++	if (eta_tramStationCount < ETA_MAX_TRAM_STATIONS)
++	{
++		VectorCopy(at, eta_tramStations[eta_tramStationCount]);
++		eta_tramStationCount++;
++	}
++}
++
++qboolean CG_AccessibilityTramButtonNear(const vec3_t point, float range);
++
++static void ETA_TramStationsMake(void)
++{
++	int   i, j, a = -1, b = -1;
++	float far = 0.0f;
++
++	eta_tramStationCount = 0;
++	if (eta_tramCornerCount < 2)
++	{
++		return;
++	}
++	for (i = 0; i < eta_tramCornerCount; i++)
++	{
++		for (j = i + 1; j < eta_tramCornerCount; j++)
++		{
++			if (Distance(eta_tramCorners[i], eta_tramCorners[j]) > far)
++			{
++				far = Distance(eta_tramCorners[i], eta_tramCorners[j]);
++				a   = i;
++				b   = j;
++			}
++		}
++	}
++	ETA_TramStationAdd(eta_tramCorners[a]);
++	ETA_TramStationAdd(eta_tramCorners[b]);
++	for (i = 0; i < eta_tramCornerCount; i++)
++	{
++		if (CG_AccessibilityTramButtonNear(eta_tramCorners[i], 400.0f))
++		{
++			ETA_TramStationAdd(eta_tramCorners[i]);
++		}
++	}
++}
++
++/* ", by the middle tram station", or nothing: where the player is. */
++void CG_AccessibilityTramStationText(const vec3_t at, char *out, size_t size)
++{
++	int i, best = -1, above, below;
++
++	out[0] = '\0';
++	if (eta_tramStationCount < 0)
++	{
++		ETA_TramStationsMake();
++	}
++	for (i = 0; i < eta_tramStationCount; i++)
++	{
++		/* The corners are the tram's own origin, over its roof. */
++		float dx = at[0] - eta_tramStations[i][0], dy = at[1] - eta_tramStations[i][1];
++		float dz = at[2] - ( eta_tramStations[i][2] - 360.0f );
++
++		if (dx * dx + dy * dy < 768.0f * 768.0f && dz > -320.0f && dz < 320.0f)
++		{
++			best = i;
++			break;
++		}
++	}
++	if (best < 0)
++	{
++		return;
++	}
++	for (i = above = below = 0; i < eta_tramStationCount; i++)
++	{
++		above += eta_tramStations[i][2] > eta_tramStations[best][2] + 64.0f;
++		below += eta_tramStations[i][2] < eta_tramStations[best][2] - 64.0f;
++	}
++	Com_sprintf(out, size, ", by the %stram station",
++	            eta_tramStationCount == 1 ? "" : !above ? "upper " : !below ? "lower " : "middle ");
++}
++
+ /* A ride's box as it is now, and whether it is moving. qfalse when it is
+    not in the snapshot. */
+ static qboolean ETA_RideBox(int i, vec3_t mins, vec3_t maxs, qboolean *moving)
+@@ -4083,6 +4199,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_exitCount       = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
++	eta_tramStationCount = -1;
+ 	CG_AccessibilityUnlockReset();
+ 
+ 	for (;;)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f1fbf672..a9f75abb 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2320,6 +2320,8 @@ qboolean CG_AccessibilityRideJustArrived( void );
+ qboolean CG_AccessibilityRideAt( vec3_t point );
+ qboolean CG_AccessibilityTramButtonNear( const vec3_t point, float range );
+ qboolean CG_AccessibilityTramWaitsHere( void );
++void CG_AccessibilityTramStationText( const vec3_t at, char *out, size_t size );
++qboolean CG_AccessibilityLadderEnds( int index, vec3_t foot, vec3_t top );
+ qboolean CG_AccessibilityAreaBehindLockedDoor( int area, const vec3_t at );
+ const char *CG_AccessibilityUnlockWhy( int index );
+ void CG_AccessibilityUnlockFrame( void );
