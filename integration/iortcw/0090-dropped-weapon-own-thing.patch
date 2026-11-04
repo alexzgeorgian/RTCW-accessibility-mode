@@ -1,0 +1,42 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 9898ba25..a946dcdf 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -301,18 +301,33 @@ static void ETA_ThingsRecord(void)
+ 
+ 	for (i = 0; i < count; i++)
+ 	{
+-		int kind = ETA_ThingKind(&list[i]);
++		int      kind = ETA_ThingKind(&list[i]);
++		qboolean dropped;
+ 
+ 		if (kind < 0)
+ 		{
+ 			continue;
+ 		}
++		dropped = ETA_ThingDropped(list[i].entityNum);
+ 		for (j = 0; j < eta_things.count; j++)
+ 		{
+ 			eta_thing_t *thing = &eta_things.things[j];
+-
+-			if (( list[i].entityNum >= 0 && thing->entityNum == list[i].entityNum
+-			      && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME * 2.0f) )
++			qboolean    same  = (qboolean)( list[i].entityNum >= 0 && thing->entityNum == list[i].entityNum );
++
++			/* A weapon a soldier dropped is its own thing, by its entity
++			   alone: one that fell by the tram's button had been taken for
++			   the button, so was not listed, and the button went when the
++			   weapon's time was up. Nor is one gone the same as a new one
++			   the game has given its number to. */
++			if (dropped || thing->goneAt)
++			{
++				if (same && !thing->done && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME * 2.0f))
++				{
++					break;
++				}
++				continue;
++			}
++			if (( same && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME * 2.0f) )
+ 			    || ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME))
+ 			{
+ 				break;

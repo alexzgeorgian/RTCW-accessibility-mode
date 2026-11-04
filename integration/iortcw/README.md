@@ -1767,3 +1767,13 @@ again, each way: it is never taken as done now. T's list was kept for
 30 seconds unless the area changed, so things come across after T was
 pressed were left off it; a count of things come across now makes the
 list again whenever it goes up.
+
+### 0090 A dropped weapon is its own thing
+
+The tester, in the tram: the button was not on T, nor the weapons of the
+soldiers just taken down. Something seen within 48 units of a thing
+already known was taken for that thing, so a weapon dropped by the
+tram's button was taken for the button: it was never listed, and as a
+dropped thing goes after 30 seconds, the button went with it. A dropped
+weapon now matches only the thing with its own entity, and nothing
+matches one that has been dropped but that very weapon, still there.
