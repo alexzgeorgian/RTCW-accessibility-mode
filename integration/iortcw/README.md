@@ -2086,3 +2086,28 @@ to 12 meters, take 3 to 4 seconds; with nothing said in between, a climb
 sounded endless. "Climbing up" and "Climbing down" now say the height
 too, "Climbing up, 9 meters", from where the player stands to the
 ladder's other end.
+
+### 0110 Down through the hatch to the power room, and back up
+
+The tester opened the hatch over the middle station's power room and
+shot the soldier below through it, but could not get down. Four things
+stood in the way, found by climbing it in the test game:
+
+- The ladder is painted on both faces, and a clip brush covers its back:
+  the game climbs it only from the shaft. Its foot and top were put on
+  the back, behind the wall, so "climb down" walked away from the
+  hatch. A ladder's ends now go on the face a trace from in front
+  finds as a ladder, the face the game climbs.
+- At the top with the hatch open, the crosshair was on the hatch, and F
+  used it - swinging it shut - instead of climbing. Standing at a ladder
+  with an open hatch at it, F climbs.
+- At the foot, held on the ladder by the game, F said "Opening the
+  hatch" five meters below it. Only within reach of the hatch now.
+- Climbing up to the shut hatch, nothing was said for twenty seconds.
+  Held there a second, "A hatch is shut above you: F opens it". F opens
+  it while still facing the ladder - turned to the switch, a little
+  behind, the player had let go and dropped - and F again climbs on,
+  rather than "Just used".
+
+The test player then climbed up and down through the hatch three times,
+about two seconds each way, without a fall.

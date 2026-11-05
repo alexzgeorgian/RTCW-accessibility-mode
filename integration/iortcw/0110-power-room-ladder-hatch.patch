@@ -1,0 +1,282 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index b7ad8287..4650fe96 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -448,6 +448,8 @@ typedef struct
+ 	qboolean latched;   /* has been on the ladder */
+ 	int      offSince;  /* off the top of it, since */
+ 	float    startZ;
++	float    bestZ;     /* highest yet, going up */
++	int      bestAt;
+ } eta_climb_t;
+ 
+ static eta_climb_t eta_climb;
+@@ -515,6 +517,64 @@ static void ETA_ClimbStop(const char *say)
+ 	}
+ }
+ 
++/* A hatch at the ladder by the player, level with them, open: F over
++   it would only swing it shut again. The tester, at the top of the
++   middle station's ladder down to the power room with its hatch open,
++   pressed F to climb down and was never taken down it. */
++/* Whether a turning door - a hatch - is anywhere but shut: turned, or
++   moving. */
++static qboolean ETA_DoorNotShut(int model)
++{
++	int i;
++
++	for (i = 0; i < MAX_GENTITIES; i++)
++	{
++		const centity_t *cent = &cg_entities[i];
++
++		if (cent->currentValid && cent->currentState.eType == ET_MOVER && cent->currentState.modelindex == model)
++		{
++			return (qboolean)( cent->currentState.apos.trType != TR_STATIONARY || cent->currentState.pos.trType != TR_STATIONARY
++			                   || VectorLength(cent->currentState.apos.trBase) > 1.0f );
++		}
++	}
++	return qfalse;
++}
++
++static qboolean ETA_HatchAtLadder(const vec3_t at)
++{
++	const float *me = cg.predictedPlayerState.origin;
++	int         model;
++
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		vec3_t   mins, maxs;
++		qboolean opens;
++
++		if (CG_AccessibilityDoorBox(model, mins, maxs, &opens) && maxs[2] - mins[2] <= 48.0f && ETA_DoorNotShut(model)
++		    && at[0] > mins[0] - 48.0f && at[0] < maxs[0] + 48.0f && at[1] > mins[1] - 48.0f && at[1] < maxs[1] + 48.0f
++		    && mins[2] > me[2] - 96.0f && mins[2] < me[2] + 96.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* Where to look to use a hatch over the ladder: up, still facing the
++   ladder, and not straight up, which the view never reaches. Turned to
++   the switch's own spot, a little behind, the test player turned off
++   the ladder and fell back to the floor. */
++static void ETA_HatchAimPoint(const vec3_t above, vec3_t point)
++{
++	vec3_t forward;
++
++	AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
++	forward[2] = 0.0f;
++	VectorNormalize(forward);
++	VectorMA(cg.predictedPlayerState.origin, 16.0f, forward, point);
++	point[2] = above[2] + 4.0f;
++}
++
+ static void ETA_ClimbStart(const etaLadder_t *ladder)
+ {
+ 	if (eta_turn.step)
+@@ -529,6 +589,8 @@ static void ETA_ClimbStart(const etaLadder_t *ladder)
+ 	eta_climb.behind  = ladder->behind;
+ 	eta_climb.started = cg.time;
+ 	eta_climb.startZ  = cg.predictedPlayerState.origin[2];
++	eta_climb.bestZ   = eta_climb.startZ;
++	eta_climb.bestAt  = cg.time;
+ 	VectorCopy(ladder->point, eta_climb.point);
+ 	VectorCopy(ladder->normal, eta_climb.normal);
+ 
+@@ -602,6 +664,25 @@ static void ETA_ClimbFrame(void)
+ 		eta_climb.latched = qtrue;
+ 	}
+ 
++	/* Going up, and no higher for a second: held under a hatch shut over
++	   the ladder - said then, not after the twenty seconds the climb
++	   could last. */
++	if (eta_climb.goesUp && ps->origin[2] > eta_climb.bestZ + 4.0f)
++	{
++		eta_climb.bestZ  = ps->origin[2];
++		eta_climb.bestAt = cg.time;
++	}
++	else if (eta_climb.goesUp && eta_climb.latched && onLadder && cg.time - eta_climb.bestAt > 1000)
++	{
++		vec3_t above;
++
++		if (CG_AccessibilityHatchSwitchAbove(above))
++		{
++			ETA_ClimbStop("A hatch is shut above you: F opens it");
++			return;
++		}
++	}
++
+ 	if (!eta_climb.latched && cg.time - eta_climb.started > ETA_CLIMB_GRAB_MS)
+ 	{
+ 		ETA_ClimbStop("Could not get onto the ladder");
+@@ -1377,6 +1458,19 @@ void CG_AccessibilityActivateDown_f(void)
+ 	                  && cg.cursorHintTime != 0 && cg.cursorHintFade > 0
+ 	                  && cg.time - cg.cursorHintTime < cg.cursorHintFade);
+ 
++	/* On the hatch at a ladder in reach, standing: the ladder, not the
++	   hatch. */
++	if (hint && !eta_climb.active && cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL
++	    && cg.predictedPlayerState.groundEntityNum != ENTITYNUM_NONE)
++	{
++		etaLadder_t atLadder;
++
++		if (CG_AccessibilityLadderNear(&atLadder) && atLadder.meters <= 1.5f && ETA_HatchAtLadder(atLadder.point))
++		{
++			hint = qfalse;
++		}
++	}
++
+ 	/* Pressed while climbing: stop - and under a hatch shut over the
+ 	   ladder, open it: the tester, climbing up out of the middle
+ 	   station's power room, had no key that pressed the hatch's switch
+@@ -1392,7 +1486,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 			ETA_ClimbStop("Opening the hatch");
+ 			memset(&hatch, 0, sizeof(hatch));
+ 			hatch.entityNum = -1;
+-			VectorCopy(above, hatch.point);
++			ETA_HatchAimPoint(above, hatch.point);
+ 			hatch.meters = Distance(cg.predictedPlayerState.origin, above) * ETA_QU_TO_METERS;
+ 			Q_strncpyz(hatch.name, "Hatch", sizeof(hatch.name));
+ 			ETA_AimStartSnap(&hatch, NULL);
+@@ -1409,13 +1503,17 @@ void CG_AccessibilityActivateDown_f(void)
+ 	{
+ 		vec3_t above;
+ 
+-		if (CG_AccessibilityHatchSwitchAbove(above))
++		/* Up by it, in reach: at the ladder's foot, held on the ladder
++		   by the game, F climbs - the tester, at the bottom of the power
++		   room's ladder, heard "Opening the hatch" five meters below it. */
++		if (CG_AccessibilityHatchSwitchAbove(above)
++		    && above[2] - (cg.predictedPlayerState.origin[2] + cg.predictedPlayerState.viewheight) < 72.0f)
+ 		{
+ 			etaAimTarget_t hatch;
+ 
+ 			memset(&hatch, 0, sizeof(hatch));
+ 			hatch.entityNum = -1;
+-			VectorCopy(above, hatch.point);
++			ETA_HatchAimPoint(above, hatch.point);
+ 			hatch.meters = Distance(cg.predictedPlayerState.origin, above) * ETA_QU_TO_METERS;
+ 			Q_strncpyz(hatch.name, "Hatch", sizeof(hatch.name));
+ 			ETA_Speech_Say("Opening the hatch");
+@@ -1425,6 +1523,24 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* Held on a ladder, off the ground: F climbs on up - before "Just
++	   used": the test player, opening the hatch over the power room's
++	   ladder from it, heard "Just used" at the next F and stayed there. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL
++	    && (cg.predictedPlayerState.pm_flags & PMF_LADDER)
++	    && cg.predictedPlayerState.groundEntityNum == ENTITYNUM_NONE)
++	{
++		etaLadder_t ladder;
++
++		if (CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 1.5f)
++		{
++			ladder.goesUp = qtrue;
++			ladder.behind = qfalse;
++			ETA_ClimbStart(&ladder);
++			return;
++		}
++	}
++
+ 	/* The way goes up or down the ladder here, as "Ladder here: F
+ 	   climbs" said: F climbs it, before anything else F would turn to.
+ 	   A test player heard it, pressed F, and was only turned to the
+@@ -1464,6 +1580,15 @@ void CG_AccessibilityActivateDown_f(void)
+ 		   the tram each way in turn, and the tester, back at one after
+ 		   falling from the tram, could not press it again. */
+ 		qboolean doorSwitch = CG_AccessibilitySwitchOpensDoorAt(eta_use.usedPoint);
++		etaLadder_t besideLadder;
++
++		/* Not with a ladder in reach: F climbs it. The test player, up
++		   through the hatch they had just opened, heard "Ladder down: F
++		   climbs", and F said "Just used". */
++		if (doorSwitch && CG_AccessibilityLadderNear(&besideLadder) && besideLadder.meters <= 1.5f)
++		{
++			doorSwitch = qfalse;
++		}
+ 
+ 		if (!door && doorSwitch && !doubled && eta_use.usedAt && cg.time >= eta_use.usedAt
+ 		    && cg.time - eta_use.usedAt < ETA_USE_AGAIN_MS
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index fa09bc8d..421e00e1 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1272,6 +1272,36 @@ static qboolean ETA_LadderFloor(vec3_t point, float drop)
+ 	return qtrue;
+ }
+ 
++/**
++ * @brief Whether the game climbs a ladder from this face: something in
++ *        front of the painted face - a clip brush over it - stops the
++ *        player before it, and the ladder is climbed from the other side.
++ *        The middle station's ladder down to the power room has a clip
++ *        over its back: its foot was put behind it, out of the shaft, and
++ *        the tester at the open hatch could not get down it.
++ */
++static qboolean ETA_LadderFaceClimbed(const ETA_BspLadder *ladder, const vec3_t centre, float half, const vec3_t face)
++{
++	trace_t trace;
++	vec3_t  from, to;
++	float   z;
++
++	for (z = 0.25f; z < 1.0f; z += 0.25f)
++	{
++		VectorMA(centre, half + 40.0f, face, from);
++		from[2] = ladder->mins[2] + (ladder->maxs[2] - ladder->mins[2]) * z;
++		VectorMA(centre, -half, face, to);
++		to[2] = from[2];
++		trap_CM_BoxTrace(&trace, from, to, NULL, NULL, 0, MASK_PLAYERSOLID);
++		if (!trace.startsolid && trace.fraction < 1.0f && (trace.surfaceFlags & SURF_LADDER)
++		    && DotProduct(trace.plane.normal, face) > 0.7f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /**
+  * @brief Each ladder's foot and top, handed to the way-finder as links.
+  *
+@@ -1297,12 +1327,24 @@ static void ETA_LadderLinks(void)
+ 		int                 axis    = Q_fabs(ladder->normal[0]) > 0.5f ? 0 : 1;
+ 		float               half    = (ladder->maxs[axis] - ladder->mins[axis]) * 0.5f;
+ 		vec3_t              centre;
+-		int                 side;
++		int                 side, sides = ladder->oneFace ? 1 : 2;
++		qboolean            climbed[2] = { qfalse, qfalse }, any = qfalse;
+ 
+ 		VectorAdd(ladder->mins, ladder->maxs, centre);
+ 		VectorScale(centre, 0.5f, centre);
+ 
+-		for (side = 0; side < (ladder->oneFace ? 1 : 2); side++)
++		for (side = 0; side < sides; side++)
++		{
++			vec3_t face;
++
++			VectorScale(ladder->normal, side ? -1.0f : 1.0f, face);
++			climbed[side] = ETA_LadderFaceClimbed(ladder, centre, half, face);
++			any           = (qboolean)( any || climbed[side] );
++		}
++
++		/* The faces the game climbs, and only when it climbs none of
++		   them - a ladder this test misses - any face. */
++		for (side = 0; side < sides; side++)
+ 		{
+ 			float  sign = side ? -1.0f : 1.0f;
+ 			vec3_t face, foot, top;
+@@ -1310,6 +1352,10 @@ static void ETA_LadderLinks(void)
+ 			float  reach;
+ 			qboolean found = qfalse;
+ 
++			if (any && !climbed[side])
++			{
++				continue;
++			}
+ 			VectorScale(ladder->normal, sign, face);
+ 
+ 			/* A body's width and a little out from the face: 16 units
