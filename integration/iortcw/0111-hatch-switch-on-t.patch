@@ -1,0 +1,190 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index a1f1fbd2..0c82c69d 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -174,7 +174,8 @@ static int ETA_ThingKind(const etaAimTarget_t *target)
+ 			return es->frame == 1 ? ETA_THING_SWITCH : -1;
+ 		case ET_MOVER:
+ 			/* A door is a way; a button is a switch. */
+-			return Q_stristr(target->name, "door") && !Q_stristr(target->name, "for a door") ? -1 : ETA_THING_SWITCH;
++			return Q_stristr(target->name, "door") && !Q_stristr(target->name, "for a door") && !Q_stristr(target->name, "for the hatch")
++			       ? -1 : ETA_THING_SWITCH;
+ 		default:
+ 			return -1;
+ 		}
+@@ -365,6 +366,10 @@ static void ETA_ThingsRecord(void)
+ 			{
+ 				at[strlen(" for a door")] = '\0';
+ 			}
++			else if (( at = (char *)Q_stristr(eta_things.things[j].name, " for the hatch") ) != NULL)
++			{
++				at[strlen(" for the hatch")] = '\0';
++			}
+ 		}
+ 		eta_things.things[j].kind = (eta_thingKind_t)kind;
+ 		if (kind == ETA_THING_TREASURE)
+@@ -413,6 +418,50 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+ 	return qfalse;
+ }
+ 
++/* Close by and in sight: on the list here, whatever area the map puts
++   it in. The switch that opens the middle station's hatch is set in the
++   wall of the room the tester stood in, a meter off, and its middle,
++   in the wall, was taken for another area's: T never had it. */
++#define ETA_THINGS_HERE_NEAR 400.0f
++
++static qboolean ETA_ThingHereInSight(const vec3_t point)
++{
++	vec3_t  eye;
++	trace_t trace;
++
++	VectorCopy(cg.predictedPlayerState.origin, eye);
++	eye[2] += cg.predictedPlayerState.viewheight;
++	if (Distance(eye, point) > ETA_THINGS_HERE_NEAR)
++	{
++		return qfalse;
++	}
++	CG_Trace(&trace, eye, NULL, NULL, point, cg.predictedPlayerState.clientNum, MASK_SOLID);
++	return (qboolean)( trace.fraction >= 0.95f
++	                   || ( trace.entityNum == ENTITYNUM_WORLD && Distance(trace.endpos, point) < 24.0f ) );
++}
++
++/* A switch on the far side of a shut door or hatch from here: the one
++   under the middle station's hatch, listed from the room above, could
++   not be pressed from there. */
++static qboolean ETA_ThingBehindShutDoor(const eta_thing_t *thing)
++{
++	vec3_t   eye;
++	trace_t  trace;
++	qboolean opens;
++
++	if (thing->kind != ETA_THING_SWITCH || thing->entityNum >= 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(cg.predictedPlayerState.origin, eye);
++	eye[2] += cg.predictedPlayerState.viewheight;
++	CG_Trace(&trace, eye, NULL, NULL, thing->point, cg.predictedPlayerState.clientNum, MASK_SOLID);
++	return (qboolean)( trace.fraction < 1.0f && trace.entityNum >= 0 && trace.entityNum < ENTITYNUM_WORLD
++	                   && cg_entities[trace.entityNum].currentState.eType == ET_MOVER
++	                   && Distance(trace.endpos, thing->point) > 8.0f
++	                   && CG_AccessibilityDoorModel(cg_entities[trace.entityNum].currentState.modelindex, &opens) );
++}
++
+ /* Those left in an area, or in the whole level for -1. */
+ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ {
+@@ -423,7 +472,8 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+ 		if (!eta_things.things[i].done && !eta_things.things[i].ride && eta_things.things[i].known
+-		    && CG_AccessibilityAreaHolds(area, eta_things.things[i].point))
++		    && ( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
++		         || ( area >= 0 && area == CG_AccessibilityAreaHere() && ETA_ThingHereInSight(eta_things.things[i].point) ) ))
+ 		{
+ 			counts[eta_things.things[i].kind]++;
+ 			( *left )++;
+@@ -577,7 +627,13 @@ static void ETA_ThingsStep(int step)
+ 			{
+ 				hidden += !eta_things.things[i].done;
+ 			}
++			else if (Distance(ps->origin, eta_things.things[i].point) < ETA_THINGS_HERE_NEAR
++			         && ETA_ThingBehindShutDoor(&eta_things.things[i]))
++			{
++				elsewhere++;
++			}
+ 			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride
++			         || ETA_ThingHereInSight(eta_things.things[i].point)
+ 			         || ( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+ 			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
+ 			{
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 8802671d..1af69cf4 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1984,6 +1984,10 @@ static void ETA_PlaceName(const vec3_t at, qboolean switchOnly, char *out, size_
+ 		{
+ 			*cut = '\0';
+ 		}
++		else if (( cut = (char *)Q_stristr(bestName, " for the hatch") ) != NULL)
++		{
++			cut[strlen(" for the hatch")] = '\0';
++		}
+ 		bestName[0] = (char)tolower((unsigned char)bestName[0]);
+ 		Com_sprintf(out, size, "by the %s", bestName);
+ 		return;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 421e00e1..2e9575a3 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4884,6 +4884,8 @@ static void ETA_ReadMapEntities(void)
+  */
+ /* A door's box where the map puts it, closed: its model's own, moved to
+    the origin a turning door is built around. */
++static const char *ETA_ForDoor(int door);
++
+ qboolean CG_AccessibilityDoorBox(int model, vec3_t mins, vec3_t maxs, qboolean *opens)
+ {
+ 	if (!CG_AccessibilityDoorModel(model, opens) || model >= cgs.numInlineModels || !cgs.inlineDrawModel[model])
+@@ -5464,6 +5466,11 @@ void CG_AccessibilityWaypointPlace(void)
+ 			Q_strncpyz(thing, near[i].name, sizeof(thing));
+ 			for (k = 0; thing[k]; k++)
+ 			{
++				if (!Q_stricmpn(thing + k, " for the hatch", 14))
++				{
++					thing[k + 14] = '\0';
++					break;
++				}
+ 				if (thing[k] == ',' || !Q_stricmpn(thing + k, " for a door", 11)
+ 				    || !Q_stricmpn(thing + k, " that opens", 11))
+ 				{
+@@ -5718,7 +5725,7 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		Q_strncpyz(name, Q_stricmp(eta_users[index].name, "Door") ? eta_users[index].name : "", nameSize);
+ 		if (name[0] && eta_opensDoor[eta_users[index].model])
+ 		{
+-			Q_strcat(name, nameSize, " for a door");
++			Q_strcat(name, nameSize, ETA_ForDoor(eta_opensDoor[eta_users[index].model]));
+ 		}
+ 		*kind = ETA_MAP_SWITCH;
+ 		return qtrue;
+@@ -5729,7 +5736,7 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		if (eta_buttonModel[i] && index-- == 0)
+ 		{
+ 			VectorCopy(cgs.inlineModelMidpoints[i], at);
+-			Q_strncpyz(name, eta_opensDoor[i] ? "Button for a door" : "Button", nameSize);
++			Q_strncpyz(name, eta_opensDoor[i] ? va("Button%s", ETA_ForDoor(eta_opensDoor[i])) : "Button", nameSize);
+ 			*kind = ETA_MAP_SWITCH;
+ 			return qtrue;
+ 		}
+@@ -6455,6 +6462,22 @@ static int ETA_StairsNear(const vec3_t origin, etaAimTarget_t *out, int max)
+ /* A switch or a button by what it works, as BROK the InvestiGator says
+    what each thing in a scene is for: "Button for a door behind left 8
+    meters" - so once it is pressed, the player knows where to go. */
++/* " for the hatch" for a door lying flat - a hatch - and " for a door"
++   for the rest: the tester asked after the middle station's "hatch
++   switch", which T called a switch for a door. */
++static const char *ETA_ForDoor(int door)
++{
++	vec3_t   mins, maxs;
++	qboolean opens;
++
++	if (door > 0 && door < MAX_MODELS && CG_AccessibilityDoorBox(door, mins, maxs, &opens)
++	    && maxs[2] - mins[2] <= 48.0f && maxs[0] - mins[0] >= 48.0f && maxs[1] - mins[1] >= 48.0f)
++	{
++		return " for the hatch";
++	}
++	return " for a door";
++}
++
+ static void ETA_SwitchName(const char *kind, int model, char *out, size_t outSize)
+ {
+ 	int    door = (model > 0 && model < MAX_MODELS) ? eta_opensDoor[model] : 0;
+@@ -6482,7 +6505,7 @@ static void ETA_SwitchName(const char *kind, int model, char *out, size_t outSiz
+ 	}
+ 
+ 	meters = (int)(Distance(cg.predictedPlayerState.origin, at) * ETA_QU_TO_METERS + 0.5f);
+-	Q_strcat(out, outSize, va(" for a door %s %d %s",
++	Q_strcat(out, outSize, va("%s %s %d %s", ETA_ForDoor(door),
+ 	                          ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
+ 	                          meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters"));
+ }

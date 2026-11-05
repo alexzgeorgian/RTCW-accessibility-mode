@@ -2111,3 +2111,17 @@ stood in the way, found by climbing it in the test game:
 
 The test player then climbed up and down through the hatch three times,
 about two seconds each way, without a fall.
+
+### 0111 The hatch switch on T, named for the hatch
+
+The tester asked why the hatch switch and the power switch were not on
+T. The hatch's switch is set in the wall of the room above the power
+room, a meter from where the tester stood; its middle, in the wall,
+was taken for another area's, and T lists only the area's things. A
+thing within ten meters and in sight is now on T wherever the map puts
+it. A switch on the far side of a shut door or hatch is not: the one
+under the hatch had been listed from the room above, where F could not
+reach it. A switch for a door lying flat is "Switch for the hatch".
+
+The power switch is on T once seen, as everything is: from the power
+room, or from above through the open hatch.
