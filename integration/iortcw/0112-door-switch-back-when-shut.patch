@@ -1,0 +1,95 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 0c82c69d..b0a8d153 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -564,8 +564,10 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	{
+ 		eta_thing_t *thing = &eta_things.things[i];
+ 
+-		/* Not the tram's button: pressed again and again, each way. */
++		/* Not the tram's button: pressed again and again, each way. Nor a
++		   door's switch, back while its door is shut (the frame below). */
+ 		if (thing->kind == ETA_THING_SWITCH && !thing->done && Q_stricmpn(thing->name, "Tram button", 11)
++		    && CG_AccessibilitySwitchDoorShut(thing->point) < 0
+ 		    && ( ( entityNum >= 0 && thing->entityNum == entityNum ) || ETA_ThingNear(thing->point, point, 64.0f) ))
+ 		{
+ 			thing->done = qtrue;
+@@ -903,6 +905,23 @@ void CG_AccessibilityThingsFrame(void)
+ 				continue;
+ 			}
+ 
++			/* A door's switch: there while its door is shut, gone while it
++			   is open. The tester pressed the hatch's switch, the hatch
++			   shut again, and the switch was gone from T for good - after
++			   loading a save too. */
++			if (thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5))
++			{
++				int shut = CG_AccessibilitySwitchDoorShut(thing->point);
++
++				if (shut >= 0)
++				{
++					/* Back: T's list made again, with it on. */
++					eta_things.found += (thing->done && shut && thing->known);
++					thing->done = (qboolean)!shut;
++					continue;
++				}
++			}
++
+ 			/* A spot that unlocks a door is done once used: the game says
+ 			   when its trigger has gone. One switched off does nothing
+ 			   walked onto, so stays until it works and is used. */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2e9575a3..ca662a6f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4960,6 +4960,38 @@ qboolean CG_AccessibilitySwitchOpensDoorAt(const vec3_t point)
+ 	return qfalse;
+ }
+ 
++/* For a switch that works a door: 1 with its door shut, 0 with it open
++   or moving, -1 for no door or one not in view. A door that shuts again
++   after a while - the middle station's hatch - wants its switch again. */
++int CG_AccessibilitySwitchDoorShut(const vec3_t point)
++{
++	int i, j;
++
++	ETA_WorldRead();
++	for (i = 1; i < MAX_MODELS; i++)
++	{
++		int door = eta_opensDoor[i];
++
++		if (door <= 0 || door >= MAX_MODELS || Distance(cgs.inlineModelMidpoints[i], point) >= 48.0f)
++		{
++			continue;
++		}
++		for (j = 0; cg.snap && j < cg.snap->numEntities; j++)
++		{
++			const entityState_t *es = &cg.snap->entities[j];
++
++			if (es->eType == ET_MOVER && es->modelindex == door)
++			{
++				return (es->pos.trType == TR_STATIONARY && es->apos.trType == TR_STATIONARY
++				        && VectorLength(es->apos.trBase) < 1.0f
++				        && Distance(es->pos.trBase, eta_doorOrigins[door]) < 1.0f) ? 1 : 0;
++			}
++		}
++		return -1;
++	}
++	return -1;
++}
++
+ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+ {
+ 	if (modelindex <= 0 || modelindex >= MAX_MODELS || eta_doorLocked[modelindex] < 0)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3f1c48b6..3d56236a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2314,6 +2314,7 @@ qboolean CG_AccessibilityMarkerUnreachable( void );
+ void CG_AccessibilityCrouch_f( void );
+ void CG_AccessibilityThingsNoWay( const vec3_t at );
+ qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
++int CG_AccessibilitySwitchDoorShut( const vec3_t point );
+ qboolean CG_AccessibilitySwitchOff( int model );
+ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
+ qboolean CG_AccessibilityInRide( char *out, size_t size );

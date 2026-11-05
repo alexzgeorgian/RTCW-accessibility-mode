@@ -2125,3 +2125,14 @@ reach it. A switch for a door lying flat is "Switch for the hatch".
 
 The power switch is on T once seen, as everything is: from the power
 room, or from above through the open hatch.
+
+### 0112 A door's switch comes back on T while its door is shut
+
+The tester: the hatch switch disappeared from T, even after loading a
+save with F9. A switch was done for good once pressed, and what is done
+is kept for the level, through loads. The hatch is a toggle - it stays
+open until the switch is pressed again - and loading a save from before
+had it shut, with its switch still gone. A switch that works a door is
+now on T while its door is shut and off it while the door is open, as
+the game has the door now: tested pressing it, then loading the save
+made before, and T had it again.
