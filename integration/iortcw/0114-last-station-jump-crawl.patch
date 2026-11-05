@@ -1,0 +1,374 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 97e62853..ab72acc7 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -448,6 +448,8 @@ typedef struct
+ 	qboolean latched;   /* has been on the ladder */
+ 	int      offSince;  /* off the top of it, since */
+ 	float    startZ;
++	qboolean hasStand;  /* walked to first: where the map says to get on */
++	vec3_t   stand;
+ 	float    bestZ;     /* highest yet, going up */
+ 	int      bestAt;
+ } eta_climb_t;
+@@ -593,6 +595,8 @@ static void ETA_ClimbStart(const etaLadder_t *ladder)
+ 	eta_climb.bestAt  = cg.time;
+ 	VectorCopy(ladder->point, eta_climb.point);
+ 	VectorCopy(ladder->normal, eta_climb.normal);
++	eta_climb.hasStand = ladder->hasStand;
++	VectorCopy(ladder->stand, eta_climb.stand);
+ 
+ 	/* How far, so the climb is not heard as endless: the tester, on a
+ 	   twelve meter ladder, wondered why it took so long. The game climbs
+@@ -701,7 +705,12 @@ static void ETA_ClimbFrame(void)
+ 					eta_climb.offSince = cg.time;
+ 				}
+ 
+-				if (onGround && ps->origin[2] < eta_climb.startZ + 16.0f)
++				/* Off a while: brushed against from the side while
++				   turning to it, the game holds the player a moment and
++				   lets go - "Off the ladder" at once stopped the climb
++				   the guide had brought the tester to. */
++				if (onGround && ps->origin[2] < eta_climb.startZ + 16.0f
++				    && cg.time - eta_climb.offSince > ETA_CLIMB_STEP_OFF_MS)
+ 				{
+ 					/* Back where it started: let go of the ladder, or
+ 					   never got up it. */
+@@ -746,7 +755,26 @@ static void ETA_ClimbFrame(void)
+ 
+ 	/* Facing: at the ladder's face once on it, or from behind its wall;
+ 	   on the way to a ladder ahead, at the spot where it was found. */
+-	if (eta_climb.latched || eta_climb.behind)
++	/* Found from the map, some steps off: to where the map says to get
++	   on first, then at the ladder. Walked at straight from the side, the
++	   test player brushed it, let go, and walked into the wall beside it. */
++	if (eta_climb.hasStand && !eta_climb.latched)
++	{
++		vec3_t toStand;
++
++		VectorSubtract(eta_climb.stand, ps->origin, toStand);
++		toStand[2] = 0.0f;
++		if (VectorLength(toStand) < 20.0f)
++		{
++			eta_climb.hasStand = qfalse;
++		}
++	}
++
++	if (eta_climb.hasStand && !eta_climb.latched)
++	{
++		VectorSubtract(eta_climb.stand, ps->origin, toLadder);
++	}
++	else if (eta_climb.latched || eta_climb.behind)
+ 	{
+ 		VectorScale(eta_climb.normal, -1.0f, toLadder);
+ 	}
+@@ -1592,7 +1620,18 @@ void CG_AccessibilityActivateDown_f(void)
+ 		   hatch, the ladder up to the roof is a meter nearer than the one
+ 		   down through it, and F, after "the way goes down it", climbed
+ 		   twelve meters up. */
+-		if (CG_AccessibilityLadderOnWay(140.0f, &ladder) || ( CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.5f ))
++		etaLadder_t near;
++		qboolean    onWay  = CG_AccessibilityLadderOnWay(140.0f, &ladder);
++		qboolean    inReach = (qboolean)( CG_AccessibilityLadderNear(&near) && near.meters <= 2.5f );
++
++		/* The one found by touch, when it is the way's: it knows the
++		   ladder's face as the game does. */
++		if (inReach && ( !onWay || ( near.goesUp == ladder.goesUp && ( near.point[0] - ladder.point[0] ) * ( near.point[0] - ladder.point[0] )
++		                           + ( near.point[1] - ladder.point[1] ) * ( near.point[1] - ladder.point[1] ) < 96.0f * 96.0f ) ))
++		{
++			ladder = near;
++		}
++		if (onWay || inReach)
+ 		{
+ 			ETA_ClimbStart(&ladder);
+ 			return;
+@@ -2482,7 +2521,16 @@ static void ETA_GuideFrame(void)
+ 	{
+ 		etaLadder_t ladder;
+ 
+-		if (CG_AccessibilityLadderOnWay(80.0f, &ladder) || ( CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.0f ))
++		etaLadder_t near;
++		qboolean    onWay   = CG_AccessibilityLadderOnWay(80.0f, &ladder);
++		qboolean    inReach = (qboolean)( CG_AccessibilityLadderNear(&near) && near.meters <= 2.0f );
++
++		if (inReach && ( !onWay || ( near.goesUp == ladder.goesUp && ( near.point[0] - ladder.point[0] ) * ( near.point[0] - ladder.point[0] )
++		                           + ( near.point[1] - ladder.point[1] ) * ( near.point[1] - ladder.point[1] ) < 96.0f * 96.0f ) ))
++		{
++			ladder = near;
++		}
++		if (onWay || inReach)
+ 		{
+ 			ETA_GuideRelease();
+ 			ETA_ClimbStart(&ladder);
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 0c79feda..b4922d01 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -144,6 +144,10 @@ static void ETA_MarkerEye(vec3_t eye)
+ #define ETA_ROUTE_SLOPE_LIFT    20.0f   /* a second try, higher, for ramps */
+ #define ETA_ROUTE_JUMP_LIFT     24.0f   /* a third, for a ledge to jump onto */
+ #define ETA_ROUTE_MAX_DROP      96.0f
++/* What the way may drop off an edge: as deep as a fall does no harm -
++   the game hurts a landing past about six metres (delta 38.75). The tram
++   level's way out drops three metres into a duct and five out of it. */
++#define ETA_ROUTE_SEARCH_DROP   200.0f
+ #define ETA_ROUTE_BUDGET_MS     2       /* searching per frame, at most */
+ #define ETA_ROUTE_BUDGET_STEP   4       /* squares between looks at the clock */
+ #define ETA_ROUTE_REPLAN_MS     5000    /* the world changes: look again */
+@@ -360,7 +364,7 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 	VectorCopy(end, start);
+ 	start[2] += 18.0f;
+ 	VectorCopy(start, down);
+-	down[2] -= 18.0f + lift + ETA_ROUTE_MAX_DROP;
++	down[2] -= 18.0f + lift + ETA_ROUTE_SEARCH_DROP;
+ 
+ 	trap_CM_BoxTrace(&trace, start, down, footMins, footMaxs, 0, MASK_PLAYERSOLID);
+ 
+@@ -961,6 +965,71 @@ static qboolean ETA_RouteOpening(const vec3_t here, float wantYaw, int widest, v
+  * did not keep it off the ledge; leaving jumps out until they are needed
+  * does.
+  */
++/**
++ * @brief A running jump across a gap to the square at to: floor there at
++ *        about the height of from, and room for the player all the way
++ *        over at the top of a jump. The tram level's way out crosses a
++ *        two metre gap between two balconies.
++ */
++#define ETA_ROUTE_LEAP_RISE 40.0f   /* the top of a jump, a little short */
++
++static int ETA_RouteLeap(void *context, const float from[3], float to[3])
++{
++	static const vec3_t mins     = { -ETA_ROUTE_HALF_WIDTH, -ETA_ROUTE_HALF_WIDTH, -24.0f + 18.0f };
++	static const vec3_t maxs     = { ETA_ROUTE_HALF_WIDTH, ETA_ROUTE_HALF_WIDTH, 24.0f };
++	static const vec3_t footMins = { -ETA_ROUTE_HALF_WIDTH, -ETA_ROUTE_HALF_WIDTH, -24.0f };
++	static const vec3_t footMaxs = { ETA_ROUTE_HALF_WIDTH, ETA_ROUTE_HALF_WIDTH, 24.0f - 18.0f };
++	trace_t trace;
++	vec3_t  start, end, down;
++
++	(void)context;
++
++	/* Up as a jump goes, and across at that height. */
++	VectorCopy(from, start);
++	VectorCopy(from, end);
++	end[2] += ETA_ROUTE_LEAP_RISE;
++	trap_CM_BoxTrace(&trace, start, end, mins, maxs, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid || trace.fraction < 1.0f)
++	{
++		return ETA_PATH_NONE;
++	}
++	VectorCopy(end, start);
++	VectorSet(end, to[0], to[1], start[2]);
++	trap_CM_BoxTrace(&trace, start, end, mins, maxs, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid || trace.fraction < 1.0f)
++	{
++		return ETA_PATH_NONE;
++	}
++
++	/* Floor to land on, no lower than a little below the edge. */
++	VectorCopy(end, start);
++	VectorCopy(end, down);
++	down[2] = from[2] - 48.0f;
++	trap_CM_BoxTrace(&trace, start, down, footMins, footMaxs, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid || trace.allsolid || trace.fraction >= 1.0f || trace.plane.normal[2] < 0.7f
++	    || trace.endpos[2] > from[2] + 8.0f)
++	{
++		return ETA_PATH_NONE;
++	}
++	if (CG_PointContents(trace.endpos, -1) & (CONTENTS_LAVA | CONTENTS_SLIME))
++	{
++		return ETA_PATH_NONE;
++	}
++	to[2] = trace.endpos[2];
++
++	/* Room to stand there. */
++	{
++		float landed[3];
++
++		VectorCopy(to, landed);
++		if (!ETA_RouteRoom(to, landed, 0.0f, ETA_ROUTE_BODY_TOP))
++		{
++			return ETA_PATH_NONE;
++		}
++	}
++	return ETA_PATH_JUMP;
++}
++
+ static int ETA_RouteMoveOnFoot(void *context, const float from[3], float to[3])
+ {
+ 	int kind = ETA_RouteMove(context, from, to);
+@@ -1116,6 +1185,7 @@ void CG_AccessibilityNavSweep_f(void)
+ 		began = trap_Milliseconds();
+ 		do
+ 		{
++			ETA_PathFinder_SetLeap(ETA_RouteLeap);
+ 			state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP, ETA_RouteMove, NULL);
+ 		}
+ 		while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
+@@ -1181,6 +1251,7 @@ void CG_AccessibilityNavSweep_f(void)
+ 			began = trap_Milliseconds();
+ 			do
+ 			{
++				ETA_PathFinder_SetLeap(ETA_RouteLeap);
+ 				state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP, ETA_RouteMove, NULL);
+ 			}
+ 			while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
+@@ -1679,6 +1750,7 @@ static void ETA_RouteFrame(void)
+ 
+ 		do
+ 		{
++			ETA_PathFinder_SetLeap(eta_route.jumps ? ETA_RouteLeap : NULL);
+ 			state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP,
+ 			                            eta_route.jumps ? ETA_RouteMove : ETA_RouteMoveOnFoot, NULL);
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index a2b295f1..cd38a8f3 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1302,6 +1302,76 @@ static qboolean ETA_LadderFaceClimbed(const ETA_BspLadder *ladder, const vec3_t
+ 	return qfalse;
+ }
+ 
++/* Whether the top found is reached from the ladder's head, with no wall
++   between: the ladder up from the last tram station has a wall over its
++   head, and the floor found past it was another room's, behind a door
++   only the soldiers open. The player at its top steps off onto the
++   ledge on its own side. */
++static qboolean ETA_LadderTopReached(const vec3_t centre, const vec3_t top)
++{
++	trace_t trace;
++	vec3_t  from, to;
++
++	/* From just off the ladder on that side, at standing height. */
++	vec3_t dir;
++	float  far;
++
++	VectorSubtract(top, centre, dir);
++	dir[2] = 0.0f;
++	far    = VectorNormalize(dir);
++	if (far < 1.0f)
++	{
++		return qtrue;
++	}
++	VectorMA(centre, MIN(far, 12.0f), dir, from);
++	from[2] = top[2] + 16.0f;
++	VectorSet(to, top[0], top[1], top[2] + 16.0f);
++	trap_CM_BoxTrace(&trace, from, to, NULL, NULL, 0, MASK_PLAYERSOLID);
++	if (trace.startsolid)
++	{
++		from[2] = top[2] + 32.0f;
++		to[2]   = top[2] + 32.0f;
++		trap_CM_BoxTrace(&trace, from, to, NULL, NULL, 0, MASK_PLAYERSOLID);
++	}
++	return (qboolean)( !trace.startsolid && trace.fraction >= 1.0f );
++}
++
++/* A ladder's end moved, if it must, to where the way's own body fits:
++   on along the way off the ladder, or to one side. */
++static void ETA_LadderEndClear(vec3_t at, const vec3_t out)
++{
++	/* The player's own width, which the way's room test takes. */
++	static const vec3_t mins = { -18.0f, -18.0f, -24.0f + 18.0f };
++	static const vec3_t maxs = { 18.0f, 18.0f, 24.0f };
++	vec3_t  side, tried;
++	trace_t trace;
++	float   far;
++	int     k;
++
++	trap_CM_BoxTrace(&trace, at, at, mins, maxs, 0, MASK_PLAYERSOLID);
++	if (!trace.startsolid)
++	{
++		return;
++	}
++	VectorSet(side, -out[1], out[0], 0.0f);
++	for (far = 4.0f; far <= 24.0f; far += 4.0f)
++	{
++		for (k = 0; k < 3; k++)
++		{
++			const float *dir = k == 0 ? out : side;
++			float        sign = k == 2 ? -1.0f : 1.0f;
++
++			VectorMA(at, far * sign, dir, tried);
++			trap_CM_BoxTrace(&trace, tried, tried, mins, maxs, 0, MASK_PLAYERSOLID);
++			if (!trace.startsolid)
++			{
++				VectorCopy(tried, at);
++				return;
++			}
++		}
++	}
++}
++
+ /* Whether a point lies on a door lying flat - a hatch - as the map has
+    it, shut. */
+ static qboolean ETA_LadderTopOnHatch(const vec3_t at)
+@@ -1402,7 +1472,25 @@ static void ETA_LadderLinks(void)
+ 
+ 					found = (qboolean)(ETA_LadderFloor(top, 48.0f)
+ 					                   && top[2] >= ladder->maxs[2] - 8.0f
+-					                   && top[2] - foot[2] >= 48.0f);
++					                   && top[2] - foot[2] >= 48.0f
++					                   && ETA_LadderTopReached(centre, top));
++				}
++			}
++
++			/* Then nearer the ladder: a ledge no wider than the ladder's
++			   own top - the one the ladder up from the last tram station
++			   comes out on, its far side walled. */
++			for (exit = 0; exit < 2 && !found; exit++)
++			{
++				for (reach = 4.0f; reach <= 16.0f && !found; reach += 6.0f)
++				{
++					VectorMA(centre, (exit ? 1.0f : -1.0f) * (half + reach), face, top);
++					top[2] = ladder->maxs[2] + 24.0f + 8.0f;
++
++					found = (qboolean)(ETA_LadderFloor(top, 48.0f)
++					                   && top[2] >= ladder->maxs[2] - 8.0f
++					                   && top[2] - foot[2] >= 48.0f
++					                   && ETA_LadderTopReached(centre, top));
+ 				}
+ 			}
+ 
+@@ -1440,6 +1528,21 @@ static void ETA_LadderLinks(void)
+ 
+ 			if (found)
+ 			{
++				vec3_t out;
++
++				/* Clear of the walls by them, as the way's squares are:
++				   the top of the ladder up from the last tram station sat
++				   two units into the wall beside it, and the way never set
++				   off from there - up it to the balcony, and on. */
++				VectorSubtract(top, centre, out);
++				out[2] = 0.0f;
++				VectorNormalize(out);
++				ETA_LadderEndClear(top, out);
++				VectorSubtract(foot, centre, out);
++				out[2] = 0.0f;
++				VectorNormalize(out);
++				ETA_LadderEndClear(foot, out);
++
+ 				ETA_PathFinder_AddLink(foot, top, ETA_PATH_LADDER_UP);
+ 				ETA_PathFinder_AddLink(top, foot, ETA_PATH_LADDER_DOWN);
+ 				VectorCopy(foot, eta_ladderFoot[i]);
+@@ -3472,6 +3575,8 @@ qboolean CG_AccessibilityLadderOnWay(float reach, etaLadder_t *out)
+ 		out->goesUp = atFoot;
+ 		out->behind = qfalse;
+ 		out->meters = Distance(me, centre) * ETA_QU_TO_METERS;
++		out->hasStand = qtrue;
++		VectorCopy(atFoot ? eta_ladderFoot[i] : eta_ladderTop[i], out->stand);
+ 		return qtrue;
+ 	}
+ 	return qfalse;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 488956d3..064f8a84 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2378,6 +2378,8 @@ typedef struct {
+ 	qboolean	goesUp;		// up from here; otherwise down a shaft or hatch
+ 	qboolean	behind;		// down, on the wall under the player's own edge
+ 	float		meters;
++	qboolean	hasStand;	// where to stand to get on it, from the map
++	vec3_t		stand;
+ } etaLadder_t;
+ 
+ qboolean CG_AccessibilityLadderNear( etaLadder_t *out );

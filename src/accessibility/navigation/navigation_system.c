@@ -377,6 +377,18 @@ static int ETA_Path_Floor(float v)
 #define ETA_PATH_JUMP_SQUARES 24.0f
 #define ETA_PATH_DROP_SQUARES 8.0f
 #define ETA_PATH_DROP_DEEP    40.0f
+/* Deeper than a storey: walked off only when there is no other way, as a
+   jump is - into the tram level's duct, three metres down. */
+#define ETA_PATH_DROP_FAR     100.0f
+/* A gap jumped: two to this many squares across. */
+#define ETA_PATH_LEAP_SQUARES 4
+
+static ETA_PathLeapFn gPathLeap;
+
+void ETA_PathFinder_SetLeap(ETA_PathLeapFn leap)
+{
+    gPathLeap = leap;
+}
 
 typedef struct
 {
@@ -671,6 +683,10 @@ static int ETA_Path_Reach(int current, const float to[3], int ix, int iy,
     {
         cost += ETA_PATH_EFFORT_SQUARES * gPathCell;
     }
+    else if (gPathNodes[current].pos[2] - to[2] > ETA_PATH_DROP_FAR)
+    {
+        cost += ETA_PATH_JUMP_SQUARES * gPathCell;
+    }
     else if (gPathNodes[current].pos[2] - to[2] > ETA_PATH_DROP_DEEP)
     {
         cost += ETA_PATH_DROP_SQUARES * gPathCell;
@@ -880,6 +896,35 @@ ETA_PathState ETA_PathFinder_Step(int budget, ETA_PathMoveFn move, void *context
             to[2] = gPathNodes[current].pos[2];
 
             kind = move(context, gPathNodes[current].pos, to);
+
+            /* No floor next, or one far below: a gap, perhaps, with
+               floor across it. Straight on only. */
+            if (gPathLeap && d < 4
+                && ( kind <= ETA_PATH_NONE || kind > ETA_PATH_CROUCH
+                     || gPathNodes[current].pos[2] - to[2] > ETA_PATH_DROP_FAR ))
+            {
+                int n;
+
+                for (n = 2; n <= ETA_PATH_LEAP_SQUARES; n++)
+                {
+                    float across[3];
+                    int   ax = gPathNodes[current].ix + steps[d][0] * n;
+                    int   ay = gPathNodes[current].iy + steps[d][1] * n;
+
+                    across[0] = gPathOrigin[0] + (float)ax * gPathCell;
+                    across[1] = gPathOrigin[1] + (float)ay * gPathCell;
+                    across[2] = gPathNodes[current].pos[2];
+
+                    if (gPathLeap(context, gPathNodes[current].pos, across) == ETA_PATH_JUMP)
+                    {
+                        if (!ETA_Path_Reach(current, across, ax, ay, (float)n * gPathCell, ETA_PATH_JUMP))
+                        {
+                            return gPathState;
+                        }
+                        break;
+                    }
+                }
+            }
 
             if (kind <= ETA_PATH_NONE || kind > ETA_PATH_CROUCH)
             {

@@ -147,6 +147,16 @@ void ETA_PathFinder_Begin(const float start[3], const float goal[3],
  */
 typedef int (*ETA_PathGoalFn)(void *context, const float at[3]);
 void ETA_PathFinder_BeginSearch(const float start[3], float cellSize, ETA_PathGoalFn isGoal, void *goalContext);
+/*
+ * A gap jumped across: where the next square has no floor to walk to,
+ * or only one far below, a square two to four further on at about the
+ * same height may be reached by a running jump. The function says
+ * ETA_PATH_JUMP when it can, and sets to[2] to the landing height. NULL,
+ * the default, tries none. The tram level's way out: across a gap
+ * between two balconies, then crouched into a duct.
+ */
+typedef int (*ETA_PathLeapFn)(void *context, const float from[3], float to[3]);
+void ETA_PathFinder_SetLeap(ETA_PathLeapFn leap);
 ETA_PathState ETA_PathFinder_Step(int budget, ETA_PathMoveFn move, void *context);
 ETA_PathState ETA_PathFinder_State(void);
 

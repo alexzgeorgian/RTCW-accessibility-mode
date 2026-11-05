@@ -2161,3 +2161,36 @@ Followed as they would, with X, O and F:
 
 The test player, from the switch, was led down to the power switch in
 two seconds of climbing.
+
+### 0114 From the last tram station to the end: the ladder, the jump, the crawl
+
+The tester, at the last tram station, remembered having to jump over
+something and crawl into a hole in the wall, and the guide knew no way
+on. The map's own navigation data has it: a ladder up from the corridor
+beside the station to a balcony; at the balcony's south end a two meter
+gap, jumped across westward into an upper room; on the left at once a
+low opening behind a metal fence to break, crouched into; a three meter
+drop into an air duct, crawled south; a five meter drop to the floor,
+and a low tunnel crawled west, behind a second fence, into the rooms
+before the end. The way now finds all of it:
+
+- Gaps are jumped: where the next square has no floor, or only one far
+  below, a square two to four further on at about the same height is
+  tried for a running jump, with room over the top of the jump
+  (navigation_system.c, ETA_PathFinder_SetLeap; ETA_RouteLeap).
+- Drops as deep as do no harm - the game hurts a landing past about six
+  meters - are walked off, costing as much as a jump, so only when there
+  is no other way.
+- A ladder's top is taken only where it is reached from the ladder's
+  head with no wall between: the balcony ladder's had been put in a
+  room behind its wall, behind a door only the soldiers open. Then
+  nearer the ladder, for a ledge no wider than its top; and each end is
+  moved clear of the walls by the player's own width.
+- F climbs the ladder found by touch when it is the way's own, and the
+  way's when it is not; a climb found from the map first walks to where
+  the map says to get on, then turns to the ladder; and brushed against
+  from the side, the climb no longer stops at once with "Off the
+  ladder".
+
+The fences are things to break: the way says "The way goes through
+something to break. Break it to get through: T lists it".
