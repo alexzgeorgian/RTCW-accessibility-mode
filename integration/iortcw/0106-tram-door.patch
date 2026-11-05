@@ -1,0 +1,144 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index e8e8aca0..630bbc41 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3048,7 +3048,10 @@ static void ETA_EdgeGuardFrame(void)
+ 		VectorCopy(ahead, down);
+ 		down[2] -= 96.0f;
+ 		CG_Trace(&slope, ahead, NULL, NULL, down, ps->clientNum, MASK_PLAYERSOLID);
+-		if (!slope.startsolid && slope.fraction < 1.0f && slope.plane.normal[2] < 0.7f && slope.plane.normal[2] > 0.05f)
++		/* The map's own ground only: the tram's slanted sides, met inside
++		   it, are no slope to slide down. */
++		if (!slope.startsolid && slope.fraction < 1.0f && slope.plane.normal[2] < 0.7f && slope.plane.normal[2] > 0.05f
++		    && slope.entityNum == ENTITYNUM_WORLD && cg.predictedPlayerState.groundEntityNum == ENTITYNUM_WORLD)
+ 		{
+ 			vec3_t  far, bottom2;
+ 			trace_t fall;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index f0774d47..fa09bc8d 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4068,6 +4068,81 @@ qboolean CG_AccessibilityRideJustArrived(void)
+ 
+ /* A tram standing near, the player not in it: where its floor's middle
+    is, for T's list. qfalse with none. */
++/*
++ * The tram's way in: tried from outside each side, a body's width at a
++ * time, into it - where a body gets through its wall is its door. The
++ * tester, led to the tram's middle, walked into its side: "Metal wall".
++ * Kept until the tram moves. qfalse with no way in found.
++ */
++static vec3_t eta_rideDoor, eta_rideDoorFor;
++static int    eta_rideDoorAt = -1;   /* the ride it is for, or -1 */
++
++static qboolean ETA_RideEntrance(int i, const vec3_t mins, const vec3_t maxs, vec3_t out)
++{
++	static const vec3_t bmins = { -15.0f, -15.0f, -6.0f };
++	static const vec3_t bmaxs = { 15.0f, 15.0f, 30.0f };
++	const float         *me = cg.predictedPlayerState.origin;
++	trace_t             tr;
++	vec3_t              centre, start, end;
++	float               floorZ, bestFar = 1.0e9f;
++	int                 side, found = 0;
++
++	VectorAdd(mins, maxs, centre);
++	VectorScale(centre, 0.5f, centre);
++	if (eta_rideDoorAt == i && Distance(centre, eta_rideDoorFor) < 4.0f)
++	{
++		VectorCopy(eta_rideDoor, out);
++		return qtrue;
++	}
++
++	/* Its floor: down from a body's height over its bottom, in its
++	   middle - from its roof, the probe met what hangs inside. */
++	VectorSet(start, centre[0], centre[1], mins[2] + 96.0f);
++	VectorSet(end, centre[0], centre[1], mins[2] - 16.0f);
++	CG_Trace(&tr, start, NULL, NULL, end, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++	floorZ = tr.fraction < 1.0f ? tr.endpos[2] + 24.0f + 2.0f : mins[2] + 40.0f;
++
++	for (side = 0; side < 4; side++)
++	{
++		int   a = side & 1, b = 1 - a, run = 0;
++		float sign = side < 2 ? 1.0f : -1.0f, along, wall = sign > 0.0f ? maxs[a] : mins[a];
++
++		for (along = mins[b] + 24.0f; along <= maxs[b] - 24.0f; along += 16.0f)
++		{
++			start[a] = wall + sign * 40.0f;
++			end[a]   = wall - sign * 56.0f;
++			start[b] = end[b] = along;
++			start[2] = end[2] = floorZ;
++			CG_Trace(&tr, start, bmins, bmaxs, end, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			run = ( !tr.startsolid && tr.fraction >= 1.0f ) ? run + 1 : 0;
++			/* Two bodies' widths through: a door, at its middle. */
++			if (run >= 2)
++			{
++				vec3_t door;
++				float  far;
++
++				door[a] = wall + sign * 32.0f;
++				door[b] = along - 8.0f;
++				door[2] = floorZ;
++				far     = Distance(door, me);
++				if (far < bestFar)
++				{
++					bestFar = far;
++					VectorCopy(door, out);
++					found = 1;
++				}
++			}
++		}
++	}
++	if (found)
++	{
++		eta_rideDoorAt = i;
++		VectorCopy(centre, eta_rideDoorFor);
++		VectorCopy(out, eta_rideDoor);
++	}
++	return (qboolean)found;
++}
++
+ qboolean CG_AccessibilityRideAt(vec3_t point)
+ {
+ 	vec3_t   mins, maxs;
+@@ -4081,9 +4156,13 @@ qboolean CG_AccessibilityRideAt(vec3_t point)
+ 		{
+ 			continue;
+ 		}
+-		point[0] = ( mins[0] + maxs[0] ) * 0.5f;
+-		point[1] = ( mins[1] + maxs[1] ) * 0.5f;
+-		point[2] = mins[2] + 40.0f;
++		/* Its way in, where there is one: led there, not into its side. */
++		if (!ETA_RideEntrance(i, mins, maxs, point))
++		{
++			point[0] = ( mins[0] + maxs[0] ) * 0.5f;
++			point[1] = ( mins[1] + maxs[1] ) * 0.5f;
++			point[2] = mins[2] + 40.0f;
++		}
+ 		if (Distance(point, cg.predictedPlayerState.origin) <= 1600.0f)
+ 		{
+ 			return qtrue;
+@@ -4142,6 +4221,24 @@ void CG_AccessibilityRideFrame(void)
+ 		{
+ 			eta_rides[i].arrivedAt = cg.time;
+ 		}
++
++		/* At its door, outside: which way in. */
++		{
++			static int doorSaidAt = -100000;
++			vec3_t     door;
++
++			if (!in && !moving && ps->pm_type == PM_NORMAL && ETA_RideEntrance(i, mins, maxs, door)
++			    && Distance(ps->origin, door) < 80.0f && fabsf(ps->origin[2] - door[2]) < 48.0f
++			    && ( cg.time - doorSaidAt > 6000 || cg.time < doorSaidAt ))
++			{
++				vec3_t inside;
++
++				doorSaidAt = cg.time;
++				VectorCopy(middle, inside);
++				inside[2] = door[2];
++				ETA_Speech_Say(va("Tram door here. Walk in, %s", ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(inside))));
++			}
++		}
+ 		eta_rides[i].state    = moving;
+ 		eta_rides[i].playerIn = in;
+ 	}

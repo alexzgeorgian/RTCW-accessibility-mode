@@ -2034,3 +2034,18 @@ the station still "moving", and its arrival was never said. It is
 moving now only while its way is under way. Stopped, inside it: "The
 tram has stopped, by the middle tram station. J says where you are"; J
 in it: "You are in the tram, standing, by the middle tram station".
+
+### 0106 The tram's door
+
+The tester: going to the tram, "I heard a metal wall instead; it didn't
+tell me I was inside." T's "Tram, walk in" and O led to the tram's
+middle, and the way-finder, which sees only the map's own walls, led
+straight at its side. The tram's way in is now found from its shape:
+from outside each side, a body's width at a time, tried into it at its
+floor - two widths in a row that get through its wall are its door, the
+one nearest the player kept until the tram moves. At the middle station
+it is on the platform's side, a meter and a half east of the button. T
+and O lead to it; there, "Tram door here. Walk in, ahead"; inside, "In
+the tram", and J "You are in the tram, standing, by the middle tram
+station". The edge guard's steep slopes are the map's own ground only:
+inside the tram its slanted sides stopped the player as a slope.
