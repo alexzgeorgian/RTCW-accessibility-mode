@@ -1964,3 +1964,31 @@ found, and a test player climbed it to the platform in 35 seconds. The
 other walks on the level were reached as before, the one past the upper
 station's jump in 34 seconds rather than 180. `accessibilityNavSweep
 route x y z x y z` prints one search, its points and their kinds.
+
+### 0102 Out of the power room: ladders on the way, and the hatch from below
+
+The tester: how to know the platform can be reached from below, to get
+on the tram again. The map has the way - up through the hatch, up the
+next ladder, across the floor above, down the platform's ladder - and
+the way-finder finds it, but walking it a test player was stopped at
+each step:
+
+- At the foot of a ladder the way takes it heard only "Metal wall":
+  "Ladder here: F climbs" came only after holding against it. Now it is
+  said as soon as the player reaches the ladder the way takes - "Ladder
+  here, the way goes up it: F climbs" - the ladder the way gets on at,
+  not the one just climbed.
+- F there turned the player to the ladder instead of climbing it. F now
+  climbs the ladder the way takes first, from up to 3.5 meters off it,
+  the climb walking the player onto it.
+- Under the hatch the climb stopped with "Climb stopped", and F on a
+  ladder only stopped the climb: nothing pressed the hatch's switch, on
+  its underside. Now "A hatch is shut above you: F opens it", and F
+  turns up to it and presses it; "Open door", and F climbs on.
+- X below the hatch said "a switch opens it. O leads to the switch":
+  the switch by the ladder above, out of reach. From below it says
+  "ladder up, a hatch shut at its top: climb it, and F at the top opens
+  the hatch".
+
+The test player climbed from the power room through the hatch and up to
+the floor above the platform in a minute.
