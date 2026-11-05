@@ -1,0 +1,63 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1c5fffd0..b7ad8287 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -532,10 +532,45 @@ static void ETA_ClimbStart(const etaLadder_t *ladder)
+ 	VectorCopy(ladder->point, eta_climb.point);
+ 	VectorCopy(ladder->normal, eta_climb.normal);
+ 
+-	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(ladder->goesUp ? "Climbing up" : "Climbing down");
+-	ETA_Speech_EndReport();
++	/* How far, so the climb is not heard as endless: the tester, on a
++	   twelve meter ladder, wondered why it took so long. The game climbs
++	   about three meters a second. */
++	{
++		const float *me = cg.predictedPlayerState.origin;
++		vec3_t      foot, top;
++		float       best = 96.0f, rise = 0.0f;
++		int         i;
++
++		for (i = 0; i < CG_AccessibilityLadderCount(); i++)
++		{
++			float near;
++
++			if (!CG_AccessibilityLadderEnds(i, foot, top))
++			{
++				continue;
++			}
++			near = sqrt((ladder->point[0] - foot[0]) * (ladder->point[0] - foot[0])
++			            + (ladder->point[1] - foot[1]) * (ladder->point[1] - foot[1]));
++			if (near < best && me[2] > foot[2] - 64.0f && me[2] < top[2] + 64.0f)
++			{
++				best = near;
++				rise = ladder->goesUp ? top[2] - me[2] : me[2] - foot[2];
++			}
++		}
++
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_BeginReport();
++		if (rise * ETA_QU_TO_METERS >= 1.5f)
++		{
++			ETA_Speech_Say(va("%s, %d meters", ladder->goesUp ? "Climbing up" : "Climbing down",
++			                  (int)(rise * ETA_QU_TO_METERS + 0.5f)));
++		}
++		else
++		{
++			ETA_Speech_Say(ladder->goesUp ? "Climbing up" : "Climbing down");
++		}
++		ETA_Speech_EndReport();
++	}
+ }
+ 
+ static void ETA_ClimbFrame(void)
+@@ -1725,7 +1760,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 			other = -1;
+ 		}
+ 
+-		if (other >= 0 && CG_AccessibilityLadderNear(&ladder) && (other >= count || ladder.meters < list[other].meters))
++			if (other >= 0 && CG_AccessibilityLadderNear(&ladder) && (other >= count || ladder.meters < list[other].meters))
+ 		{
+ 			ETA_ClimbStart(&ladder);
+ 			return;

@@ -2077,3 +2077,12 @@ walk, and pushes toward the ladder the moment the feet leave the edge:
 the game catches it, and the climb goes on down to "Bottom of the
 ladder". "Top of the ladder" and "Bottom of the ladder" hold the other
 callouts back a moment, so the next one does not talk over them.
+
+### 0109 The climb says how far
+
+The tester asked why a climb took so long. The game climbs about three
+meters a second whoever is climbing, so the middle station's ladders, 9
+to 12 meters, take 3 to 4 seconds; with nothing said in between, a climb
+sounded endless. "Climbing up" and "Climbing down" now say the height
+too, "Climbing up, 9 meters", from where the player stands to the
+ladder's other end.
