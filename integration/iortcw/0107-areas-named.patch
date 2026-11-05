@@ -1,0 +1,302 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index fe795d01..53131c16 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -731,6 +731,136 @@ static void ETA_AreaDoorsText(int area, char *out, size_t size)
+ /* Each frame: the area come into, said once the player is in it. */
+ static void ETA_AreaLike(int area, char *out, size_t size);
+ 
++/*
++ * An area's name, as said in place of its number: what kind of place it
++ * is, and what marks it - "the corridor by the middle tram station", "the
++ * room with a ladder up", "the hall with the way out". The tester asked
++ * for real places rather than numbers; the levels name none, so each is
++ * named by what is in it and where it is. Two of the same name keep their
++ * number to tell them apart: "the room with a switch, 4".
++ */
++static void ETA_AreaNameBase(int area, char *out, size_t size)
++{
++	vec3_t      at, mins, maxs, wayOut, foot, top, feature, lead;
++	ETA_Place   place;
++	char        mark[80], station[64];
++	const char *kind;
++	int         i, k;
++	qboolean    tried;
++
++	out[0] = '\0';
++	if (area < 0 || area >= ETA_AREAS_MAX || !ETA_BspAreas_Bounds(area, mins, maxs))
++	{
++		return;
++	}
++	if (eta_areas.hasSpot[area])
++	{
++		VectorCopy(eta_areas.spot[area], at);
++	}
++	else
++	{
++		vec3_t mid;
++
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		if (!ETA_BspAreas_PointIn(area, mid, at))
++		{
++			VectorCopy(mid, at);
++		}
++	}
++
++	/* What kind of place. */
++	CG_AccessibilityPlace(at, &place);
++	kind = ETA_Place_KindName(place.kind);
++	if (!kind || !Q_stricmp(kind, "indoors") || !Q_stricmp(kind, "upper floor"))
++	{
++		kind = "room";
++	}
++	if (!Q_stricmp(kind, "room") && ETA_BspAreas_Floor(area) / ( 39.37f * 39.37f ) < 25.0f)
++	{
++		kind = "small room";
++	}
++
++	/* What marks it, the first of these there is. */
++	mark[0] = '\0';
++	CG_AccessibilityTramStationText(at, station, sizeof(station));
++	if (station[0])
++	{
++		Q_strncpyz(mark, station + 2, sizeof(mark));   /* past ", " */
++	}
++	if (!mark[0] && CG_AccessibilityExitPoint(cg.predictedPlayerState.origin, wayOut) && ETA_AreaOf(wayOut) == area)
++	{
++		Q_strncpyz(mark, "with the way out", sizeof(mark));
++	}
++	for (i = 0; !mark[0] && i < CG_AccessibilityLadderCount(); i++)
++	{
++		if (!CG_AccessibilityLadderEnds(i, foot, top))
++		{
++			continue;
++		}
++		for (k = 0; k < 2 && !mark[0]; k++)
++		{
++			if (ETA_AreaOf(k ? top : foot) == area)
++			{
++				Q_strncpyz(mark, k ? "with a ladder down" : "with a ladder up", sizeof(mark));
++			}
++		}
++	}
++	for (i = 0; !mark[0] && CG_AccessibilityFrontierGet(i, feature, lead, &k, &tried); i++)
++	{
++		if (( k == 6 || k == 7 ) && ETA_AreaOf(feature) == area)
++		{
++			Q_strncpyz(mark, k == 6 ? "with stairs up" : "with stairs down", sizeof(mark));
++		}
++	}
++	if (!mark[0])
++	{
++		int toNew, doors = ETA_AreaDoorsOut(area, &toNew);
++
++		if (doors >= 2)
++		{
++			Com_sprintf(mark, sizeof(mark), "with %d ways out", doors);
++		}
++	}
++	Com_sprintf(out, size, "the %s%s%s", kind, mark[0] ? " " : "", mark);
++}
++
++static void ETA_AreaName(int area, char *out, size_t size)
++{
++	char other[128];
++	int  i;
++
++	ETA_AreaNameBase(area, out, size);
++	if (!out[0])
++	{
++		Com_sprintf(out, size, "area %d", area >= 0 && area < ETA_AREAS_MAX ? eta_areas.number[area] : 0);
++		return;
++	}
++	for (i = 0; i < eta_areas.count && i < ETA_AREAS_MAX; i++)
++	{
++		if (i == area || !eta_areas.number[i])
++		{
++			continue;
++		}
++		ETA_AreaNameBase(i, other, sizeof(other));
++		if (!Q_stricmp(other, out))
++		{
++			Q_strcat(out, size, va(", %d", eta_areas.number[area]));
++			return;
++		}
++	}
++}
++
++/* The same, with a capital: "The corridor ...". */
++static const char *ETA_AreaNameCap(int area)
++{
++	static char name[128];
++
++	ETA_AreaName(area, name, sizeof(name));
++	name[0] = (char)toupper((unsigned char)name[0]);
++	return name;
++}
++
+ void CG_AccessibilityAreasFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -785,8 +915,12 @@ void CG_AccessibilityAreasFrame(void)
+ 		CG_AccessibilityThingsInArea(area, things, sizeof(things));
+ 		ETA_AreaLike(area, like, sizeof(like));
+ 		ETA_Speech_BeginReport();
+-		ETA_Speech_Say(va("New area, area %d%s%s. %s. %s", eta_areas.number[area], like[0] ? ", " : "", like, doors,
+-		                  things));
++		{
++			char name[128];
++
++			ETA_AreaName(area, name, sizeof(name));
++			ETA_Speech_Say(va("New area: %s. %s. %s", name, doors, things));
++		}
+ 		ETA_Speech_EndReport();
+ 		return;
+ 	}
+@@ -794,7 +928,12 @@ void CG_AccessibilityAreasFrame(void)
+ 	{
+ 		CG_AccessibilityThingsInArea(area, things, sizeof(things));
+ 		ETA_Speech_BeginReport();
+-		ETA_Speech_Say(va("Back in area %d. %s", eta_areas.number[area], things));
++		{
++			char name[128];
++
++			ETA_AreaName(area, name, sizeof(name));
++			ETA_Speech_Say(va("Back in %s. %s", name, things));
++		}
+ 		ETA_Speech_EndReport();
+ 	}
+ }
+@@ -860,8 +999,26 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 	}
+ 	ETA_AreaDoorsText(area, doors, sizeof(doors));
+ 	ETA_AreaLike(area, like, sizeof(like));
+-	Com_sprintf(out, size, "In area %d%s%s, of %d explored. %s", eta_areas.number[area], like[0] ? ", " : "", like,
+-	            eta_areas.numbered, doors);
++	{
++		char name[128];
++
++		ETA_AreaName(area, name, sizeof(name));
++		char  height[96];
++		char *cut;
++
++		/* The name says the kind and the station; the height is kept. */
++		Q_strncpyz(height, strstr(like, ", ") ? strstr(like, ", ") : "", sizeof(height));
++		if (( cut = strstr(height, ", by the") ) != NULL)
++		{
++			*cut = '\0';
++		}
++		if (( cut = strstr(height, ", where") ) != NULL)
++		{
++			*cut = '\0';
++		}
++		Com_sprintf(out, size, "In %s%s, of %d %s explored. %s", name, height, eta_areas.numbered,
++		            eta_areas.numbered == 1 ? "area" : "areas", doors);
++	}
+ }
+ 
+ /* X's list holds a door out as its number, a way not yet tried as -1
+@@ -1017,8 +1174,17 @@ static void ETA_AreaStairsText(int area, const vec3_t feature, const vec3_t lead
+ 	where[0] = '\0';
+ 	if (there >= 0 && there != area)
+ 	{
+-		Com_sprintf(where, sizeof(where), eta_areas.number[there] ? ", in area %d" : ", in a new area",
+-		            eta_areas.number[there]);
++		if (eta_areas.number[there])
++		{
++			char name[128];
++
++			ETA_AreaName(there, name, sizeof(name));
++			Com_sprintf(where, sizeof(where), ", in %s", name);
++		}
++		else
++		{
++			Q_strncpyz(where, ", in a new area", sizeof(where));
++		}
+ 	}
+ 	Com_sprintf(out, size, "%sstairs %s%s%s%s%s%s%s%s", known ? "" : "new ", number ? va("%d ", number) : "",
+ 	            up ? "up" : "down", used ? ", used before" : "",
+@@ -1282,8 +1448,8 @@ void CG_AccessibilityAreaExits(void)
+ 		fresh_new           = newCount;
+ 		if (!count)
+ 		{
+-			ETA_Speech_Say(va("Area %d: no doors out, and no way found here not yet tried. O leads to the way out",
+-			                  eta_areas.number[area]));
++			ETA_Speech_Say(va("%s: no doors out, and no way found here not yet tried. O leads to the way out",
++			                  ETA_AreaNameCap(area)));
+ 			return;
+ 		}
+ 	}
+@@ -1312,12 +1478,12 @@ void CG_AccessibilityAreaExits(void)
+ 		ETA_AreaDoorsText(area, doors, sizeof(doors));
+ 		if (eta_areas.listWays)
+ 		{
+-			ETA_Speech_Say(va("Area %d. %s. %d new %s here", eta_areas.number[area], doors, eta_areas.listWays,
++			ETA_Speech_Say(va("%s. %s. %d new %s here", ETA_AreaNameCap(area), doors, eta_areas.listWays,
+ 			                  eta_areas.listWays == 1 ? "way" : "ways"));
+ 		}
+ 		else
+ 		{
+-			ETA_Speech_Say(va("Area %d. %s", eta_areas.number[area], doors));
++			ETA_Speech_Say(va("%s. %s", ETA_AreaNameCap(area), doors));
+ 		}
+ 		if (!fresh_new)
+ 		{
+@@ -1352,7 +1518,10 @@ void CG_AccessibilityAreaExits(void)
+ 		there = ETA_AreaOf(to);
+ 		if (there >= 0 && there != area && eta_areas.number[there])
+ 		{
+-			Com_sprintf(where, sizeof(where), "back to area %d", eta_areas.number[there]);
++			char tname[128];
++
++			ETA_AreaName(there, tname, sizeof(tname));
++			Com_sprintf(where, sizeof(where), "back to %s", tname);
+ 		}
+ 		else if (there >= 0 && there != area)
+ 		{
+@@ -1486,7 +1655,10 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (eta_areas.number[other])
+ 	{
+-		Com_sprintf(where, sizeof(where), "%s back to area %d", exit->model ? "door" : "opening", eta_areas.number[other]);
++		char oname[128];
++
++		ETA_AreaName(other, oname, sizeof(oname));
++		Com_sprintf(where, sizeof(where), "%s back to %s", exit->model ? "door" : "opening", oname);
+ 	}
+ 	else
+ 	{
+@@ -1545,7 +1717,10 @@ void CG_AccessibilityAreaExits(void)
+ 
+ 	if (eta_areas.number[other])
+ 	{
+-		Com_sprintf(name, sizeof(name), "the %s back to area %d", exit->model ? "door" : "opening", eta_areas.number[other]);
++		char oname[128];
++
++		ETA_AreaName(other, oname, sizeof(oname));
++		Com_sprintf(name, sizeof(name), "the %s back to %s", exit->model ? "door" : "opening", oname);
+ 	}
+ 	else
+ 	{
+@@ -1748,12 +1923,17 @@ void CG_AccessibilityAreasBack(void)
+ 		               : va("%d other %s explored, nothing left in them", eta_areas.backCount,
+ 		                    eta_areas.backCount == 1 ? "area" : "areas"));
+ 	}
+-	ETA_Speech_Say(va("%d of %d, area %d%s, %s, %d %s%s%s. O leads there", eta_areas.backPos + 1, eta_areas.backCount,
+-	                  eta_areas.number[area], things, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
++	{
++		char bname[128];
++
++		ETA_AreaName(area, bname, sizeof(bname));
++		Q_strncpyz(name, bname, sizeof(name));
++	}
++	ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s%s. O leads there", eta_areas.backPos + 1, eta_areas.backCount,
++	                  name, things, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+ 	ETA_Speech_EndReport();
+ 
+-	Com_sprintf(name, sizeof(name), "area %d", eta_areas.number[area]);
+ 	CG_AccessibilityChoose(at, name);
+ }
+ 

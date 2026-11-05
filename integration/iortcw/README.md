@@ -2049,3 +2049,18 @@ and O lead to it; there, "Tram door here. Walk in, ahead"; inside, "In
 the tram", and J "You are in the tram, standing, by the middle tram
 station". The edge guard's steep slopes are the map's own ground only:
 inside the tram its slanted sides stopped the player as a slope.
+
+### 0107 Areas named, not numbered
+
+The tester: finish with area numbers, and use real places from the game
+data. The levels name no places - no location entities, only a few
+script names no player ever hears - so each area is named by what kind
+of place it is (the place classifier, at where the player came into it,
+or its middle) and the first of what marks it: the level's start or a
+tram station, the way out, a ladder's foot or top, stairs, or how many
+ways out it has. "New area: the corridor with stairs down", "Back in the
+room with a ladder up", J "In the alley by the middle tram station,
+halfway up the level, of 4 areas explored", X "The corridor with stairs
+down. 2 ways out...", "door back to the hall with the way out", and
+semicolon's list. Two areas of the same name keep their number after
+it: "the corridor where the level began, 2".
