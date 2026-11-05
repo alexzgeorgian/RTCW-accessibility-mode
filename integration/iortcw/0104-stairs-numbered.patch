@@ -1,0 +1,190 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 120d0c47..fe795d01 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -984,7 +984,7 @@ static void ETA_AreaStairsEnd(const vec3_t feature, const vec3_t lead, vec3_t ou
+    flight are often in one area, so the area alone says nothing. Where O
+    leads: the near end. */
+ static void ETA_AreaStairsText(int area, const vec3_t feature, const vec3_t lead, qboolean up, qboolean known,
+-                               char *out, size_t size, vec3_t leadTo)
++                               char *out, size_t size, vec3_t leadTo, int number, qboolean used)
+ {
+ 	vec3_t    end, from, to;
+ 	ETA_Place place;
+@@ -1020,7 +1020,8 @@ static void ETA_AreaStairsText(int area, const vec3_t feature, const vec3_t lead
+ 		Com_sprintf(where, sizeof(where), eta_areas.number[there] ? ", in area %d" : ", in a new area",
+ 		            eta_areas.number[there]);
+ 	}
+-	Com_sprintf(out, size, "%sstairs %s%s%s%s%s%s", known ? "" : "new ", up ? "up" : "down",
++	Com_sprintf(out, size, "%sstairs %s%s%s%s%s%s%s%s", known ? "" : "new ", number ? va("%d ", number) : "",
++	            up ? "up" : "down", used ? ", used before" : "",
+ 	            meters >= 1 ? va(", %d %s %s", meters, meters == 1 ? "meter" : "meters", up ? "up" : "down") : "",
+ 	            what[0] ? ", to " : "",
+ 	            !what[0] || !Q_stricmpn(what, "open", 4) || !Q_stricmpn(what, "indoors", 7) ? ""
+@@ -1429,7 +1430,8 @@ void CG_AccessibilityAreaExits(void)
+ 		qboolean tried;
+ 
+ 		CG_AccessibilityFrontierGet(ETA_AREA_STAIRS - entry, at, lead, &kind, &tried);
+-		ETA_AreaStairsText(area, at, lead, (qboolean)( kind == 6 ), qtrue, text, sizeof(text), end);
++		ETA_AreaStairsText(area, at, lead, (qboolean)( kind == 6 ), qtrue, text, sizeof(text), end,
++		                   CG_AccessibilityStairsNumber(ETA_AREA_STAIRS - entry), tried);
+ 		VectorCopy(end, lead);
+ 		VectorCopy(end, at);
+ 		VectorSubtract(at, ps->origin, delta);
+@@ -1456,7 +1458,8 @@ void CG_AccessibilityAreaExits(void)
+ 		{
+ 			vec3_t end;
+ 
+-			ETA_AreaStairsText(area, at, lead, (qboolean)!Q_stricmp(word, "Stairs up"), qtrue, text, sizeof(text), end);
++			ETA_AreaStairsText(area, at, lead, (qboolean)!Q_stricmp(word, "Stairs up"), qtrue, text, sizeof(text), end,
++			                   CG_AccessibilityStairsNumber(-1 - entry), qfalse);
+ 		}
+ 		VectorSubtract(at, ps->origin, delta);
+ 		meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 424e83d2..e8e8aca0 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2689,6 +2689,54 @@ int CG_AccessibilityOnStairs(void)
+ 	return cg.time < eta_stairKeep.until ? eta_stairKeep.sense : 0;
+ }
+ 
++/* A flight of stairs walked to its end: said, with its number, and the
++   stairs marked as used. The tester did not know which stairs had been
++   climbed up or down, or whether a flight was done. */
++static struct
++{
++	qboolean on;
++	vec3_t   from;
++	int      lastAt;
++} eta_flight;
++
++static void ETA_StairsDoneFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
++	{
++		eta_flight.on = qfalse;
++		return;
++	}
++	if (CG_AccessibilityOnStairs())
++	{
++		if (!eta_flight.on)
++		{
++			eta_flight.on = qtrue;
++			VectorCopy(ps->origin, eta_flight.from);
++		}
++		eta_flight.lastAt = cg.time;
++		return;
++	}
++	if (eta_flight.on && ps->groundEntityNum != ENTITYNUM_NONE
++	    && ( cg.time - eta_flight.lastAt > 700 || cg.time < eta_flight.lastAt ))
++	{
++		float rise = ps->origin[2] - eta_flight.from[2];
++
++		eta_flight.on = qfalse;
++		if (fabsf(rise) >= 64.0f)
++		{
++			int number = CG_AccessibilityStairsWalked(eta_flight.from, ps->origin);
++			int meters = (int)( fabsf(rise) * ETA_QU_TO_METERS + 0.5f );
++
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(va("%s of %s%s, %d %s %s", rise > 0.0f ? "Top" : "Bottom", number ? "stairs " : "the stairs",
++			                  number ? va("%d", number) : "", meters, meters == 1 ? "meter" : "meters",
++			                  rise > 0.0f ? "up" : "down"));
++		}
++	}
++}
++
+ static void ETA_StairsKeepFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3861,6 +3909,7 @@ void CG_AccessibilityAimFrame(void)
+ 			if (!eta_guide.active)
+ 			{
+ 				ETA_StairsKeepFrame();
++				ETA_StairsDoneFrame();
+ 			}
+ 			else
+ 			{
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index bb20c828..8802671d 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1588,6 +1588,62 @@ qboolean CG_AccessibilityNewWayNearest(vec3_t lead, char *name, size_t nameSize,
+ 	return qtrue;
+ }
+ 
++/* Stairs by number: the stairs among the ways found, in the order found,
++   from 1 - the same each time the level is played, as the ways found are
++   kept with the areas explored. The tester: stairs have no numbers, and
++   which ones were climbed up or down is not known. */
++int CG_AccessibilityStairsNumber(int index)
++{
++	int i, n = 0;
++
++	if (index < 0 || index >= eta_frontier.count)
++	{
++		return 0;
++	}
++	for (i = 0; i <= index; i++)
++	{
++		n += eta_frontier.ways[i].kind == ETA_WAY_STAIRS_UP || eta_frontier.ways[i].kind == ETA_WAY_STAIRS_DOWN;
++	}
++	return ( eta_frontier.ways[index].kind == ETA_WAY_STAIRS_UP || eta_frontier.ways[index].kind == ETA_WAY_STAIRS_DOWN )
++	       ? n : 0;
++}
++
++/* The stairs found nearest a flight just walked, from where it began to
++   where it ended: its number, and marked as used. 0 for none known. */
++int CG_AccessibilityStairsWalked(const vec3_t from, const vec3_t to)
++{
++	int   i, best = -1;
++	float bestFar = 256.0f;
++
++	for (i = 0; i < eta_frontier.count; i++)
++	{
++		eta_frontier_t *way = &eta_frontier.ways[i];
++		float          far;
++
++		if (way->kind != ETA_WAY_STAIRS_UP && way->kind != ETA_WAY_STAIRS_DOWN)
++		{
++			continue;
++		}
++		far = MIN(MIN(Distance(way->feature, from), Distance(way->feature, to)),
++		          MIN(Distance(way->lead, from), Distance(way->lead, to)));
++		if (far < bestFar)
++		{
++			bestFar = far;
++			best    = i;
++		}
++	}
++	if (best < 0)
++	{
++		return 0;
++	}
++	if (!eta_frontier.ways[best].tried)
++	{
++		eta_frontier.ways[best].tried = qtrue;
++		CG_AccessibilityExploredChanged();
++	}
++	return CG_AccessibilityStairsNumber(best);
++}
++
+ /* The ways found, tried or not, kept with the areas explored so that a
+    save loaded or a death does not make them new again
+    (cg_accessibility_areas.c). */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index fc0b0a3f..3f1c48b6 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2266,6 +2266,8 @@ qboolean CG_AccessibilityNewWayNearest( vec3_t lead, char *name, size_t nameSize
+ int CG_AccessibilityPlaceAt( const vec3_t at );
+ int CG_AccessibilityNewWayCount( void );
+ qboolean CG_AccessibilityFrontierGet( int index, vec3_t feature, vec3_t lead, int *kind, qboolean *tried );
++int CG_AccessibilityStairsNumber( int index );
++int CG_AccessibilityStairsWalked( const vec3_t from, const vec3_t to );
+ void CG_AccessibilityFrontierPut( const vec3_t feature, const vec3_t lead, int kind, qboolean tried );
+ void CG_AccessibilityExploredChanged( void );
+ qboolean CG_AccessibilityNewWayAt( int index, vec3_t feature, vec3_t lead, const char **word );

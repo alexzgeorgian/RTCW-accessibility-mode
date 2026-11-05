@@ -2013,3 +2013,14 @@ over its edge.
 - A slope too steep to stand on just ahead, with a fall that hurts below
   it, stops the player as an edge does: "Edge. A steep slope you would
   slide off. Stopped".
+
+### 0104 Stairs numbered; the end of a flight said
+
+The tester: "I don't know which stairs I climbed up or down, and if I
+have done it." Stairs are now numbered in the order found - kept with
+the ways found, so the same each time the level is played - and X says
+"stairs 2 up, used before, 4 meters up, to a corridor". At the end of a
+flight walked - off the stairs a moment, on the ground, two meters or
+more up or down from where it began - "Top of stairs 2, 4 meters up",
+or "Bottom of stairs 1, 4 meters down", and those stairs are marked as
+used.
