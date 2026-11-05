@@ -1,0 +1,63 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 630bbc41..1c5fffd0 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -478,6 +478,19 @@ static void ETA_ClimbMove(int move)
+ 	eta_climb.move = move;
+ }
+ 
++/* Walking, not running: backing off an edge onto a ladder under it. */
++#define ETA_CLIMB_KEY_WALK "989"
++static qboolean eta_climbWalk;
++
++static void ETA_ClimbWalk(qboolean on)
++{
++	if (on != eta_climbWalk)
++	{
++		trap_SendConsoleCommand(va("%cspeed " ETA_CLIMB_KEY_WALK "\n", on ? '+' : '-'));
++		eta_climbWalk = on;
++	}
++}
++
+ static void ETA_ClimbStop(const char *say)
+ {
+ 	if (!eta_climb.active)
+@@ -485,6 +498,7 @@ static void ETA_ClimbStop(const char *say)
+ 		return;
+ 	}
+ 
++	ETA_ClimbWalk(qfalse);
+ 	ETA_ClimbMove(0);
+ 	ETA_AimKeys(0, 0);
+ 	ETA_TurnBoost(qfalse);
+@@ -492,6 +506,9 @@ static void ETA_ClimbStop(const char *say)
+ 
+ 	if (say)
+ 	{
++		/* Said, and not talked over at once: the tester, climbing, never
++		   knew whether the top had been reached. */
++		ETA_HudNarrator_HoldPassive(cg.time);
+ 		ETA_Speech_BeginReport();
+ 		ETA_Speech_Say(say);
+ 		ETA_Speech_EndReport();
+@@ -628,7 +645,19 @@ static void ETA_ClimbFrame(void)
+ 	   never off a ledge in some other direction. */
+ 	yawError = AngleSubtract(wanted[YAW], ps->viewangles[YAW]);
+ 
+-	if (Q_fabs(yawError) < ETA_CLIMB_FACING || eta_climb.latched)
++	/* Stepped back off the edge and not on the ladder yet: toward it, so
++	   the game catches it as the player drops past - backing on, the
++	   test player was carried away from the ladder of the middle
++	   station's roof and fell eleven meters. */
++	/* Backing off the edge at a walk, not a run: at a run the player was
++	   carried a meter past the ladder before dropping, and never got back
++	   to it in the air. */
++	ETA_ClimbWalk((qboolean)( eta_climb.behind && !eta_climb.latched && onGround ));
++	if (eta_climb.behind && !eta_climb.latched && !onGround && !onLadder)
++	{
++		ETA_ClimbMove(1);
++	}
++	else if (Q_fabs(yawError) < ETA_CLIMB_FACING || eta_climb.latched)
+ 	{
+ 		ETA_ClimbMove(eta_climb.behind ? -1 : 1);
+ 	}

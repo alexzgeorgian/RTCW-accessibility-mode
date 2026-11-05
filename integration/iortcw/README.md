@@ -2064,3 +2064,16 @@ halfway up the level, of 4 areas explored", X "The corridor with stairs
 down. 2 ways out...", "door back to the hall with the way out", and
 semicolon's list. Two areas of the same name keep their number after
 it: "the corridor where the level began, 2".
+
+### 0108 Climbing down a ladder under an edge
+
+The tester: climbing, "it keeps climbing and doesn't stop", and they
+did not know whether the top had been reached. On the middle station's
+roof, F at the top of the ladder down to the room below backed the
+player off the edge at a run: the ladder is under the roof's lip, and
+the player dropped a meter past it, missed it, and fell eleven meters,
+losing half their health. The climb now backs off such an edge at a
+walk, and pushes toward the ladder the moment the feet leave the edge:
+the game catches it, and the climb goes on down to "Bottom of the
+ladder". "Top of the ladder" and "Bottom of the ladder" hold the other
+callouts back a moment, so the next one does not talk over them.
