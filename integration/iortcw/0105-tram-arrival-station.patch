@@ -1,0 +1,45 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index aa526498..f0774d47 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4011,7 +4011,11 @@ static qboolean ETA_RideBox(int i, vec3_t mins, vec3_t maxs, qboolean *moving)
+ 		trap_R_ModelBounds(cgs.inlineDrawModel[eta_rides[i].model], mins, maxs);
+ 		VectorAdd(mins, cent->lerpOrigin, mins);
+ 		VectorAdd(maxs, cent->lerpOrigin, maxs);
+-		*moving = (qboolean)( es->pos.trType != TR_STATIONARY && es->pos.trDuration != 0 );
++		/* Moving while its way is under way: a way that has ended keeps
++		   its kind, and the tram stopped at the middle station was still
++		   "moving" - nothing was said of its arrival. */
++		*moving = (qboolean)( es->pos.trType != TR_STATIONARY && es->pos.trDuration != 0
++		                      && cg.time < es->pos.trTime + es->pos.trDuration + 100 );
+ 		return qtrue;
+ 	}
+ 	return qfalse;
+@@ -4034,7 +4038,11 @@ qboolean CG_AccessibilityInRide(char *out, size_t size)
+ 	{
+ 		if (ETA_RideBox(i, mins, maxs, &moving) && ETA_RideHolds(mins, maxs, cg.predictedPlayerState.origin))
+ 		{
+-			Com_sprintf(out, size, moving ? "You are in the tram, moving. Stay inside" : "You are in the tram, standing");
++			char station[64];
++
++			CG_AccessibilityTramStationText(cg.predictedPlayerState.origin, station, sizeof(station));
++			Com_sprintf(out, size, moving ? "You are in the tram, moving. Stay inside" : "You are in the tram, standing%s",
++			            station);
+ 			return qtrue;
+ 		}
+ 	}
+@@ -4108,7 +4116,13 @@ void CG_AccessibilityRideFrame(void)
+ 		{
+ 			if (in)
+ 			{
+-				ETA_Speech_Say(moving ? "The tram is moving. Stay inside" : "The tram has stopped");
++				/* Where: the tester, come to the middle station in the tram,
++				   heard nothing of where they were. */
++				char station[64];
++
++				CG_AccessibilityTramStationText(ps->origin, station, sizeof(station));
++				ETA_Speech_Say(moving ? "The tram is moving. Stay inside"
++				               : va("The tram has stopped%s. J says where you are", station));
+ 			}
+ 			else if (meters <= 40)
+ 			{

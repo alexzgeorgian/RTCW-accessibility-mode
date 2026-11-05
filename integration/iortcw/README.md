@@ -2024,3 +2024,13 @@ flight walked - off the stairs a moment, on the ground, two meters or
 more up or down from where it began - "Top of stairs 2, 4 meters up",
 or "Bottom of stairs 1, 4 meters down", and those stairs are marked as
 used.
+
+### 0105 The tram's arrival said, with the station
+
+The tester, riding the tram to the middle station: nothing was said
+when it got there. Whether the tram was moving was taken from its way's
+kind alone, and a way that has ended keeps its kind: the tram stood at
+the station still "moving", and its arrival was never said. It is
+moving now only while its way is under way. Stopped, inside it: "The
+tram has stopped, by the middle tram station. J says where you are"; J
+in it: "You are in the tram, standing, by the middle tram station".
