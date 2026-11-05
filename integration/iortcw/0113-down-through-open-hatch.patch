@@ -1,0 +1,344 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 53131c16..144f5538 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1068,7 +1068,8 @@ static int ETA_AreaLadderHatch(int entry)
+ 		qboolean opens;
+ 		int      k;
+ 
+-		if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens) || opens)
++		/* Open now - opened by its switch - it is no longer in the way. */
++		if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens) || opens || CG_AccessibilityDoorShutNow(model) == 0)
+ 		{
+ 			continue;
+ 		}
+@@ -1331,6 +1332,13 @@ void CG_AccessibilityAreaExits(void)
+ 		for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
+ 		{
+ 			exit = &eta_areas.exits[i];
++			/* A hatch over a ladder is not a way of its own: the ladder
++			   is, and says the hatch. Opened, it was "door to a new area",
++			   and O stopped the tester beside it, not at the ladder. */
++			if (exit->model > 0 && CG_AccessibilityHatchAtLadder(exit->model))
++			{
++				continue;
++			}
+ 			if ((exit->area[0] == area || exit->area[1] == area)
+ 			    && !eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
+ 			{
+@@ -1394,6 +1402,10 @@ void CG_AccessibilityAreaExits(void)
+ 				for (i = 0; i < eta_areas.exitCount && count < ETA_AREA_LIST_MAX; i++)
+ 				{
+ 					exit = &eta_areas.exits[i];
++					if (exit->model > 0 && CG_AccessibilityHatchAtLadder(exit->model))
++					{
++						continue;
++					}
+ 					if ((exit->area[0] == area || exit->area[1] == area)
+ 					    && eta_areas.number[exit->area[exit->area[0] == area ? 1 : 0]])
+ 					{
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 4650fe96..97e62853 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -727,6 +727,23 @@ static void ETA_ClimbFrame(void)
+ 		}
+ 	}
+ 
++	/* Going down a ladder the way takes, found from the map: once the
++	   ground search finds its face, take whether it is behind - led
++	   down to it facing forward, the player would walk off past it. */
++	if (!eta_climb.latched && !eta_climb.goesUp && !eta_climb.behind && onGround)
++	{
++		etaLadder_t down;
++
++		if (CG_AccessibilityLadderDownNear(&down)
++		    && ( down.point[0] - eta_climb.point[0] ) * ( down.point[0] - eta_climb.point[0] )
++		    + ( down.point[1] - eta_climb.point[1] ) * ( down.point[1] - eta_climb.point[1] ) < 96.0f * 96.0f)
++		{
++			eta_climb.behind = down.behind;
++			VectorCopy(down.point, eta_climb.point);
++			VectorCopy(down.normal, eta_climb.normal);
++		}
++	}
++
+ 	/* Facing: at the ladder's face once on it, or from behind its wall;
+ 	   on the way to a ladder ahead, at the spot where it was found. */
+ 	if (eta_climb.latched || eta_climb.behind)
+@@ -1458,6 +1475,28 @@ void CG_AccessibilityActivateDown_f(void)
+ 	                  && cg.cursorHintTime != 0 && cg.cursorHintFade > 0
+ 	                  && cg.time - cg.cursorHintTime < cg.cursorHintFade);
+ 
++	/* On the switch of a door open now: pressed again, it would shut it -
++	   the hatch the tester had just opened. F goes on to what else is
++	   near; F twice quickly still presses it. */
++	if (hint && cg.snap && !( eta_use.fAt && cg.time >= eta_use.fAt && cg.time - eta_use.fAt < ETA_USE_DOUBLE_MS ))
++	{
++		vec3_t eye, forward, along;
++		float  far;
++
++		VectorCopy(cg.predictedPlayerState.origin, eye);
++		eye[2] += cg.predictedPlayerState.viewheight;
++		AngleVectors(cg.predictedPlayerState.viewangles, forward, NULL, NULL);
++		for (far = 16.0f; far <= 96.0f; far += 16.0f)
++		{
++			VectorMA(eye, far, forward, along);
++			if (CG_AccessibilitySwitchDoorShut(along) == 0)
++			{
++				hint = qfalse;
++				break;
++			}
++		}
++	}
++
+ 	/* On the hatch at a ladder in reach, standing: the ladder, not the
+ 	   hatch. */
+ 	if (hint && !eta_climb.active && cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL
+@@ -1549,7 +1588,11 @@ void CG_AccessibilityActivateDown_f(void)
+ 	{
+ 		etaLadder_t ladder;
+ 
+-		if (( CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.5f ) || CG_AccessibilityLadderOnWay(140.0f, &ladder))
++		/* The way's own ladder first: by the middle station's open
++		   hatch, the ladder up to the roof is a meter nearer than the one
++		   down through it, and F, after "the way goes down it", climbed
++		   twelve meters up. */
++		if (CG_AccessibilityLadderOnWay(140.0f, &ladder) || ( CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.5f ))
+ 		{
+ 			ETA_ClimbStart(&ladder);
+ 			return;
+@@ -2439,7 +2482,7 @@ static void ETA_GuideFrame(void)
+ 	{
+ 		etaLadder_t ladder;
+ 
+-		if (CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.0f)
++		if (CG_AccessibilityLadderOnWay(80.0f, &ladder) || ( CG_AccessibilityLadderNear(&ladder) && ladder.meters <= 2.0f ))
+ 		{
+ 			ETA_GuideRelease();
+ 			ETA_ClimbStart(&ladder);
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index ca662a6f..a2b295f1 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1302,6 +1302,28 @@ static qboolean ETA_LadderFaceClimbed(const ETA_BspLadder *ladder, const vec3_t
+ 	return qfalse;
+ }
+ 
++/* Whether a point lies on a door lying flat - a hatch - as the map has
++   it, shut. */
++static qboolean ETA_LadderTopOnHatch(const vec3_t at)
++{
++	int model;
++
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		vec3_t   mins, maxs;
++		qboolean opens;
++
++		if (CG_AccessibilityDoorBox(model, mins, maxs, &opens) && maxs[2] - mins[2] <= 48.0f
++		    && maxs[0] - mins[0] >= 48.0f && maxs[1] - mins[1] >= 48.0f
++		    && at[0] > mins[0] && at[0] < maxs[0] && at[1] > mins[1] && at[1] < maxs[1]
++		    && fabsf(at[2] - ( mins[2] + maxs[2] ) * 0.5f) < 64.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /**
+  * @brief Each ladder's foot and top, handed to the way-finder as links.
+  *
+@@ -1384,6 +1406,38 @@ static void ETA_LadderLinks(void)
+ 				}
+ 			}
+ 
++			/* Over the head, but on a hatch over the ladder: open, it
++			   stands up there as a wall - the middle station's, over the
++			   ladder down to the power room, walled the way in off, and
++			   the climb walked into it. Then across the hatchway on the
++			   ladder's own side, where the player steps off the edge
++			   facing the ladder and the game catches it. */
++			if (found && ETA_LadderTopOnHatch(top))
++			{
++				vec3_t across;
++				qboolean other = qfalse;
++
++				for (reach = 24.0f; reach <= 160.0f && !other; reach += 16.0f)
++				{
++					VectorMA(centre, half + reach, face, across);
++					across[2] = ladder->maxs[2] + 24.0f + 8.0f;
++
++					other = (qboolean)(ETA_LadderFloor(across, 48.0f)
++					                   && across[2] >= ladder->maxs[2] - 8.0f
++					                   && across[2] - foot[2] >= 48.0f && !ETA_LadderTopOnHatch(across));
++				}
++				if (other)
++				{
++					/* A body's width further out, off the hatchway's edge. */
++					VectorMA(across, 16.0f, face, top);
++					top[2] = across[2];
++					if (!ETA_LadderFloor(top, 48.0f))
++					{
++						VectorCopy(across, top);
++					}
++				}
++			}
++
+ 			if (found)
+ 			{
+ 				ETA_PathFinder_AddLink(foot, top, ETA_PATH_LADDER_UP);
+@@ -3479,8 +3533,23 @@ qboolean CG_AccessibilityLadderNear(etaLadder_t *out)
+ 		return qtrue;
+ 	}
+ 
++	return CG_AccessibilityLadderDownNear(out);
++}
++
++/* A ladder down from where the player stands, and whether its face is
++   behind them - even with a ladder up nearer, as by the middle station's
++   open hatch, where the ladder to the roof stands a meter off. */
++qboolean CG_AccessibilityLadderDownNear(etaLadder_t *out)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float               best = ETA_LADDER_REACH + 1.0f;
++	trace_t             tr;
++	int                 i;
++
++	memset(out, 0, sizeof(*out));
++
+ 	/* A ladder down starts from the ground. */
+-	if (ps->groundEntityNum == ENTITYNUM_NONE)
++	if (!cg.snap || ps->groundEntityNum == ENTITYNUM_NONE)
+ 	{
+ 		return qfalse;
+ 	}
+@@ -4963,9 +5032,31 @@ qboolean CG_AccessibilitySwitchOpensDoorAt(const vec3_t point)
+ /* For a switch that works a door: 1 with its door shut, 0 with it open
+    or moving, -1 for no door or one not in view. A door that shuts again
+    after a while - the middle station's hatch - wants its switch again. */
++int CG_AccessibilityDoorShutNow(int door)
++{
++	int j;
++
++	if (door <= 0 || door >= MAX_MODELS)
++	{
++		return -1;
++	}
++	for (j = 0; cg.snap && j < cg.snap->numEntities; j++)
++	{
++		const entityState_t *es = &cg.snap->entities[j];
++
++		if (es->eType == ET_MOVER && es->modelindex == door)
++		{
++			return (es->pos.trType == TR_STATIONARY && es->apos.trType == TR_STATIONARY
++			        && VectorLength(es->apos.trBase) < 1.0f
++			        && Distance(es->pos.trBase, eta_doorOrigins[door]) < 1.0f) ? 1 : 0;
++		}
++	}
++	return -1;
++}
++
+ int CG_AccessibilitySwitchDoorShut(const vec3_t point)
+ {
+-	int i, j;
++	int i;
+ 
+ 	ETA_WorldRead();
+ 	for (i = 1; i < MAX_MODELS; i++)
+@@ -4976,20 +5067,41 @@ int CG_AccessibilitySwitchDoorShut(const vec3_t point)
+ 		{
+ 			continue;
+ 		}
+-		for (j = 0; cg.snap && j < cg.snap->numEntities; j++)
++		return CG_AccessibilityDoorShutNow(door);
++	}
++	return -1;
++}
++
++/* A door lying flat at one of the map's ladders: a hatch, which the
++   ladder is the way through. */
++qboolean CG_AccessibilityHatchAtLadder(int model)
++{
++	vec3_t   mins, maxs, foot, top;
++	qboolean opens;
++	int      i, k;
++
++	if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens) || maxs[2] - mins[2] > 48.0f)
++	{
++		return qfalse;
++	}
++	for (i = 0; i < CG_AccessibilityLadderCount(); i++)
++	{
++		if (!CG_AccessibilityLadderEnds(i, foot, top))
++		{
++			continue;
++		}
++		for (k = 0; k < 2; k++)
+ 		{
+-			const entityState_t *es = &cg.snap->entities[j];
++			const float *end = k ? top : foot;
+ 
+-			if (es->eType == ET_MOVER && es->modelindex == door)
++			if (end[0] > mins[0] - 48.0f && end[0] < maxs[0] + 48.0f && end[1] > mins[1] - 48.0f
++			    && end[1] < maxs[1] + 48.0f && fabsf(end[2] - ( mins[2] + maxs[2] ) * 0.5f) < 72.0f)
+ 			{
+-				return (es->pos.trType == TR_STATIONARY && es->apos.trType == TR_STATIONARY
+-				        && VectorLength(es->apos.trBase) < 1.0f
+-				        && Distance(es->pos.trBase, eta_doorOrigins[door]) < 1.0f) ? 1 : 0;
++				return qtrue;
+ 			}
+ 		}
+-		return -1;
+ 	}
+-	return -1;
++	return qfalse;
+ }
+ 
+ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+@@ -6602,6 +6714,10 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 			if (es->solid == SOLID_BMODEL && es->modelindex > 0 && es->modelindex < MAX_MODELS
+ 			    && eta_buttonModel[es->modelindex])
+ 			{
++				if (CG_AccessibilitySwitchDoorShut(cgs.inlineModelMidpoints[es->modelindex]) == 0)
++				{
++					continue;
++				}
+ 				ETA_SwitchName("Button", es->modelindex, target.name, sizeof(target.name));
+ 				break;
+ 			}
+@@ -6697,6 +6813,13 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 			continue;
+ 		}
+ 
++		/* Its door open: pressed again, it would only shut it. The
++		   tester opened the hatch, pressed F to go on, and F shut it. */
++		if (CG_AccessibilitySwitchDoorShut(target.point) == 0)
++		{
++			continue;
++		}
++
+ 		if (Q_stricmp(eta_users[i].name, "Door"))
+ 		{
+ 			ETA_SwitchName(eta_users[i].name, eta_users[i].model, target.name, sizeof(target.name));
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3d56236a..488956d3 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2315,6 +2315,8 @@ void CG_AccessibilityCrouch_f( void );
+ void CG_AccessibilityThingsNoWay( const vec3_t at );
+ qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
+ int CG_AccessibilitySwitchDoorShut( const vec3_t point );
++int CG_AccessibilityDoorShutNow( int model );
++qboolean CG_AccessibilityHatchAtLadder( int model );
+ qboolean CG_AccessibilitySwitchOff( int model );
+ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
+ qboolean CG_AccessibilityInRide( char *out, size_t size );
+@@ -2379,6 +2381,7 @@ typedef struct {
+ } etaLadder_t;
+ 
+ qboolean CG_AccessibilityLadderNear( etaLadder_t *out );
++qboolean CG_AccessibilityLadderDownNear( etaLadder_t *out );
+ qboolean CG_AccessibilityLadderOnWay( float reach, etaLadder_t *out );
+ qboolean CG_AccessibilityMarkerLadderFrom( vec3_t from, qboolean *up );
+ 

@@ -2136,3 +2136,28 @@ had it shut, with its switch still gone. A switch that works a door is
 now on T while its door is shut and off it while the door is open, as
 the game has the door now: tested pressing it, then loading the save
 made before, and T had it again.
+
+### 0113 Down through the open hatch
+
+The tester opened the hatch with its switch and still could not get
+down to the power room, for the soldier's weapon or the power switch.
+Followed as they would, with X, O and F:
+
+- F, once the hatch was open, pressed its switch again and shut it. A
+  switch whose door is open now is left out of what F turns to, and
+  facing it F goes on to what else is near; F twice quickly still
+  presses it.
+- X listed the open hatch as "door to a new area", and O stopped the
+  player beside it. A hatch over a ladder is no way of its own now -
+  the ladder is - and X's ladder says the hatch only while it is shut.
+- At the hatch, "Ladder here, the way goes down it: F climbs", and F
+  climbed the ladder up to the roof, a meter nearer, twelve meters up.
+  F now takes the ladder the way goes by first.
+- The hatch opens by standing up on its hinge, a metal wall over the
+  ladder's head, where its top had been put: the climb walked into it.
+  A ladder's top on a hatch moves across the hatchway, to the side the
+  ladder is climbed from: the player steps off that edge facing the
+  ladder, and the game catches it.
+
+The test player, from the switch, was led down to the power switch in
+two seconds of climbing.
