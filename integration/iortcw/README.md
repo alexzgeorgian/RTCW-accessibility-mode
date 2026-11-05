@@ -1992,3 +1992,24 @@ each step:
 
 The test player climbed from the power room through the hatch and up to
 the floor above the platform in a minute.
+
+### 0103 The edge guard: never over a fall that kills, every way, and steep slopes
+
+The tester: "I am getting lost, falling down continuously." The edge
+guard let go of W at a drop that would hurt - "Edge. Drop 20 meters. W
+again goes over" - and W pressed again there, out of habit, went over,
+whatever the drop. It guarded only walking forward, and nothing at all
+on a slope too steep to stand on, where the player slides off with no
+say in it: a test player went down a station roof a ledge at a time and
+over its edge.
+
+- A fall that would kill - by the game's own falling damage, or with no
+  floor found below - is never gone over by pressing the key again:
+  "Edge. Drop 20 meters, a fall that would kill you. Stopped". Jump,
+  held, still goes over, for the way's own jumps.
+- Backing, and side-stepping, are guarded as walking forward is: the
+  way the player is going is taken from the keys held, or how they move,
+  and every walk key is let go.
+- A slope too steep to stand on just ahead, with a fall that hurts below
+  it, stops the player as an edge does: "Edge. A steep slope you would
+  slide off. Stopped".

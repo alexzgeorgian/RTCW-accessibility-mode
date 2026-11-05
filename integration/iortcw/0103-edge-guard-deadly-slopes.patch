@@ -1,0 +1,129 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 94cf1375..424e83d2 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2945,6 +2945,7 @@ static void ETA_StairsKeepFrame(void)
+ #define ETA_EDGE_AGAIN_NEAR  64.0f
+ #define ETA_EDGE_SAY_MS      2000
+ #define ETA_FALL_DELTA_HURT  38.75f   /* the game's own: a fall that hurts */
++#define ETA_FALL_DELTA_KILLS 77.0f    /* the game's own: a fall that kills */
+ 
+ static struct
+ {
+@@ -2960,24 +2961,75 @@ static void ETA_EdgeGuardFrame(void)
+ 	trace_t             trace;
+ 	vec3_t              dir, lip, bottom;
+ 	float               speed, yaw, rise, walked, drop, hurt, deep;
+-	qboolean            edge;
++	qboolean            edge, deadly;
+ 
+ 	if (!eta_edgeGuard.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
+ 	    || ps->groundEntityNum == ENTITYNUM_NONE || (ps->pm_flags & PMF_LADDER) || CG_AccessibilityClimbing()
+-	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || cmd.forwardmove <= 0 || cmd.upmove > 0)
++	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || ( !cmd.forwardmove && !cmd.rightmove ) || cmd.upmove > 0)
+ 	{
+ 		return;
+ 	}
+ 
+-	/* Stopped here a moment ago, and W pressed again: over, on purpose. */
+-	if (eta_edge.stoppedAt && cg.time >= eta_edge.stoppedAt && cg.time - eta_edge.stoppedAt < ETA_EDGE_AGAIN_MS
+-	    && Distance(ps->origin, eta_edge.stoppedFrom) < ETA_EDGE_AGAIN_NEAR)
++	speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++	/* Whichever way the player is going - backing or side-stepping too:
++	   the tester kept falling at the middle station. */
++	if (speed > 40.0f)
+ 	{
+-		return;
++		yaw = vectoyaw(ps->velocity);
++	}
++	else
++	{
++		vec3_t wish, fwd, right;
++
++		AngleVectors(ps->viewangles, fwd, right, NULL);
++		fwd[2] = right[2] = 0.0f;
++		VectorScale(fwd, (float)cmd.forwardmove, wish);
++		VectorMA(wish, (float)cmd.rightmove, right, wish);
++		yaw = vectoyaw(wish);
++	}
++	/* A slope too steep to stand on, just ahead: walked onto, the player
++	   slides off with no say in it - the test player went down a station
++	   roof a ledge at a time, and over its edge. Stopped as at an edge,
++	   with how far the slide ends below. */
++	{
++		vec3_t  dir2, ahead, down;
++		trace_t slope;
++
++		VectorSet(dir2, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++		VectorMA(ps->origin, speed * ETA_EDGE_STOP_TIME + ETA_EDGE_STOP_MARGIN + 16.0f, dir2, ahead);
++		VectorCopy(ahead, down);
++		down[2] -= 96.0f;
++		CG_Trace(&slope, ahead, NULL, NULL, down, ps->clientNum, MASK_PLAYERSOLID);
++		if (!slope.startsolid && slope.fraction < 1.0f && slope.plane.normal[2] < 0.7f && slope.plane.normal[2] > 0.05f)
++		{
++			vec3_t  far, bottom2;
++			trace_t fall;
++
++			VectorMA(ahead, 96.0f, dir2, far);
++			VectorCopy(far, bottom2);
++			bottom2[2] -= 2048.0f;
++			CG_Trace(&fall, far, NULL, NULL, bottom2, ps->clientNum, MASK_PLAYERSOLID | MASK_WATER);
++			walked = 0.0f;
++			edge   = qtrue;
++			rise   = 0.0f;
++			if (fall.fraction >= 1.0f
++			    || ps->origin[2] - fall.endpos[2] >= ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_HURT,
++			                                                                            (float)ps->gravity))
++			{
++				trap_SendConsoleCommand("-forward\n-back\n-moveleft\n-moveright\n");
++				eta_edge.stoppedAt = cg.time;
++				VectorCopy(ps->origin, eta_edge.stoppedFrom);
++				if (cg.time - eta_edge.saidAt >= ETA_EDGE_SAY_MS || cg.time < eta_edge.saidAt)
++				{
++					eta_edge.saidAt = cg.time;
++					ETA_HudNarrator_HoldPassive(cg.time);
++					ETA_Speech_Say("Edge. A steep slope you would slide off. Stopped");
++				}
++				return;
++			}
++		}
+ 	}
+ 
+-	speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
+-	yaw   = speed > 40.0f ? vectoyaw(ps->velocity) : ps->viewangles[YAW];
+ 	walked = ETA_StairsKeepProbe(yaw, &rise, &edge);
+ 	if (!edge || walked > speed * ETA_EDGE_STOP_TIME + ETA_EDGE_STOP_MARGIN)
+ 	{
+@@ -3000,8 +3052,20 @@ static void ETA_EdgeGuardFrame(void)
+ 		return;
+ 	}
+ 
+-	/* The walk key let go - every key on it, as typed at the console. */
+-	trap_SendConsoleCommand("-forward\n");
++	/* Stopped here a moment ago, and the key pressed again: over, on
++	   purpose - but never over a fall that kills. The tester pressed W
++	   again out of habit at the tram's gap and died, again and again;
++	   jump, held, still goes over. */
++	deadly = (qboolean)( trace.fraction >= 1.0f
++	                     || drop >= ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_KILLS, (float)ps->gravity) );
++	if (!deadly && eta_edge.stoppedAt && cg.time >= eta_edge.stoppedAt && cg.time - eta_edge.stoppedAt < ETA_EDGE_AGAIN_MS
++	    && Distance(ps->origin, eta_edge.stoppedFrom) < ETA_EDGE_AGAIN_NEAR)
++	{
++		return;
++	}
++
++	/* The walk keys let go - every key on them, as typed at the console. */
++	trap_SendConsoleCommand("-forward\n-back\n-moveleft\n-moveright\n");
+ 	eta_edge.stoppedAt = cg.time;
+ 	VectorCopy(ps->origin, eta_edge.stoppedFrom);
+ 	if (cg.time - eta_edge.saidAt >= ETA_EDGE_SAY_MS || cg.time < eta_edge.saidAt)
+@@ -3010,7 +3074,8 @@ static void ETA_EdgeGuardFrame(void)
+ 
+ 		eta_edge.saidAt = cg.time;
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say(trace.fraction >= 1.0f ? "Edge. A long drop. W again goes over"
++		ETA_Speech_Say(deadly ? ( trace.fraction >= 1.0f ? "Edge. A fall here would kill you. Stopped"
++		                          : va("Edge. Drop %d meters, a fall that would kill you. Stopped", meters) )
+ 		               : va("Edge. Drop %d %s. W again goes over", meters < 1 ? 1 : meters,
+ 		                    meters == 1 ? "meter" : "meters"));
+ 	}
