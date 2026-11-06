@@ -2205,3 +2205,25 @@ used up, and never lets it be taken. F turned to the plate and said the
 player was full. Used-up meals and drinks are now left out of F, T and
 what is said round about. Tested: at 90 health a whole meal is eaten,
 to 100; eaten to the plate, F and T go on to what else there is.
+
+### 0116 O goes on when the way out is shut; places named by what is in them
+
+The tester, in the village: O was to lead the way on, but led nowhere,
+and they had to use X all the time. The level's way out is shut until
+the story opens it, and O said "No way to the way out from here yet".
+Now, when the way out cannot be reached, O says "The way out is not
+open yet. On to the nearest place not explored" and leads to X's first
+entry; O again goes on to the next.
+
+They also asked for every part of a level to be named, as in the Enemy
+Territory mode, and where the game names nothing, by how it looks. Areas
+are now named by the map's own furniture in them, read from its
+surfaces: beds a bedroom, bunks a bunk room, a stove or sink a kitchen,
+pews a church, tombs or bones a crypt, wine racks a wine cellar, hay a
+barn, a generator a generator room, a desk, radio or telephone an
+office, books a study, armchairs or a fireplace a sitting room, tables
+and chairs a dining room, crates and barrels a store room. Outdoors the
+ground is said - "the snowy square", "the grassy alley" - and a truck,
+a cart, hay, sandbags or trees mark the place. A plain room under the
+roof is the attic, one above the ground floor upstairs. In the village:
+two wine cellars, a crypt, a barn, a study, a generator room, a bedroom.

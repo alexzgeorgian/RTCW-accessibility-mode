@@ -1,0 +1,308 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 144f5538..340f9db3 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -476,9 +476,15 @@ static void ETA_AreasOpenings(void)
+ }
+ 
+ /* From cg_accessibility_world.c, once the map's areas are read. */
++/* What each area is by what is in it, worked out once (ETA_AreaLook). */
++static int eta_areaLookDone[ETA_AREAS_MAX];   /* 1 once worked out */
++static char eta_areaLookKind[ETA_AREAS_MAX][24];
++static char eta_areaLookMark[ETA_AREAS_MAX][32];
++
+ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
++	memset(eta_areaLookDone, 0, sizeof(eta_areaLookDone));
+ 	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.bots    = bots;
+ 	/* Without the bots' rooms, cut at every door, not only those the map
+@@ -739,11 +745,140 @@ static void ETA_AreaLike(int area, char *out, size_t size);
+  * named by what is in it and where it is. Two of the same name keep their
+  * number to tell them apart: "the room with a switch, 4".
+  */
++/*
++ * What a place is by what is in it - the map's own furniture, read from
++ * its surfaces: beds make a bedroom, a stove a kitchen, pews a church,
++ * crates a store room. The tester, used to the Enemy Territory mode's
++ * place names, asked for every part of a level to be named, and where
++ * the game names nothing, to be named by how it looks.
++ */
++#define ETA_AREA_LOOK_ROOM   0
++#define ETA_AREA_LOOK_OUT    1
++
++
++static void ETA_AreaLook(int area, qboolean outdoors, const char **kind, const char **mark)
++{
++	enum
++	{
++		L_BED, L_BUNK, L_STOVE, L_SINK, L_TOILET, L_PEW, L_FURNACE, L_GENERATOR, L_OFFICE, L_BOOK,
++		L_SEAT, L_TABLE, L_CHAIR, L_STORE, L_CELL, L_BONES, L_TRUCK, L_CART, L_TREE, L_SANDBAG, L_WINE, L_HAY, L_TOMB,
++		L_COUNT
++	};
++	static const struct
++	{
++		const char *name;
++		int         look;
++	} names[] =
++	{
++		{ "Bed", L_BED }, { "Bunk bed", L_BUNK }, { "Stove", L_STOVE }, { "Sink", L_SINK },
++		{ "Toilet", L_TOILET }, { "Bath", L_TOILET }, { "Pew", L_PEW }, { "Altar", L_PEW },
++		{ "Furnace", L_FURNACE }, { "Generator", L_GENERATOR }, { "Radio", L_OFFICE },
++		{ "Telephone", L_OFFICE }, { "Typewriter", L_OFFICE }, { "Desk", L_OFFICE },
++		{ "Bookcase", L_BOOK }, { "Books", L_BOOK }, { "Armchair", L_SEAT }, { "Sofa", L_SEAT },
++		{ "Fireplace", L_SEAT }, { "Piano", L_SEAT }, { "Table", L_TABLE }, { "Chair", L_CHAIR },
++		{ "Bench", L_CHAIR }, { "Crate", L_STORE }, { "Barrel", L_STORE }, { "Shelves", L_STORE },
++		{ "Cupboard", L_STORE }, { "Manacles", L_CELL }, { "Bones", L_BONES }, { "Truck", L_TRUCK },
++		{ "Cart", L_CART }, { "Tree", L_TREE }, { "Hedge", L_TREE }, { "Sandbags", L_SANDBAG },
++		{ "Wine rack", L_WINE }, { "Hay", L_HAY }, { "Tomb", L_TOMB }
++	};
++	int    count[L_COUNT], i, k, n = CG_AccessibilityPropCount();
++	vec3_t center;
++
++	*kind = NULL;
++	*mark = NULL;
++	if (area < 0 || area >= ETA_AREAS_MAX)
++	{
++		return;
++	}
++	if (eta_areaLookDone[area])
++	{
++		*kind = eta_areaLookKind[area][0] ? eta_areaLookKind[area] : NULL;
++		*mark = eta_areaLookMark[area][0] ? eta_areaLookMark[area] : NULL;
++		return;
++	}
++
++	memset(count, 0, sizeof(count));
++	for (i = 0; i < n; i++)
++	{
++		const char *name = CG_AccessibilityPropGet(i, center);
++
++		if (!name || ETA_AreaOf(center) != area)
++		{
++			continue;
++		}
++		for (k = 0; k < (int)ARRAY_LEN(names); k++)
++		{
++			if (!Q_stricmp(names[k].name, name))
++			{
++				count[names[k].look]++;
++				break;
++			}
++		}
++	}
++
++	eta_areaLookKind[area][0] = '\0';
++	eta_areaLookMark[area][0] = '\0';
++	if (outdoors)
++	{
++		const char *m = count[L_TRUCK] ? "with a truck" : count[L_CART] ? "with a cart" : count[L_HAY] ? "with hay"
++		                : count[L_SANDBAG] ? "with sandbags" : count[L_TREE] >= 2 ? "with trees" : NULL;
++
++		if (m)
++		{
++			Q_strncpyz(eta_areaLookMark[area], m, sizeof(eta_areaLookMark[area]));
++		}
++	}
++	else
++	{
++		const char *r = count[L_PEW] ? "church"
++		                : count[L_CELL] ? "cell"
++		                : count[L_TOMB] || count[L_BONES] >= 2 ? "crypt"
++		                : count[L_WINE] ? "wine cellar"
++		                : count[L_HAY] ? "barn"
++		                : count[L_BUNK] ? "bunk room"
++		                : count[L_BED] ? "bedroom"
++		                : count[L_TOILET] ? "bathroom"
++		                : count[L_STOVE] || count[L_SINK] ? "kitchen"
++		                : count[L_FURNACE] ? "boiler room"
++		                : count[L_GENERATOR] ? "generator room"
++		                : count[L_OFFICE] ? "office"
++		                : count[L_BOOK] ? "study"
++		                : count[L_SEAT] ? "sitting room"
++		                : count[L_TABLE] && count[L_CHAIR] ? "dining room"
++		                : count[L_STORE] >= 2 ? "store room" : NULL;
++
++		if (r)
++		{
++			Q_strncpyz(eta_areaLookKind[area], r, sizeof(eta_areaLookKind[area]));
++		}
++	}
++	eta_areaLookDone[area] = 1;
++	*kind = eta_areaLookKind[area][0] ? eta_areaLookKind[area] : NULL;
++	*mark = eta_areaLookMark[area][0] ? eta_areaLookMark[area] : NULL;
++}
++
++/* What the ground outdoors is: snow in the village, grass, gravel. */
++static const char *ETA_AreaGround(const vec3_t at)
++{
++	trace_t trace;
++	vec3_t  down;
++
++	VectorCopy(at, down);
++	down[2] -= 96.0f;
++	CG_Trace(&trace, at, NULL, NULL, down, cg.predictedPlayerState.clientNum, MASK_SOLID);
++	if (trace.fraction >= 1.0f)
++	{
++		return NULL;
++	}
++	return ( trace.surfaceFlags & SURF_SNOW ) ? "snowy" : ( trace.surfaceFlags & SURF_GRASS ) ? "grassy"
++	       : ( trace.surfaceFlags & SURF_GRAVEL ) ? "gravel" : NULL;
++}
++
+ static void ETA_AreaNameBase(int area, char *out, size_t size)
+ {
+ 	vec3_t      at, mins, maxs, wayOut, foot, top, feature, lead;
+ 	ETA_Place   place;
+-	char        mark[80], station[64];
++	char        mark[80], station[64], look[48], lookMarkText[32] = "";
+ 	const char *kind;
+ 	int         i, k;
+ 	qboolean    tried;
+@@ -781,6 +916,48 @@ static void ETA_AreaNameBase(int area, char *out, size_t size)
+ 		kind = "small room";
+ 	}
+ 
++	/* What it is by what is in it, or the ground outdoors. */
++	{
++		qboolean    outdoors = (qboolean)( !Q_stricmp(kind, "street") || !Q_stricmp(kind, "alley")
++		                                   || !Q_stricmp(kind, "square") || !Q_stricmp(kind, "open ground") );
++		const char *lookKind, *lookMark, *ground;
++
++		ETA_AreaLook(area, outdoors, &lookKind, &lookMark);
++		if (lookKind && Q_stricmp(kind, "corridor"))
++		{
++			kind = lookKind;
++		}
++		/* A plain room: under the roof, the attic; above the ground
++		   floor, upstairs. */
++		else if (!lookKind && ( !Q_stricmp(kind, "room") || !Q_stricmp(kind, "small room") ))
++		{
++			trace_t roof;
++			vec3_t  up;
++
++			VectorCopy(at, up);
++			up[2] += 256.0f;
++			CG_Trace(&roof, at, NULL, NULL, up, cg.predictedPlayerState.clientNum, MASK_SOLID);
++			if (roof.fraction < 1.0f && ( roof.surfaceFlags & SURF_ROOF ))
++			{
++				kind = !Q_stricmp(kind, "room") ? "attic" : "small attic";
++			}
++			else if (place.upper)
++			{
++				Q_strncpyz(look, va("upstairs %s", kind), sizeof(look));
++				kind = look;
++			}
++		}
++		if (outdoors && ( ground = ETA_AreaGround(at) ) != NULL)
++		{
++			Q_strncpyz(look, va("%s %s", ground, kind), sizeof(look));
++			kind = look;
++		}
++		if (lookMark)
++		{
++			Q_strncpyz(lookMarkText, lookMark, sizeof(lookMarkText));
++		}
++	}
++
+ 	/* What marks it, the first of these there is. */
+ 	mark[0] = '\0';
+ 	CG_AccessibilityTramStationText(at, station, sizeof(station));
+@@ -813,6 +990,10 @@ static void ETA_AreaNameBase(int area, char *out, size_t size)
+ 			Q_strncpyz(mark, k == 6 ? "with stairs up" : "with stairs down", sizeof(mark));
+ 		}
+ 	}
++	if (!mark[0] && lookMarkText[0])
++	{
++		Q_strncpyz(mark, lookMarkText, sizeof(mark));
++	}
+ 	if (!mark[0])
+ 	{
+ 		int toNew, doors = ETA_AreaDoorsOut(area, &toNew);
+@@ -1764,9 +1945,14 @@ void CG_AccessibilityAreasDump(void)
+ 				doors += eta_areas.exits[i].model > 0;
+ 			}
+ 		}
+-		CG_Printf("ETASWEEP area %d box %.0f %.0f %.0f to %.0f %.0f %.0f floor %.0f m2 ways %d doors %d\n", a,
+-		          mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], ETA_BspAreas_Floor(a) / ( 39.37f * 39.37f ),
+-		          ways, doors);
++		{
++			char name[128];
++
++			ETA_AreaName(a, name, sizeof(name));
++			CG_Printf("ETASWEEP area %d box %.0f %.0f %.0f to %.0f %.0f %.0f floor %.0f m2 ways %d doors %d name %s\n", a,
++			          mins[0], mins[1], mins[2], maxs[0], maxs[1], maxs[2], ETA_BspAreas_Floor(a) / ( 39.37f * 39.37f ),
++			          ways, doors, name);
++		}
+ 	}
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 445b3d7f..20ce74e2 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3922,6 +3922,19 @@ static void ETA_FaceTheWayNow(void)
+ 		char        what[48];
+ 
+ 		Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
++
++		/* The level's way out, not open yet - shut until the story opens
++		   it: on to the nearest place not explored, as X's first. The
++		   tester, in the village, heard O say there was no way, and had
++		   to use X all the time. O again goes on to X's next. */
++		if (!Q_stricmp(what, "the way out"))
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("The way out is not open yet. On to the nearest place not explored");
++			CG_AccessibilityAreaExits();
++			CG_AccessibilityWayOut();
++			return;
++		}
+ 		CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+ 		ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index cb76ae08..54d1f223 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -1687,6 +1687,26 @@ void CG_AccessibilityLoadProps(void)
+ 	CG_DPrintf("accessibility: %d thing(s) in the rooms of %s\n", eta_mapPropCount, cgs.mapname);
+ }
+ 
++static void ETA_WorldRead(void);
++
++int CG_AccessibilityPropCount(void)
++{
++	ETA_WorldRead();
++	return eta_mapPropCount;
++}
++
++/* A thing in the rooms, by its index: its name, and the middle of it. */
++const char *CG_AccessibilityPropGet(int index, vec3_t center)
++{
++	if (index < 0 || index >= eta_mapPropCount)
++	{
++		return NULL;
++	}
++	VectorAdd(eta_mapProps[index].mins, eta_mapProps[index].maxs, center);
++	VectorScale(center, 0.5f, center);
++	return eta_mapProps[index].name;
++}
++
+ /* The thing a point is on, NULL for none: a trace's end on its surface
+    lands at its box, give or take - and walking into it, the player's
+    own box stops half its width short. */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index e0fdc44b..3e95dd40 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,8 @@ qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
+ int CG_AccessibilitySwitchDoorShut( const vec3_t point );
+ int CG_AccessibilityDoorShutNow( int model );
+ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
++int CG_AccessibilityPropCount( void );
++const char *CG_AccessibilityPropGet( int index, vec3_t center );
+ qboolean CG_AccessibilityHatchAtLadder( int model );
+ qboolean CG_AccessibilitySwitchOff( int model );
+ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );
