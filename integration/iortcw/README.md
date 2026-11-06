@@ -2255,3 +2255,19 @@ room the things come into sight, and T has them. With none left, O goes
 on to the nearest place not explored, as before. Secret areas, things
 that come later in the level and things shut inside something to break
 are not counted.
+
+### 0119 O no longer turns you round in circles
+
+The tester: O rolled them round in circles instead of leading through the
+openings. In the village a test player led by O alone went round and round
+at the switchback stairs on the way to the wine cellar: with the way's
+next corner a step away, O faced the corner and said "1 meter, then back";
+turned there, the next O said it again. With the corner closer than about
+a meter and a half, O now faces on past it, and says no turn. And O's lead
+into rooms with things not yet found goes only to rooms not yet been in: a
+room been in whose thing stays out of sight - up high, behind something -
+was led to again and again. An area's name is now the same each time it is
+said, from the first time: worked out from another spot it had come out
+otherwise - "the corridor" while O led there, "the wine cellar" on
+arrival. A test player led by O alone then went from the start to the
+wine cellar and on into new rooms.

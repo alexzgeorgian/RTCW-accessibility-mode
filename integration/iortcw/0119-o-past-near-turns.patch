@@ -1,0 +1,265 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 0648418d..5fd88c4c 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -303,15 +303,38 @@ static void ETA_AreaName(int area, char *out, size_t size);
+    across, if there is one - to its middle, not to the things. */
+ qboolean CG_AccessibilityAreasLeadUnfound(void)
+ {
+-	vec3_t thing, mins, maxs, mid, at;
+-	char   name[128];
+-	int    here = CG_AccessibilityAreaHere(), area, n;
++	static vec3_t points[256];
++	vec3_t        thing, mins, maxs, mid, at;
++	char          name[128];
++	int           here = CG_AccessibilityAreaHere(), area = -1, n, i, count;
++	float         best = 1.0e9f;
++	const float  *me = cg.predictedPlayerState.origin;
+ 
+-	if (!eta_areas.loaded || !CG_AccessibilityThingsUnfoundNearest(here, thing))
++	if (!eta_areas.loaded)
+ 	{
+ 		return qfalse;
+ 	}
+-	area = ETA_AreaOf(thing);
++	/* Only into rooms not yet been in: one been in, its thing still not
++	   in sight - up high, or behind something - would be led to again
++	   and again, round in circles. */
++	count = CG_AccessibilityThingsUnfoundPoints(points, ARRAY_LEN(points));
++	for (i = 0; i < count; i++)
++	{
++		int   a = ETA_AreaOf(points[i]);
++		float far;
++
++		if (a < 0 || a == here || eta_areas.number[a])
++		{
++			continue;
++		}
++		far = Distance(me, points[i]) + fabsf(points[i][2] - me[2]);
++		if (far < best)
++		{
++			best = far;
++			area = a;
++			VectorCopy(points[i], thing);
++		}
++	}
+ 	if (area < 0 || !ETA_BspAreas_Bounds(area, mins, maxs))
+ 	{
+ 		return qfalse;
+@@ -584,11 +607,13 @@ static void ETA_AreasOpenings(void)
+ static int eta_areaLookDone[ETA_AREAS_MAX];   /* 1 once worked out */
+ static char eta_areaLookKind[ETA_AREAS_MAX][24];
+ static char eta_areaLookMark[ETA_AREAS_MAX][32];
++static char eta_areaNameCache[ETA_AREAS_MAX][96];   /* each area's name, once said */
+ 
+ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+ 	memset(eta_areaLookDone, 0, sizeof(eta_areaLookDone));
++	memset(eta_areaNameCache, 0, sizeof(eta_areaNameCache));
+ 	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.bots    = bots;
+ 	/* Without the bots' rooms, cut at every door, not only those the map
+@@ -978,7 +1003,27 @@ static const char *ETA_AreaGround(const vec3_t at)
+ 	       : ( trace.surfaceFlags & SURF_GRAVEL ) ? "gravel" : NULL;
+ }
+ 
++static void ETA_AreaNameWork(int area, char *out, size_t size);
++
++/* An area's name, the same every time it is said: worked out from where
++   the player was once, it could come out otherwise from another spot -
++   "the corridor" said where O was leading, "the wine cellar" on
++   arrival. Kept from the first time. */
+ static void ETA_AreaNameBase(int area, char *out, size_t size)
++{
++	if (area >= 0 && area < ETA_AREAS_MAX && eta_areaNameCache[area][0])
++	{
++		Q_strncpyz(out, eta_areaNameCache[area], size);
++		return;
++	}
++	ETA_AreaNameWork(area, out, size);
++	if (area >= 0 && area < ETA_AREAS_MAX && out[0])
++	{
++		Q_strncpyz(eta_areaNameCache[area], out, sizeof(eta_areaNameCache[area]));
++	}
++}
++
++static void ETA_AreaNameWork(int area, char *out, size_t size)
+ {
+ 	vec3_t      at, mins, maxs, wayOut, foot, top, feature, lead;
+ 	ETA_Place   place;
+@@ -1027,7 +1072,7 @@ static void ETA_AreaNameBase(int area, char *out, size_t size)
+ 		const char *lookKind, *lookMark, *ground;
+ 
+ 		ETA_AreaLook(area, outdoors, &lookKind, &lookMark);
+-		if (lookKind && Q_stricmp(kind, "corridor"))
++		if (lookKind)
+ 		{
+ 			kind = lookKind;
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 04233bdf..94d204bc 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3516,9 +3516,10 @@ static const char *ETA_TurnAheadText(void)
+ 		return "";
+ 	}
+ 	meters = (int)(distance * ETA_QU_TO_METERS + 0.5f);
+-	if (meters < 1)
++	/* A step away, O faced on round the turn already: nothing to say. */
++	if (distance < 56.0f)
+ 	{
+-		return va(" %s here.", side == 2 ? "Back" : side < 0 ? "Left" : "Right");
++		return "";
+ 	}
+ 	return va(" %d %s, then %s.", meters, meters == 1 ? "meter" : "meters",
+ 	          side == 2 ? "back" : side < 0 ? "left" : "right");
+@@ -3959,6 +3960,19 @@ static void ETA_FaceTheWayNow(void)
+ 		VectorSubtract(target, ps->origin, delta);
+ 		delta[2] = 0.0f;
+ 
++		/* The corner a step away: faced on round it, not into it. */
++		if (VectorLength(delta) < 56.0f)
++		{
++			vec3_t past;
++
++			if (CG_AccessibilityMarkerPastTurn(past))
++			{
++				VectorCopy(past, target);
++				VectorSubtract(target, ps->origin, delta);
++				delta[2] = 0.0f;
++			}
++		}
++
+ 		/* A closed door the way goes through, just ahead: no opening is
+ 		   found through it, and the nearest one either side led away from
+ 		   it - or, with none, the marker's whole report was said. It is
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index b4922d01..ab6b0e7f 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1205,6 +1205,24 @@ void CG_AccessibilityNavSweep_f(void)
+ 		CG_AccessibilityAreasDump();
+ 		return;
+ 	}
++	/* "marker": where the marker is, and the way there as it stands. */
++	if (!Q_stricmp(arg, "marker"))
++	{
++		int n = ETA_PathFinder_PointCount(), k;
++
++		CG_Printf("ETASWEEP marker %d at %.0f %.0f %.0f from %.0f %.0f %.0f points %d steer %d\n", eta_marker.active,
++		          eta_marker.origin[0], eta_marker.origin[1], eta_marker.origin[2], cg.predictedPlayerState.origin[0],
++		          cg.predictedPlayerState.origin[1], cg.predictedPlayerState.origin[2], n, eta_route.steerIndex);
++		for (k = 0; k < n; k++)
++		{
++			vec3_t p;
++
++			ETA_PathFinder_Point(k, p);
++			CG_Printf("ETASWEEP mpoint %d kind %d %.0f %.0f %.0f\n", k, (int)ETA_PathFinder_PointKind(k), p[0], p[1], p[2]);
++		}
++		return;
++	}
++
+ 	/* "ladders": each of the map's ladders, its box and the floors it joins. */
+ 	if (!Q_stricmp(arg, "ladders"))
+ 	{
+@@ -2384,6 +2402,35 @@ qboolean CG_AccessibilityMarkerSteerPoint(vec3_t out)
+ #define ETA_ROUTE_TURN_PAST  64.0f   /* this far on past the point: the way's new heading */
+ #define ETA_ROUTE_TURN_ANGLE 35.0f
+ 
++/* Where the way goes on after its next turn: a little past the corner.
++   With the corner a step away, O faces on round it: turned to face the
++   corner itself, at the switchback stairs on the village's way to the
++   wine cellar, the test player was told "1 meter, then back", turned,
++   and was told it again, round and round. */
++qboolean CG_AccessibilityMarkerPastTurn(vec3_t out)
++{
++	int    count = ETA_PathFinder_PointCount(), i;
++	vec3_t point, past;
++
++	if (!eta_marker.active || !eta_route.done || !eta_route.steering || eta_route.steerIndex <= 0
++	    || eta_route.steerIndex >= count - 1)
++	{
++		return qfalse;
++	}
++	for (i = eta_route.steerIndex + 1; i < count; i++)
++	{
++		ETA_PathFinder_Point(i, point);
++		VectorSubtract(point, eta_route.steer, past);
++		past[2] = 0.0f;
++		if (VectorLength(past) >= ETA_ROUTE_TURN_PAST)
++		{
++			VectorCopy(point, out);
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ qboolean CG_AccessibilityMarkerTurn(float *distance, int *side)
+ {
+ 	const playerState_t *ps    = &cg.predictedPlayerState;
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 210853be..eb00fbd7 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -510,36 +510,21 @@ int CG_AccessibilityThingsUnfound(int area)
+ 	return n;
+ }
+ 
+-/* The nearest thing not yet come across outside an area: where O leads
+-   to look - into the room, not to the thing. */
+-qboolean CG_AccessibilityThingsUnfoundNearest(int notArea, vec3_t at)
++/* Where the things not yet come across are: for O to lead into their
++   rooms - to the room, not to the thing. */
++int CG_AccessibilityThingsUnfoundPoints(vec3_t *out, int max)
+ {
+-	int   i, best = -1;
+-	float bestFar = 1.0e9f;
++	int i, n = 0;
+ 
+-	for (i = 0; i < eta_things.count; i++)
++	for (i = 0; i < eta_things.count && n < max; i++)
+ 	{
+-		const eta_thing_t *thing = &eta_things.things[i];
+-		float              far;
+-
+-		if (!ETA_ThingUnfound(thing) || ( notArea >= 0 && CG_AccessibilityAreaHolds(notArea, thing->point) ))
+-		{
+-			continue;
+-		}
+-		far = Distance(cg.predictedPlayerState.origin, thing->point)
+-		      + fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]);
+-		if (far < bestFar)
++		if (ETA_ThingUnfound(&eta_things.things[i]))
+ 		{
+-			bestFar = far;
+-			best    = i;
++			VectorCopy(eta_things.things[i].point, out[n]);
++			n++;
+ 		}
+ 	}
+-	if (best < 0)
+-	{
+-		return qfalse;
+-	}
+-	VectorCopy(eta_things.things[best].point, at);
+-	return qtrue;
++	return n;
+ }
+ 
+ static void ETA_ThingsProgress(int area, const char *where, char *out, size_t size)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 1265d575..917080a0 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2320,7 +2320,8 @@ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ void CG_AccessibilityGameSaved( void );
+ void CG_AccessibilityExploredRestart( void );
+ int CG_AccessibilityThingsUnfound( int area );
+-qboolean CG_AccessibilityThingsUnfoundNearest( int notArea, vec3_t at );
++int CG_AccessibilityThingsUnfoundPoints( vec3_t *out, int max );
++qboolean CG_AccessibilityMarkerPastTurn( vec3_t out );
+ qboolean CG_AccessibilityAreasLeadUnfound( void );
+ void CG_AccessibilityFrontierClear( void );
+ int CG_AccessibilitySaveLoading( void );
