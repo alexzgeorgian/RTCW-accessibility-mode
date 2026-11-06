@@ -2313,3 +2313,42 @@ went round in circles three ways, now gone:
 The test player then went from the start through the rooms and the
 cellars, down through the hole and on, the village's first objective
 done on the way. The tram level's walks still pass.
+
+### 0123 No drop loops
+
+The tester, going for a rifle on a walkway in the village, kept climbing
+the same ladder. From the top, the way dropped four metres back into the
+street, and from the street went up the ladder again. A drop deeper than
+a storey is now taken only when there is no way on foot, as a jump is.
+And "It drops here" is no longer said on a ladder, or with the way going
+down one.
+
+### 0124 Switches through relays; O on past ways with no way
+
+In the first catacomb level nearly every switch opens its door through a
+relay, and the switch was found for one door in ten: X said "opened by a
+switch or by what happens", and O could not lead to it. Relays are now
+followed, three deep, and all ten doors have their switch. With the way
+out shut, an opening O finds no way to is said once, "On to the next",
+and put last on X's list; from the same spot, after one round, O stops
+and says a jump, a switch or something to break may be what is needed.
+Before, it said "No way" a hundred and seventy times. And O can no longer
+call itself round without end.
+
+### 0125 Openings on the floor; a start out of the corner
+
+In the second catacomb level an opening's spot was worked out at the
+height of its top, four metres up, and no way was ever found to it: it
+is now put on the floor beyond. And a player squeezed into a corner,
+their square in the walls on two sides, had no way at all from it: a
+clear square is now looked for up to two squares away. A test player led
+by O alone went through eight rooms of the level.
+
+### 0126 The way keeps to the middle of narrow walkways
+
+The way to the rifle runs along the top of a wall 1.8 metres wide with a
+five metre drop beside it, and the way ran along the very edge: the test
+player stepped off again and again. A square with a drop within half a
+square of its middle now costs three squares more, so the way keeps to
+the middle. From the tester's save the test player then reached the
+rifle. The tram level's walks still pass.
