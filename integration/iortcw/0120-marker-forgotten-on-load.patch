@@ -1,0 +1,43 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index ab6b0e7f..a6f14865 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2049,6 +2049,14 @@ void CG_AccessibilityMarkerClear(void)
+ 	ETA_RouteForget();
+ }
+ 
++/* The level started again in place - a save loaded after a death: a
++   marker set since is gone without a word, as is the way to it. */
++void CG_AccessibilityMarkerForget(void)
++{
++	eta_marker.active = qfalse;
++	ETA_RouteForget();
++}
++
+ /**
+  * @brief Which of the marker's three sounds to play, by where it is.
+  *
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 917080a0..e4d0d615 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2250,6 +2250,7 @@ void CG_AccessibilityMarkerFrame( void );
+ void CG_AccessibilityMarkerApproach( void );
+ void CG_AccessibilityMarkerWhere( void );
+ void CG_AccessibilityMarkerClear( void );
++void CG_AccessibilityMarkerForget( void );
+ int CG_AccessibilityRouteStep( const float from[3], float to[3] );
+ void CG_AccessibilityChoose( const vec3_t point, const char *name );
+ qboolean CG_AccessibilityExitPoint( const vec3_t from, vec3_t out );
+diff --git a/SP/code/cgame/cg_servercmds.c b/SP/code/cgame/cg_servercmds.c
+index 3c967a9a..2c73cd7c 100644
+--- a/SP/code/cgame/cg_servercmds.c
++++ b/SP/code/cgame/cg_servercmds.c
+@@ -623,6 +623,7 @@ static void CG_MapRestart( void ) {
+ 	}
+ #ifdef FEATURE_ACCESSIBILITY
+ 	CG_AccessibilityExploredRestart();
++	CG_AccessibilityMarkerForget();
+ #endif
+ 
+ 	memset( &cg.lastWeapSelInBank[0], 0, MAX_WEAP_BANKS * sizeof( int ) );  // clear weapon bank selections

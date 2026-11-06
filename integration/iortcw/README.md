@@ -2271,3 +2271,11 @@ said, from the first time: worked out from another spot it had come out
 otherwise - "the corridor" while O led there, "the wine cellar" on
 arrival. A test player led by O alone then went from the start to the
 wine cellar and on into new rooms.
+
+### 0120 Marker forgotten when a save is loaded
+
+The tester: after a death, a marker set on a place that could not be
+reached was still there once the save was loaded, and had to be removed by
+hand. A save of the same level is loaded by restarting the level in place,
+without starting the cgame again, so the marker lived on. Now when the
+level restarts the marker and the way to it are forgotten, without a word.
