@@ -1,0 +1,98 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index ab72acc7..445b3d7f 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4324,6 +4324,14 @@ void CG_AccessibilityAimFrame(void)
+ 			   ammo, health, or a weapon carried already with all its ammo.
+ 			   The tester pressed F at a weapon on the floor and nothing
+ 			   happened, with nothing said. */
++			/* Eaten to the plate: said so, not that the player is full. */
++			if (use && item && CG_AccessibilityItemUsedUp(&cg_entities[body].currentState))
++			{
++				ETA_AimStop();
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say("Only an empty plate: this meal has been eaten. T finds more health");
++				return;
++			}
+ 			if (use && item && cg_entities[body].currentState.modelindex > 0
+ 			    && cg_entities[body].currentState.modelindex < bg_numItems
+ 			    && !BG_CanItemBeGrabbed(&cg_entities[body].currentState, &cg.predictedPlayerState))
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index b0a8d153..1679a906 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -399,7 +399,7 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+ 		/* An item the map placed and not yet seen: any item there. */
+ 		if (thing->entityNum < 0)
+ 		{
+-			if (es->eType == ET_ITEM && !( es->eFlags & EF_NODRAW )
++			if (es->eType == ET_ITEM && !( es->eFlags & EF_NODRAW ) && !CG_AccessibilityItemUsedUp(es)
+ 			    && ETA_ThingNear(cg_entities[es->number].lerpOrigin, thing->point, 48.0f))
+ 			{
+ 				return qtrue;
+@@ -410,7 +410,7 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+ 		{
+ 			if (es->eType == ET_ITEM)
+ 			{
+-				return (qboolean)!( es->eFlags & EF_NODRAW );
++				return (qboolean)( !( es->eFlags & EF_NODRAW ) && !CG_AccessibilityItemUsedUp(es) );
+ 			}
+ 			return (qboolean)( es->eType == ET_EXPLOSIVE || es->eType == ET_MOVER );
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index cd38a8f3..cb76ae08 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2030,6 +2030,18 @@ static void ETA_NameFromModelPath(const char *path, char *out, size_t outSize)
+  * is guessed from shape: a thing with no name is left out rather than
+  * called something it might not be.
+  */
++/* A meal eaten to the plate, or a stein drunk: the game leaves it there,
++   used up, and never lets it be taken (bg_misc.c, density 1 << 9). The
++   tester, at 90 health in the village, tried to eat from a plate on a
++   table and heard "You carry all you can of this". */
++qboolean CG_AccessibilityItemUsedUp(const entityState_t *es)
++{
++	return (qboolean)( es->eType == ET_ITEM && es->density == ( 1 << 9 )
++	                   && es->modelindex > 0 && es->modelindex < bg_numItems
++	                   && ( bg_itemlist[es->modelindex].giType == IT_HEALTH
++	                        || bg_itemlist[es->modelindex].giType == IT_POWERUP ) );
++}
++
+ qboolean CG_AccessibilityObjectName(const entityState_t *es, char *out, size_t outSize)
+ {
+ 	int      index;
+@@ -2043,6 +2055,12 @@ qboolean CG_AccessibilityObjectName(const entityState_t *es, char *out, size_t o
+ 	{
+ 		gitem_t *item = (&bg_itemlist[es->modelindex]);
+ 
++		/* Used up: nothing to take, so not named as a thing. */
++		if (CG_AccessibilityItemUsedUp(es))
++		{
++			return qfalse;
++		}
++
+ 		if (item && item->pickup_name && item->pickup_name[0])
+ 		{
+ 			Q_strncpyz(out, item->pickup_name, outSize);
+@@ -2297,7 +2315,7 @@ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players,
+ 				Q_strncpyz(thing.name, ETA_CharacterKind(es), sizeof(thing.name));
+ 			}
+ 		}
+-		else if (es->eType == ET_ITEM && ground && !(es->eFlags & EF_NODRAW))
++		else if (es->eType == ET_ITEM && ground && !(es->eFlags & EF_NODRAW) && !CG_AccessibilityItemUsedUp(es))
+ 		{
+ 			gitem_t *item = (&bg_itemlist[es->modelindex]);
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 064f8a84..e0fdc44b 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2316,6 +2316,7 @@ void CG_AccessibilityThingsNoWay( const vec3_t at );
+ qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
+ int CG_AccessibilitySwitchDoorShut( const vec3_t point );
+ int CG_AccessibilityDoorShutNow( int model );
++qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ qboolean CG_AccessibilityHatchAtLadder( int model );
+ qboolean CG_AccessibilitySwitchOff( int model );
+ qboolean CG_AccessibilitySwitchOffAt( const vec3_t point );

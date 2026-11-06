@@ -2194,3 +2194,14 @@ before the end. The way now finds all of it:
 
 The fences are things to break: the way says "The way goes through
 something to break. Break it to get through: T lists it".
+
+### 0115 A meal eaten to the plate is not offered
+
+The tester, at 90 health in the village, could not eat the food on a
+table, and was told "You carry all you can of this". A hot meal is eaten
+in two goes, as much as the player needs each time, and then leaves its
+plate where it was: the game keeps the plate as the same item, marked
+used up, and never lets it be taken. F turned to the plate and said the
+player was full. Used-up meals and drinks are now left out of F, T and
+what is said round about. Tested: at 90 health a whole meal is eaten,
+to 100; eaten to the plate, F and T go on to what else there is.
