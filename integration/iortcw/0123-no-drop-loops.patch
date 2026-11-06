@@ -1,0 +1,36 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 36328452..2ed92e1b 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4006,7 +4006,12 @@ static void ETA_FaceTheWayNow(void)
+ 
+ 			VectorSubtract(target, ps->origin, flat);
+ 			flat[2] = 0.0f;
+-			if (drop > ETA_CLIMB_DROP_SAID && VectorLength(flat) < 160.0f && VectorLength(flat) >= 4.0f)
++			/* Standing, not on a ladder, and the way not down one: on the
++			   village's ladder to the walkway, partway up, the way's foot
++			   below was taken for a drop, and said, again and again. */
++			if (drop > ETA_CLIMB_DROP_SAID && VectorLength(flat) < 160.0f && VectorLength(flat) >= 4.0f
++			    && ps->groundEntityNum != ENTITYNUM_NONE && !( ps->pm_flags & PMF_LADDER )
++			    && !CG_AccessibilityMarkerLadderNext())
+ 			{
+ 				etaAimTarget_t way;
+ 				vec3_t         dir;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 7ffea380..c497019c 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -365,7 +365,12 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 	VectorCopy(end, start);
+ 	start[2] += 18.0f;
+ 	VectorCopy(start, down);
+-	down[2] -= 18.0f + lift + ETA_ROUTE_SEARCH_DROP;
++	/* A drop deeper than a storey only when there is no way on foot, as
++	   a jump: in the village the way from the top of a ladder dropped
++	   four metres back to the street, and from the street went up the
++	   ladder again - the tester kept climbing, and never got to the
++	   rifle on the walkway. */
++	down[2] -= 18.0f + lift + ( eta_route.jumps ? ETA_ROUTE_SEARCH_DROP : ETA_ROUTE_MAX_DROP );
+ 
+ 	trap_CM_BoxTrace(&trace, start, down, footMins, footMaxs, 0, MASK_PLAYERSOLID);
+ 
