@@ -1,0 +1,293 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 3a130505..9c5e8694 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -396,6 +396,34 @@ qboolean CG_AccessibilityAreasSomethingNew(void)
+ 	return qfalse;
+ }
+ 
++/* Ways O found no way to from where the player was: put last on X's list
++   when it is made again, so O goes on to the others first. In the
++   catacombs the test player was led to an opening behind a wall, and O
++   said "No way there from here yet" a hundred and seventy times. */
++#define ETA_AREA_NO_WAY_MAX 32
++static vec3_t eta_areaNoWay[ETA_AREA_NO_WAY_MAX];
++static int    eta_areaNoWayCount;
++
++void CG_AccessibilityAreasNoWay(const vec3_t point)
++{
++	VectorCopy(point, eta_areaNoWay[eta_areaNoWayCount % ETA_AREA_NO_WAY_MAX]);
++	eta_areaNoWayCount++;
++}
++
++static qboolean ETA_AreaNoWayNear(const vec3_t point)
++{
++	int i, n = eta_areaNoWayCount < ETA_AREA_NO_WAY_MAX ? eta_areaNoWayCount : ETA_AREA_NO_WAY_MAX;
++
++	for (i = 0; i < n; i++)
++	{
++		if (Distance(point, eta_areaNoWay[i]) < 96.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ void CG_AccessibilityGameSaved(void)
+ {
+ 	if (eta_areas.loaded)
+@@ -654,6 +682,7 @@ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+ 	memset(eta_areaLookDone, 0, sizeof(eta_areaLookDone));
+ 	memset(eta_areaNameCache, 0, sizeof(eta_areaNameCache));
++	eta_areaNoWayCount = 0;
+ 	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.bots    = bots;
+ 	/* Without the bots' rooms, cut at every door, not only those the map
+@@ -1805,6 +1834,15 @@ void CG_AccessibilityAreaExits(void)
+ 			{
+ 				far[i] += 1000000.0f;
+ 			}
++			/* One O found no way to: after the others. */
++			else if (eta_areas.list[i] != ETA_AREA_ELSEWHERE && far[i] > 0.0f
++			         && ( ETA_AreaNoWayNear(at)
++			              || ( eta_areas.list[i] >= 0
++			                   && ( ETA_AreaNoWayNear(eta_areas.exits[eta_areas.list[i]].side[0])
++			                        || ETA_AreaNoWayNear(eta_areas.exits[eta_areas.list[i]].side[1]) ) ) ))
++			{
++				far[i] += 500000.0f;
++			}
+ 		}
+ 		for (i = 0; i < count; i++)
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 2ed92e1b..763d3656 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3906,6 +3906,73 @@ static int ETA_DoorToward(float yaw)
+ /* A drop the way goes down, deeper than a stair: faced and said. */
+ #define ETA_CLIMB_DROP_SAID 80.0f
+ 
++static void ETA_FaceTheWayUnreachable(void)
++{
++	vec3_t      origin;
++	const char *name = NULL;
++	char        what[48];
++
++	Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
++
++	/* The level's way out, not open yet - shut until the story opens
++	   it: on to the nearest place not explored, as X's first. The
++	   tester, in the village, heard O say there was no way, and had
++	   to use X all the time. O again goes on to X's next. */
++	if (!Q_stricmp(what, "the way out"))
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("The way out is not open yet");
++		/* First the openings not yet explored, as X's; only when
++		   none is left, the rooms where things are still to be
++		   found. */
++		if (CG_AccessibilityAreasSomethingNew() || !CG_AccessibilityAreasLeadUnfound())
++		{
++			ETA_Speech_Say("On to the nearest place not explored");
++			CG_AccessibilityAreaExits();
++		}
++		CG_AccessibilityWayOut();
++		return;
++	}
++	/* A way X's list gave, O's own lead on with the way out shut: no
++	   way to it, so on to the next on the list, not the same "no way"
++	   again and again. */
++	if (!Q_stricmpn(what, "the opening ", 12) || !Q_stricmpn(what, "the door to ", 12)
++	    || !Q_stricmpn(what, "the door back ", 14) || !Q_stricmpn(what, "the new ", 8)
++	    || !Q_stricmpn(what, "the stairs ", 11))
++	{
++		static vec3_t triedFrom;
++		static int    tries;
++
++		CG_AccessibilityAreasNoWay(origin);
++		ETA_HudNarrator_HoldPassive(cg.time);
++		/* Each found to have no way goes on to the next by itself; from
++		   the same spot, once round them and no more - the test player in
++		   the catacombs heard the two ways there taken in turn without
++		   end. */
++		if (Distance(triedFrom, cg.predictedPlayerState.origin) > 48.0f)
++		{
++			VectorCopy(cg.predictedPlayerState.origin, triedFrom);
++			tries = 0;
++		}
++		if (++tries > 4)
++		{
++			ETA_Speech_Say(va("No way to %s from here yet, nor to the other ways on found so far. A jump, a switch or "
++			                  "something to break may be what is needed: X lists the ways, T what is left to do", what));
++			CG_AccessibilityMarkerForget();
++			return;
++		}
++		ETA_Speech_Say(va("No way to %s from here yet. On to the next", what));
++		CG_AccessibilityAreaExits();
++		CG_AccessibilityWayOut();
++		return;
++	}
++	CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
++	                  "yet. X says what opens the doors here, and T what is left to do", what));
++	return;
++}
++
+ static void ETA_FaceTheWayNow(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3918,38 +3985,20 @@ static void ETA_FaceTheWayNow(void)
+ 	}
+ 
+ 	/* No way there at all from here yet: said so, and not turned into the
+-	   wall nearest it. */
++	   wall nearest it. Once per press: going on to the next way, nothing
++	   chosen led back here, and round again without end - in the second
++	   catacomb level, seventeen thousand times. */
+ 	if (CG_AccessibilityMarkerUnreachable())
+ 	{
+-		vec3_t      origin;
+-		const char *name = NULL;
+-		char        what[48];
+-
+-		Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
++		static int inside;
+ 
+-		/* The level's way out, not open yet - shut until the story opens
+-		   it: on to the nearest place not explored, as X's first. The
+-		   tester, in the village, heard O say there was no way, and had
+-		   to use X all the time. O again goes on to X's next. */
+-		if (!Q_stricmp(what, "the way out"))
++		if (inside)
+ 		{
+-			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("The way out is not open yet");
+-			/* First the openings not yet explored, as X's; only when
+-			   none is left, the rooms where things are still to be
+-			   found. */
+-			if (CG_AccessibilityAreasSomethingNew() || !CG_AccessibilityAreasLeadUnfound())
+-			{
+-				ETA_Speech_Say("On to the nearest place not explored");
+-				CG_AccessibilityAreaExits();
+-			}
+-			CG_AccessibilityWayOut();
+ 			return;
+ 		}
+-		CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+-		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
+-		                  "yet. X says what opens the doors here, and T what is left to do", what));
++		inside = 1;
++		ETA_FaceTheWayUnreachable();
++		inside = 0;
+ 		return;
+ 	}
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index e6457bbd..89649612 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4615,7 +4615,7 @@ static void ETA_ReadMapEntities(void)
+ 	static struct
+ 	{
+ 		int  model;
+-		char kind;          /* 'd' door, 'b' button, 'u' invisible trigger */
++		char kind;          /* 'd' door, 'b' button, 'u' invisible trigger, 'r' relay */
+ 		char targetname[48];
+ 		char target[48];
+ 	}        links[512];
+@@ -4826,13 +4826,17 @@ static void ETA_ReadMapEntities(void)
+ 			namedCount++;
+ 		}
+ 
+-		if (model[0] == '*' && linkCount < (int)ARRAY_LEN(links)
+-		    && (!Q_stricmp(classname, "func_door") || !Q_stricmp(classname, "func_door_rotating")
+-		        || !Q_stricmp(classname, "func_button") || !Q_stricmp(classname, "func_invisible_user")))
++		if (( model[0] == '*' && linkCount < (int)ARRAY_LEN(links)
++		      && (!Q_stricmp(classname, "func_door") || !Q_stricmp(classname, "func_door_rotating")
++		          || !Q_stricmp(classname, "func_button") || !Q_stricmp(classname, "func_invisible_user")) )
++		    || ( linkCount < (int)ARRAY_LEN(links) && targetname[0] && target[0]
++		         && (!Q_stricmp(classname, "target_relay") || !Q_stricmp(classname, "target_delay")
++		             || !Q_stricmp(classname, "trigger_relay")) ))
+ 		{
+-			links[linkCount].model = atoi(model + 1);
++			links[linkCount].model = model[0] == '*' ? atoi(model + 1) : 0;
+ 			links[linkCount].kind  = !Q_stricmpn(classname, "func_door", 9) ? 'd'
+-			                         : !Q_stricmp(classname, "func_button") ? 'b' : 'u';
++			                         : !Q_stricmp(classname, "func_button") ? 'b'
++			                         : !Q_stricmp(classname, "func_invisible_user") ? 'u' : 'r';
+ 			Q_strncpyz(links[linkCount].targetname, targetname, sizeof(links[0].targetname));
+ 			Q_strncpyz(links[linkCount].target, target, sizeof(links[0].target));
+ 			linkCount++;
+@@ -4934,16 +4938,54 @@ static void ETA_ReadMapEntities(void)
+ 	memset(eta_doorOpeners, 0, sizeof(eta_doorOpeners));
+ 	for (i = 0; i < linkCount; i++)
+ 	{
+-		int j, k, opener = 0, found = 0;
++		int  j, k, opener = 0, found = 0, nameCount = 1, pass, n;
++		char names[8][48];
+ 
+ 		if (links[i].kind != 'd' || !links[i].targetname[0] || links[i].model <= 0 || links[i].model >= MAX_MODELS)
+ 		{
+ 			continue;
+ 		}
+ 
++		/* Its own name, and those of the relays aimed at it, three deep:
++		   in the first catacomb level nearly every switch opens its door
++		   through a relay, and none was found - "opened by a switch or by
++		   what happens", and O could not lead to it. */
++		Q_strncpyz(names[0], links[i].targetname, sizeof(names[0]));
++		for (pass = 0; pass < 3; pass++)
++		{
++			for (j = 0; j < linkCount && nameCount < (int)ARRAY_LEN(names); j++)
++			{
++				if (links[j].kind != 'r')
++				{
++					continue;
++				}
++				for (n = 0; n < nameCount && Q_stricmp(links[j].target, names[n]); n++)
++				{
++				}
++				if (n == nameCount)
++				{
++					continue;
++				}
++				for (n = 0; n < nameCount && Q_stricmp(links[j].targetname, names[n]); n++)
++				{
++				}
++				if (n == nameCount)
++				{
++					Q_strncpyz(names[nameCount++], links[j].targetname, sizeof(names[0]));
++				}
++			}
++		}
++
+ 		for (j = 0; j < linkCount && found < ETA_DOOR_OPENERS; j++)
+ 		{
+-			if (links[j].kind == 'd' || Q_stricmp(links[j].target, links[i].targetname))
++			if (links[j].kind == 'd' || links[j].kind == 'r')
++			{
++				continue;
++			}
++			for (n = 0; n < nameCount && Q_stricmp(links[j].target, names[n]); n++)
++			{
++			}
++			if (n == nameCount)
+ 			{
+ 				continue;
+ 			}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index ccd7debc..c476c06a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2297,6 +2297,7 @@ void CG_AccessibilityAreasFrame( void );
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
++void CG_AccessibilityAreasNoWay( const vec3_t point );
+ void CG_AccessibilityAreasBack( void );
+ int CG_AccessibilityThingsLeftIn( int area );
+ void CG_AccessibilityHealth_f( void );
