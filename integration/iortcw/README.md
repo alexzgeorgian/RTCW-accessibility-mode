@@ -2227,3 +2227,15 @@ ground is said - "the snowy square", "the grassy alley" - and a truck,
 a cart, hay, sandbags or trees mark the place. A plain room under the
 roof is the attic, one above the ground floor upstairs. In the village:
 two wine cellars, a crypt, a barn, a study, a generator room, a bedroom.
+
+### 0117 What is explored follows the saves
+
+The tester asked for explored places to be remembered from a save, not
+kept on through a death. What is explored - the areas come into and the
+ways found - is now copied when the game says it is saved, and loading a
+save gives back that copy: what was explored after the save is
+forgotten, as the items taken after it are back. Loading a save of the
+same level restarts it in place, without the cgame starting again, so
+the map restart takes the copy back too. A level entered fresh, not from
+a save, is explored anew. Tested: explored two areas, saved, explored a
+third, loaded: two.

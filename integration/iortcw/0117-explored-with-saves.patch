@@ -1,0 +1,210 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 0e33e59f..5ed68a8b 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -745,9 +745,24 @@ static void CG_AccessibilityReadScreen_f( void ) {
+ 	CG_AccessibilityObjectives_f();
+ }
+ 
++/* Whether this level was entered by loading a save: savegame_loading,
++   as the server set it before the level started. */
++static int etaSaveLoading;
++
++int CG_AccessibilitySaveLoading( void ) {
++	return etaSaveLoading;
++}
++
+ void CG_AccessibilityInit( void ) {
+ 	int i;
+ 
++	{
++		char loading[16];
++
++		trap_Cvar_VariableStringBuffer( "savegame_loading", loading, sizeof( loading ) );
++		etaSaveLoading = atoi( loading );
++	}
++
+ 	ETA_AccessibilityRuntime_Init();
+ 	ETA_HudNarrator_Init();
+ 	ETA_HudNarrator_SetFriendWords( "Friend", "friends" );
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 340f9db3..0f9a377a 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -242,6 +242,18 @@ static const char *ETA_ExploredFile(void)
+ 	Com_sprintf(file, sizeof(file), "accessibility_explored_%s.txt", base);
+ 	return file;
+ }
++/* As it was when the game was last saved: loading a save gives back what
++   had been explored by then, and no more. The tester asked for what is
++   explored to be remembered from a save, not kept on through a death. */
++static const char *ETA_ExploredSavedFile(void)
++{
++	static char file[MAX_QPATH];
++	char        base[MAX_QPATH];
++
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	Com_sprintf(file, sizeof(file), "accessibility_explored_%s_saved.txt", base);
++	return file;
++}
+ #define ETA_EXPLORED_SAVE_MS 2000
+ 
+ static qboolean eta_exploredDirty;
+@@ -252,7 +264,49 @@ void CG_AccessibilityExploredChanged(void)
+ 	eta_exploredDirty = qtrue;
+ }
+ 
++static void ETA_ExploredWrite(const char *name);
++
+ static void ETA_ExploredSave(void)
++{
++	ETA_ExploredWrite(ETA_ExploredFile());
++}
++
++static void ETA_ExploredLoad(qboolean fromSave);
++
++/* A save of this same level loaded: the game restarts the level in
++   place, without starting the cgame again, so what was explored since
++   the save is forgotten here, and the save's own given back. */
++void CG_AccessibilityExploredRestart(void)
++{
++	char loading[16];
++	int  i;
++
++	trap_Cvar_VariableStringBuffer("savegame_loading", loading, sizeof(loading));
++	if (!atoi(loading) || !eta_areas.loaded)
++	{
++		return;
++	}
++	for (i = 0; i < ETA_AREAS_MAX; i++)
++	{
++		eta_areas.number[i]  = 0;
++		eta_areas.hasSpot[i] = 0;
++	}
++	eta_areas.numbered = 0;
++	eta_areas.current  = eta_areas.pending = -1;
++	CG_AccessibilityFrontierClear();
++	ETA_ExploredLoad(qtrue);
++}
++
++void CG_AccessibilityGameSaved(void)
++{
++	if (eta_areas.loaded)
++	{
++		ETA_ExploredWrite(ETA_ExploredFile());
++		ETA_ExploredWrite(ETA_ExploredSavedFile());
++	}
++}
++
++static void ETA_ExploredWrite(const char *name)
+ {
+ 	fileHandle_t f;
+ 	char         line[256];
+@@ -262,7 +316,7 @@ static void ETA_ExploredSave(void)
+ 
+ 	eta_exploredDirty   = qfalse;
+ 	eta_exploredSavedAt = cg.time;
+-	if (trap_FS_FOpenFile(ETA_ExploredFile(), &f, FS_WRITE) < 0 || !f)
++	if (trap_FS_FOpenFile(name, &f, FS_WRITE) < 0 || !f)
+ 	{
+ 		return;
+ 	}
+@@ -291,7 +345,7 @@ static void ETA_ExploredSave(void)
+ 	trap_FS_FCloseFile(f);
+ }
+ 
+-static void ETA_ExploredLoad(void)
++static void ETA_ExploredLoad(qboolean fromSave)
+ {
+ 	static char  text[32768];
+ 	fileHandle_t f;
+@@ -300,7 +354,21 @@ static void ETA_ExploredLoad(void)
+ 	qboolean     before, fromBefore = qfalse;
+ 
+ 	eta_exploredDirty = qfalse;
+-	length            = trap_FS_FOpenFile(ETA_ExploredFile(), &f, FS_READ);
++	/* Entered fresh, not from a save: explored anew. From a save: as it
++	   was when saved, or failing that, as last known. */
++	if (!fromSave)
++	{
++		return;
++	}
++	length = trap_FS_FOpenFile(ETA_ExploredSavedFile(), &f, FS_READ);
++	if (length <= 0 || !f)
++	{
++		if (f)
++		{
++			trap_FS_FCloseFile(f);
++		}
++		length = trap_FS_FOpenFile(ETA_ExploredFile(), &f, FS_READ);
++	}
+ 	if (length <= 0 || !f)
+ 	{
+ 		if (f)
+@@ -528,7 +596,7 @@ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ 			ETA_AreasOpenings();
+ 		}
+ 	}
+-	ETA_ExploredLoad();
++	ETA_ExploredLoad((qboolean)( CG_AccessibilitySaveLoading() != 0 ));
+ 	CG_Printf("eta: %s has %d areas%s, %d ways between them\n", cgs.mapname, count, bots ? " from its bots' file" : "",
+ 	          eta_areas.exitCount);
+ }
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 1af69cf4..03fa73d2 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1660,6 +1660,12 @@ qboolean CG_AccessibilityFrontierGet(int index, vec3_t feature, vec3_t lead, int
+ 	return qtrue;
+ }
+ 
++/* All forgotten: a save loaded on the same level gives back its own. */
++void CG_AccessibilityFrontierClear(void)
++{
++	eta_frontier.count = 0;
++}
++
+ void CG_AccessibilityFrontierPut(const vec3_t feature, const vec3_t lead, int kind, qboolean tried)
+ {
+ 	if (eta_frontier.count >= ETA_FRONTIER_MAX || kind < 0 || kind > ETA_WAY_LADDER_DOWN)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3e95dd40..94a2cb42 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,10 @@ qboolean CG_AccessibilitySwitchOpensDoorAt( const vec3_t point );
+ int CG_AccessibilitySwitchDoorShut( const vec3_t point );
+ int CG_AccessibilityDoorShutNow( int model );
+ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
++void CG_AccessibilityGameSaved( void );
++void CG_AccessibilityExploredRestart( void );
++void CG_AccessibilityFrontierClear( void );
++int CG_AccessibilitySaveLoading( void );
+ int CG_AccessibilityPropCount( void );
+ const char *CG_AccessibilityPropGet( int index, vec3_t center );
+ qboolean CG_AccessibilityHatchAtLadder( int model );
+diff --git a/SP/code/cgame/cg_servercmds.c b/SP/code/cgame/cg_servercmds.c
+index 9c22c0f4..3c967a9a 100644
+--- a/SP/code/cgame/cg_servercmds.c
++++ b/SP/code/cgame/cg_servercmds.c
+@@ -621,6 +621,9 @@ static void CG_MapRestart( void ) {
+ 	if ( cg_showmiss.integer ) {
+ 		CG_Printf( "CG_MapRestart\n" );
+ 	}
++#ifdef FEATURE_ACCESSIBILITY
++	CG_AccessibilityExploredRestart();
++#endif
+ 
+ 	memset( &cg.lastWeapSelInBank[0], 0, MAX_WEAP_BANKS * sizeof( int ) );  // clear weapon bank selections
+ 
+@@ -822,6 +825,11 @@ static void CG_ServerCommand( void ) {
+ 	}
+ 
+ 	if ( !strcmp( cmd, "cp" ) ) {
++#ifdef FEATURE_ACCESSIBILITY
++		if ( !Q_stricmp( CG_Argv( 1 ), "gamesaved" ) ) {
++			CG_AccessibilityGameSaved();
++		}
++#endif
+ 		CG_CenterPrint( CG_Argv( 1 ), SCREEN_HEIGHT - ( SCREEN_HEIGHT * 0.25 ), SMALLCHAR_WIDTH );
+ 		return;
+ 	}
