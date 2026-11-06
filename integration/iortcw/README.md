@@ -2279,3 +2279,13 @@ reached was still there once the save was loaded, and had to be removed by
 hand. A save of the same level is loaded by restarting the level in place,
 without starting the cgame again, so the marker lived on. Now when the
 level restarts the marker and the way to it are forgotten, without a word.
+
+### 0121 The game starts after a crash or a force quit
+
+The tester: after the game froze and was force quit, it would no longer
+open at all. The game leaves a file, iowolfsp.pid, while it runs; found at
+the next start, it asks in a window of its own whether to start with safe
+video settings, and waits for the answer. On the Mac that window can open
+behind everything, where a screen reader player does not find it, and the
+game seems not to start. The question is no longer asked: the game notes
+it in the console and starts as usual.

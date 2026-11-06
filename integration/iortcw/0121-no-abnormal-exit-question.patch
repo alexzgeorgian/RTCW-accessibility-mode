@@ -1,0 +1,19 @@
+diff --git a/SP/code/sys/sys_main.c b/SP/code/sys/sys_main.c
+index 2c880f1b..07cdd23f 100644
+--- a/SP/code/sys/sys_main.c
++++ b/SP/code/sys/sys_main.c
+@@ -255,6 +255,14 @@ Sys_InitPIDFile
+ */
+ void Sys_InitPIDFile( const char *gamedir ) {
+ 	if( Sys_WritePIDFile( gamedir ) ) {
++#if defined( FEATURE_ACCESSIBILITY ) && !defined( DEDICATED )
++		/* Not after a crash or a force quit either: the question is a
++		   window that a screen reader player may never find - on the Mac
++		   it can open behind everything, and the game then waits on it,
++		   seeming not to start at all. The game starts as it is. */
++		Com_Printf( "The game did not exit properly last time; starting as usual.\n" );
++		return;
++#endif
+ #ifndef DEDICATED
+ 		char message[1024];
+ 		char modName[MAX_OSPATH];
