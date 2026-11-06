@@ -1,0 +1,46 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index d07fdf04..b9c5bf0f 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -393,6 +393,33 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 	return ledge ? ETA_PATH_JUMP : crouch ? ETA_PATH_CROUCH : ETA_PATH_WALK;
+ }
+ 
++/* A square whose middle hangs over an edge - the floor under the
++   player's feet, but not under where they stand: three squares more. On
++   the village's walkway to the rifle, a wall's top 1.8 metres wide with
++   a five metre drop beside it, the way ran along the very edge, and the
++   test player stepped off it again and again. */
++static float ETA_RouteEdgeExtra(const float at[3])
++{
++	static const float near[5][2] = { { 0, 0 }, { 16, 0 }, { -16, 0 }, { 0, 16 }, { 0, -16 } };
++	trace_t            trace;
++	vec3_t             top, bottom;
++	int                i;
++
++	/* The middle, and half a square to each side: an edge that near is
++	   one a step to the side goes over. */
++	for (i = 0; i < 5; i++)
++	{
++		VectorSet(top, at[0] + near[i][0], at[1] + near[i][1], at[2] + 8.0f);
++		VectorSet(bottom, top[0], top[1], at[2] - 40.0f);
++		trap_CM_BoxTrace(&trace, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
++		if (!trace.startsolid && trace.fraction >= 1.0f)
++		{
++			return 3.0f;
++		}
++	}
++	return 0.0f;
++}
++
+ /**
+  * @brief The landmines the player has been shown: the way keeps clear
+  * of them.
+@@ -1782,6 +1809,7 @@ static void ETA_RouteFrame(void)
+ 		do
+ 		{
+ 			ETA_PathFinder_SetLeap(eta_route.jumps ? ETA_RouteLeap : NULL);
++			ETA_PathFinder_SetExtra(ETA_RouteEdgeExtra);
+ 			state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP,
+ 			                            eta_route.jumps ? ETA_RouteMove : ETA_RouteMoveOnFoot, NULL);
+ 		}

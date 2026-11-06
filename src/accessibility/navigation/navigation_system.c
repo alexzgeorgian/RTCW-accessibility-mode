@@ -384,6 +384,12 @@ static int ETA_Path_Floor(float v)
 #define ETA_PATH_LEAP_SQUARES 4
 
 static ETA_PathLeapFn gPathLeap;
+static ETA_PathExtraFn gPathExtra;
+
+void ETA_PathFinder_SetExtra(ETA_PathExtraFn extra)
+{
+    gPathExtra = extra;
+}
 
 void ETA_PathFinder_SetLeap(ETA_PathLeapFn leap)
 {
@@ -670,6 +676,10 @@ static int ETA_Path_Reach(int current, const float to[3], int ix, int iy,
 
     iz   = ETA_Path_Layer(to[2]);
     cost = flat + ETA_Path_Abs(to[2] - gPathNodes[current].pos[2]);
+    if (gPathExtra)
+    {
+        cost += gPathExtra(to) * gPathCell;
+    }
     if (kind == ETA_PATH_CROUCH)
     {
         /* Crouched, a player goes at about half the pace. */

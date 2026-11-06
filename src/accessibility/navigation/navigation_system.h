@@ -157,6 +157,12 @@ void ETA_PathFinder_BeginSearch(const float start[3], float cellSize, ETA_PathGo
  */
 typedef int (*ETA_PathLeapFn)(void *context, const float from[3], float to[3]);
 void ETA_PathFinder_SetLeap(ETA_PathLeapFn leap);
+
+/* How many squares more a square costs to stand on, beyond its distance:
+   one at the very edge of a drop costs more, so the way keeps to the
+   middle of a narrow walkway. NULL for none. */
+typedef float (*ETA_PathExtraFn)(const float at[3]);
+void ETA_PathFinder_SetExtra(ETA_PathExtraFn extra);
 ETA_PathState ETA_PathFinder_Step(int budget, ETA_PathMoveFn move, void *context);
 ETA_PathState ETA_PathFinder_State(void);
 
