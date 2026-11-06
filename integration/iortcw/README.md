@@ -2289,3 +2289,27 @@ video settings, and waits for the answer. On the Mac that window can open
 behind everything, where a screen reader player does not find it, and the
 game seems not to start. The question is no longer asked: the game notes
 it in the console and starts as usual.
+
+### 0122 O leads through the openings first again
+
+The tester: O no longer led through the openings as it had, but to a
+room with things not found. With the way out shut, O now goes on to the
+nearest opening not explored, as X's first, while there is one anywhere;
+only when everything has been explored does it lead to the rooms with
+things not yet found. And a test player led by O alone in the village
+went round in circles three ways, now gone:
+
+- An opening to a new area was "reached" three metres short, still on
+  this side, and O led to it again and again. A way into a new area is
+  now reached on coming into that area.
+- Facing on past a turn a step away cut into a doorway's frame. It now
+  faces past the turn only where the straight line round it is clear.
+- The way went down through a hole in a floor, three metres, no harm,
+  but facing never turns a player off an edge, so O turned them to the
+  openings either side. Where the way drops more than two metres just
+  ahead, O now faces it and says "It drops 3 meters here, no harm: walk
+  on off the edge".
+
+The test player then went from the start through the rooms and the
+cellars, down through the hole and on, the village's first objective
+done on the way. The tram level's walks still pass.

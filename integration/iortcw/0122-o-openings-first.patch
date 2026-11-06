@@ -1,0 +1,259 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 5fd88c4c..3a130505 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -356,6 +356,46 @@ qboolean CG_AccessibilityAreasLeadUnfound(void)
+ 	return qtrue;
+ }
+ 
++/* Anything still to explore: a way never tried, or a door from an area
++   been in to one not. While there is, O leads to the openings, as X does;
++   rooms with things not found come only after. The tester, led to a room
++   with a thing not found instead of on through the openings, found O
++   broken again. */
++static qboolean ETA_AreaExitOpens(const eta_areaExit_t *exit);
++
++qboolean CG_AccessibilityAreasSomethingNew(void)
++{
++	vec3_t      at, lead;
++	const char *word;
++	int         i;
++
++	for (i = 0; i < CG_AccessibilityNewWayCount(); i++)
++	{
++		if (CG_AccessibilityNewWayAt(i, at, lead, &word))
++		{
++			return qtrue;
++		}
++	}
++	if (!eta_areas.loaded)
++	{
++		return qfalse;
++	}
++	for (i = 0; i < eta_areas.exitCount; i++)
++	{
++		const eta_areaExit_t *exit = &eta_areas.exits[i];
++
++		if (exit->area[0] < 0 || exit->area[1] < 0)
++		{
++			continue;
++		}
++		if (!eta_areas.number[exit->area[0]] != !eta_areas.number[exit->area[1]] && ETA_AreaExitOpens(exit))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ void CG_AccessibilityGameSaved(void)
+ {
+ 	if (eta_areas.loaded)
+@@ -2069,6 +2109,13 @@ void CG_AccessibilityAreaExits(void)
+ 		Q_strncpyz(name, exit->model ? "the door to a new area" : "the opening to a new area", sizeof(name));
+ 	}
+ 	CG_AccessibilityChoose(exit->side[side], name);
++	/* Reached on coming into the area beyond, not three metres short of
++	   its doorway: the tester, stopped there still on this side, was led
++	   to the same opening again and again. */
++	if (!eta_areas.number[other])
++	{
++		CG_AccessibilityChosenIntoArea(other);
++	}
+ }
+ 
+ /* For the test sweep's "areas": each area, its box, its floor, and how
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 94d204bc..36328452 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3903,6 +3903,9 @@ static int ETA_DoorToward(float yaw)
+ 	return CG_AccessibilityDoorModel(model, &opens) ? trace.entityNum : -1;
+ }
+ 
++/* A drop the way goes down, deeper than a stair: faced and said. */
++#define ETA_CLIMB_DROP_SAID 80.0f
++
+ static void ETA_FaceTheWayNow(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3932,9 +3935,10 @@ static void ETA_FaceTheWayNow(void)
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			ETA_Speech_Say("The way out is not open yet");
+-			/* First where things are still to be found, then what is not
+-			   explored. */
+-			if (!CG_AccessibilityAreasLeadUnfound())
++			/* First the openings not yet explored, as X's; only when
++			   none is left, the rooms where things are still to be
++			   found. */
++			if (CG_AccessibilityAreasSomethingNew() || !CG_AccessibilityAreasLeadUnfound())
+ 			{
+ 				ETA_Speech_Say("On to the nearest place not explored");
+ 				CG_AccessibilityAreaExits();
+@@ -3965,7 +3969,25 @@ static void ETA_FaceTheWayNow(void)
+ 		{
+ 			vec3_t past;
+ 
++			trace_t       tr;
++			static vec3_t pmins = { -16.0f, -16.0f, -6.0f }, pmaxs = { 16.0f, 16.0f, 24.0f };
++			vec3_t        from, to;
++
++			/* Only where the straight line round it is clear: past a
++			   doorway's corner, facing on cut into its frame - the test
++			   player walked into a wooden door post in the village. */
++			memset(&tr, 0, sizeof(tr));
+ 			if (CG_AccessibilityMarkerPastTurn(past))
++			{
++				VectorCopy(ps->origin, from);
++				from[2] += 12.0f;
++				VectorCopy(past, to);
++				to[2] = from[2];
++				CG_Trace(&tr, from, pmins, pmaxs, to, ps->clientNum, MASK_PLAYERSOLID);
++			}
++			/* Starting in something - a body, a step's edge - says nothing
++			   either way: faced on round, as before. */
++			if (CG_AccessibilityMarkerPastTurn(past) && ( tr.startsolid || tr.fraction >= 1.0f ))
+ 			{
+ 				VectorCopy(past, target);
+ 				VectorSubtract(target, ps->origin, delta);
+@@ -3973,6 +3995,36 @@ static void ETA_FaceTheWayNow(void)
+ 			}
+ 		}
+ 
++		/* The way drops off an edge here, on purpose - a hole in the
++		   floor, no harm in the fall: faced straight at it, and said, for
++		   facing turns away from edges. In the village the way went down
++		   through a hole in a floor, and O turned the test player to the
++		   openings either side of it, round and round. */
++		{
++			vec3_t flat;
++			float  drop = ps->origin[2] - 24.0f - target[2];
++
++			VectorSubtract(target, ps->origin, flat);
++			flat[2] = 0.0f;
++			if (drop > ETA_CLIMB_DROP_SAID && VectorLength(flat) < 160.0f && VectorLength(flat) >= 4.0f)
++			{
++				etaAimTarget_t way;
++				vec3_t         dir;
++				int            meters = (int)(drop * ETA_QU_TO_METERS + 0.5f);
++
++				memset(&way, 0, sizeof(way));
++				way.entityNum = -1;
++				VectorNormalize2(flat, dir);
++				VectorMA(ps->origin, 256.0f, dir, way.point);
++				way.point[2] = ps->origin[2] + ps->viewheight;
++				ETA_AimStartSnap(&way, NULL);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("Facing the way. It drops %d %s here, no harm: walk on off the edge",
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++				return;
++			}
++		}
++
+ 		/* A closed door the way goes through, just ahead: no opening is
+ 		   found through it, and the nearest one either side led away from
+ 		   it - or, with none, the marker's whole report was said. It is
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index a6f14865..7ffea380 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -46,6 +46,7 @@ typedef struct
+ 	vec3_t origin;     /* the spot, or the square's middle */
+ 	int column, row, layer;
+ 	char name[48];     /* the square's name, "C,3", or the objective's */
++	int intoArea;      /* reached on coming into this area, from 1, or 0 */
+ } eta_marker_t;
+ 
+ static eta_marker_t eta_marker;
+@@ -2257,6 +2258,13 @@ void CG_AccessibilityMarkerFrame(void)
+ 	else
+ 	{
+ 		arrived = (qboolean)(eta_marker.leftIt && distance <= ETA_MARKER_ARRIVE_METERS);
++		/* A way into an area: reached once in it, or right on the spot
++		   just through its doorway. */
++		if (eta_marker.intoArea)
++		{
++			arrived = (qboolean)( CG_AccessibilityAreaOf(cg.predictedPlayerState.origin) == eta_marker.intoArea - 1
++			                      || distance < 1 );
++		}
+ 	}
+ 
+ 	if (arrived)
+@@ -2373,6 +2381,13 @@ void CG_AccessibilityMarkerSet(const vec3_t origin, const char *name)
+ 	eta_progress.at = 0;
+ }
+ 
++/* The marker just put down is a way into an area: reached on coming
++   into it, not three metres short. */
++void CG_AccessibilityMarkerIntoArea(int area)
++{
++	eta_marker.intoArea = area >= 0 ? area + 1 : 0;
++}
++
+ /**
+  * @brief Forgets the marker, for a new map.
+  */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 54d1f223..e6457bbd 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5462,6 +5462,7 @@ static qboolean eta_chosenSet;
+ static int      eta_chosenAt;
+ static vec3_t   eta_chosenPoint;
+ static char     eta_chosenName[64];
++static int      eta_chosenArea;   /* an area to come into, from 1, or 0 */
+ 
+ /* Where O last led to something chosen, for F: the marker goes when it
+    is reached, and F, pressed there, turns to the thing led to. */
+@@ -5579,6 +5580,8 @@ void CG_AccessibilityWayOut(void)
+ 		VectorCopy(eta_chosenPoint, eta_ledPoint);
+ 		Q_strncpyz(eta_ledName, eta_chosenName, sizeof(eta_ledName));
+ 		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
++		CG_AccessibilityMarkerIntoArea(eta_chosenArea - 1);
++		eta_chosenArea = 0;
+ 		CG_AccessibilityFaceTheWay();
+ 		return;
+ 	}
+@@ -6049,6 +6052,7 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
+ 	eta_chosenThing = qfalse;
++	eta_chosenArea  = 0;
+ 	CG_AccessibilityUseChoiceClear();
+ 	VectorCopy(point, eta_chosenPoint);
+ 	Q_strncpyz(eta_chosenName, name, sizeof(eta_chosenName));
+@@ -6056,6 +6060,12 @@ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ 	eta_chosenAt  = cg.time;
+ }
+ 
++/* What was just chosen is a way into an area: reached on coming into it. */
++void CG_AccessibilityChosenIntoArea(int area)
++{
++	eta_chosenArea = area + 1;
++}
++
+ /* A door the map locks for good - "key" -1, which only the soldiers' own
+    door triggers open - and where it stands closed: for the way
+    (cg_accessibility_route.c), which goes round it. qfalse past the last. */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index e4d0d615..ccd7debc 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2251,6 +2251,8 @@ void CG_AccessibilityMarkerApproach( void );
+ void CG_AccessibilityMarkerWhere( void );
+ void CG_AccessibilityMarkerClear( void );
+ void CG_AccessibilityMarkerForget( void );
++void CG_AccessibilityMarkerIntoArea( int area );
++void CG_AccessibilityChosenIntoArea( int area );
+ int CG_AccessibilityRouteStep( const float from[3], float to[3] );
+ void CG_AccessibilityChoose( const vec3_t point, const char *name );
+ qboolean CG_AccessibilityExitPoint( const vec3_t from, vec3_t out );
+@@ -2294,6 +2296,7 @@ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
++qboolean CG_AccessibilityAreasSomethingNew( void );
+ void CG_AccessibilityAreasBack( void );
+ int CG_AccessibilityThingsLeftIn( int area );
+ void CG_AccessibilityHealth_f( void );
