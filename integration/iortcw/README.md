@@ -2239,3 +2239,19 @@ same level restarts it in place, without the cgame starting again, so
 the map restart takes the copy back too. A level entered fresh, not from
 a save, is explored anew. Tested: explored two areas, saved, explored a
 third, loaded: two.
+
+### 0118 Things not found yet: how many, and O into their rooms
+
+The tester asked how to find the items missed along the way, when they
+could not get into some places properly. T lists only what has been come
+across, so nothing is given away. Now how many of the map's items and
+treasures have not been come across is said too - never what or where:
+"3 things left here: 2 items. ... 3 things left in the level, and 28
+not found yet". And O, with the way out not open yet, leads first into
+the nearest room that still has things not come across - to the room's
+middle, not to the things: "The way out is not open yet. On to the
+corridor with 6 ways out: 2 things not found yet there". Once in the
+room the things come into sight, and T has them. With none left, O goes
+on to the nearest place not explored, as before. Secret areas, things
+that come later in the level and things shut inside something to break
+are not counted.

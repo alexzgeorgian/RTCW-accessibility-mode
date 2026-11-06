@@ -1,0 +1,174 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 0f9a377a..0648418d 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -297,6 +297,42 @@ void CG_AccessibilityExploredRestart(void)
+ 	ETA_ExploredLoad(qtrue);
+ }
+ 
++static void ETA_AreaName(int area, char *out, size_t size);
++
++/* O, the way out shut: into the nearest room with things not yet come
++   across, if there is one - to its middle, not to the things. */
++qboolean CG_AccessibilityAreasLeadUnfound(void)
++{
++	vec3_t thing, mins, maxs, mid, at;
++	char   name[128];
++	int    here = CG_AccessibilityAreaHere(), area, n;
++
++	if (!eta_areas.loaded || !CG_AccessibilityThingsUnfoundNearest(here, thing))
++	{
++		return qfalse;
++	}
++	area = ETA_AreaOf(thing);
++	if (area < 0 || !ETA_BspAreas_Bounds(area, mins, maxs))
++	{
++		return qfalse;
++	}
++	VectorAdd(mins, maxs, mid);
++	VectorScale(mid, 0.5f, mid);
++	if (eta_areas.hasSpot[area])
++	{
++		VectorCopy(eta_areas.spot[area], at);
++	}
++	else if (!ETA_BspAreas_PointIn(area, mid, at))
++	{
++		VectorCopy(thing, at);
++	}
++	n = CG_AccessibilityThingsUnfound(area);
++	ETA_AreaName(area, name, sizeof(name));
++	ETA_Speech_Say(va("On to %s: %d %s not found yet there", name, n, n == 1 ? "thing" : "things"));
++	CG_AccessibilityChoose(at, name);
++	return qtrue;
++}
++
+ void CG_AccessibilityGameSaved(void)
+ {
+ 	if (eta_areas.loaded)
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 20ce74e2..04233bdf 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3930,8 +3930,14 @@ static void ETA_FaceTheWayNow(void)
+ 		if (!Q_stricmp(what, "the way out"))
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("The way out is not open yet. On to the nearest place not explored");
+-			CG_AccessibilityAreaExits();
++			ETA_Speech_Say("The way out is not open yet");
++			/* First where things are still to be found, then what is not
++			   explored. */
++			if (!CG_AccessibilityAreasLeadUnfound())
++			{
++				ETA_Speech_Say("On to the nearest place not explored");
++				CG_AccessibilityAreaExits();
++			}
+ 			CG_AccessibilityWayOut();
+ 			return;
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 1679a906..210853be 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -483,11 +483,75 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 
+ /* "6 things left: 1 treasure, 2 items, 1 switch, 1 to break, 1 secret
+    area". */
++/* Things the map puts somewhere not yet come across: an item or a
++   treasure never in sight. Only how many, never what or where - the
++   tester, who could not get into some rooms, asked how to find what
++   they had missed. Not secret areas, and not what comes later in the
++   level or is shut inside something to break. */
++static qboolean ETA_ThingUnfound(const eta_thing_t *thing)
++{
++	return (qboolean)( !thing->known && !thing->done && !thing->ride
++	                   && ( thing->kind == ETA_THING_ITEM || thing->kind == ETA_THING_TREASURE )
++	                   && !Q_stristr(thing->name, "comes later") && !Q_stristr(thing->name, "inside something") );
++}
++
++int CG_AccessibilityThingsUnfound(int area)
++{
++	int i, n = 0;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		if (ETA_ThingUnfound(&eta_things.things[i])
++		    && ( area < 0 || CG_AccessibilityAreaHolds(area, eta_things.things[i].point) ))
++		{
++			n++;
++		}
++	}
++	return n;
++}
++
++/* The nearest thing not yet come across outside an area: where O leads
++   to look - into the room, not to the thing. */
++qboolean CG_AccessibilityThingsUnfoundNearest(int notArea, vec3_t at)
++{
++	int   i, best = -1;
++	float bestFar = 1.0e9f;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		const eta_thing_t *thing = &eta_things.things[i];
++		float              far;
++
++		if (!ETA_ThingUnfound(thing) || ( notArea >= 0 && CG_AccessibilityAreaHolds(notArea, thing->point) ))
++		{
++			continue;
++		}
++		far = Distance(cg.predictedPlayerState.origin, thing->point)
++		      + fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]);
++		if (far < bestFar)
++		{
++			bestFar = far;
++			best    = i;
++		}
++	}
++	if (best < 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_things.things[best].point, at);
++	return qtrue;
++}
++
+ static void ETA_ThingsProgress(int area, const char *where, char *out, size_t size)
+ {
+-	int counts[ETA_THING_KINDS], left;
++	int counts[ETA_THING_KINDS], left, unfound = CG_AccessibilityThingsUnfound(area);
+ 
+ 	ETA_ThingsCount(area, counts, &left);
++	if (!left && unfound)
++	{
++		Com_sprintf(out, size, "%d %s not found yet%s", unfound, unfound == 1 ? "thing" : "things", where);
++		return;
++	}
+ 	if (!left)
+ 	{
+ 		Com_sprintf(out, size, "No things left%s", where);
+@@ -516,6 +580,10 @@ static void ETA_ThingsProgress(int area, const char *where, char *out, size_t si
+ 		                       counts[ETA_THING_SECRET] == 1 ? "area" : "areas"));
+ 	}
+ 	out[strlen(out) - 1] = '\0';
++	if (unfound)
++	{
++		Q_strcat(out, size, va(", and %d not found yet", unfound));
++	}
+ }
+ 
+ /* For F1. */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 94a2cb42..1265d575 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2319,6 +2319,9 @@ int CG_AccessibilityDoorShutNow( int model );
+ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ void CG_AccessibilityGameSaved( void );
+ void CG_AccessibilityExploredRestart( void );
++int CG_AccessibilityThingsUnfound( int area );
++qboolean CG_AccessibilityThingsUnfoundNearest( int notArea, vec3_t at );
++qboolean CG_AccessibilityAreasLeadUnfound( void );
+ void CG_AccessibilityFrontierClear( void );
+ int CG_AccessibilitySaveLoading( void );
+ int CG_AccessibilityPropCount( void );
