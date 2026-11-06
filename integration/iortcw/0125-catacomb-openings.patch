@@ -1,0 +1,82 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 9c5e8694..d9b43088 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2146,7 +2146,31 @@ void CG_AccessibilityAreaExits(void)
+ 	{
+ 		Q_strncpyz(name, exit->model ? "the door to a new area" : "the opening to a new area", sizeof(name));
+ 	}
+-	CG_AccessibilityChoose(exit->side[side], name);
++	/* Where it stands on the floor beyond: an opening's spot worked out
++	   at the height of its top, in the second catacomb level, floated
++	   four metres up, and no way was ever found to it. */
++	{
++		static const vec3_t fmins = { -12.0f, -12.0f, 0.0f }, fmaxs = { 12.0f, 12.0f, 8.0f };
++		vec3_t              top, bottom, onFloor;
++		trace_t             trace;
++
++		VectorCopy(exit->side[side], top);
++		top[2] += 16.0f;
++		VectorCopy(top, bottom);
++		bottom[2] -= 320.0f;
++		VectorCopy(exit->side[side], onFloor);
++		trap_CM_BoxTrace(&trace, top, bottom, fmins, fmaxs, 0, MASK_PLAYERSOLID);
++		if (!exit->model && !trace.startsolid && trace.fraction < 1.0f && top[2] - trace.endpos[2] > 48.0f
++		    && top[2] - trace.endpos[2] < 160.0f)
++		{
++			onFloor[2] = trace.endpos[2] + 24.0f;
++			if (ETA_AreaOf(onFloor) != other)
++			{
++				VectorCopy(exit->side[side], onFloor);
++			}
++		}
++		CG_AccessibilityChoose(onFloor, name);
++	}
+ 	/* Reached on coming into the area beyond, not three metres short of
+ 	   its doorway: the tester, stopped there still on this side, was led
+ 	   to the same opening again and again. */
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index c497019c..d07fdf04 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1087,22 +1087,29 @@ static qboolean ETA_RouteStartFrom(const float at[3])
+ 
+ static void ETA_RouteStartAt(const vec3_t origin, float out[3])
+ {
+-	static const float offsets[17][2] =
+-	{
+-		{ 0, 0 },
+-		{ 8, 0 }, { -8, 0 }, { 0, 8 }, { 0, -8 }, { 8, 8 }, { -8, 8 }, { -8, -8 }, { 8, -8 },
+-		{ 16, 0 }, { -16, 0 }, { 0, 16 }, { 0, -16 }, { 16, 16 }, { -16, 16 }, { -16, -16 }, { 16, -16 }
+-	};
+-	int lift, i;
++	static const float dirs[8][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { -1, 1 }, { -1, -1 }, { 1, -1 } };
++	int lift, ring, i;
+ 
++	/* Out of the wall a step at a time, to two squares' width: in a
++	   corner of the second catacomb level, the test player's square was
++	   in the walls on two sides, no way was found from it at all, and O
++	   only said to try again. */
+ 	for (lift = 0; lift <= 16; lift += 8)
+ 	{
+-		for (i = 0; i < 17; i++)
++		VectorSet(out, origin[0], origin[1], origin[2] + lift);
++		if (ETA_RouteStartFrom(out))
+ 		{
+-			VectorSet(out, origin[0] + offsets[i][0], origin[1] + offsets[i][1], origin[2] + lift);
+-			if (ETA_RouteStartFrom(out))
++			return;
++		}
++		for (ring = 8; ring <= 32; ring += 8)
++		{
++			for (i = 0; i < 8; i++)
+ 			{
+-				return;
++				VectorSet(out, origin[0] + dirs[i][0] * ring, origin[1] + dirs[i][1] * ring, origin[2] + lift);
++				if (ETA_RouteStartFrom(out))
++				{
++					return;
++				}
+ 			}
+ 		}
+ 	}
