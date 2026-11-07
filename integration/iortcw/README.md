@@ -2405,3 +2405,15 @@ no enemy's lock took the view before six seconds were up, and then one
 could. Now the facing holds until they turn by hand, press U, or walk
 four metres from where they were turned. Shooting, U, and the lock
 taking an enemy at any other time are as they were.
+
+### 0131 A sound says when to jump
+
+A sighted player jumps a gap by running at it and pressing jump at the
+edge; the tester, who played that way, needed only to know when. Running
+at a jump on the way - facing where it lands, W held - a short sound,
+two quick rising high notes (jump_now.wav, made with the other cues by
+release/make-cue-sounds.py), plays once where a sighted player would
+press jump: at the lip of a gap, or at the square before something to
+jump onto or over, early by the time it takes to hear it and press.
+The jump is the player's own. O and the callout say "Run at it with W,
+and press space at the sound". It plays at the bump sounds' volume.

@@ -348,6 +348,14 @@ SOUNDS = {
     # and quiet enough to stay under the gunfire.
     "enemy_presence.wav": lambda: (tone(147, 0.090, 0.30, WARM, 0.1, 0.6)
                                    + tone(131, 0.090, 0.70, WARM, 0.1, 0.6)),
+
+    # Jump now: played once, running at a jump on the way, at the moment
+    # a sighted player would press jump - a little before the edge, for
+    # the time it takes to hear it and press. The tester jumps with their
+    # own key, and needed only to know when. Two quick rising high notes,
+    # brighter than anything else in the set, and over at once.
+    "jump_now.wav": lambda: (tone(1047, 0.040, 0.070, BRIGHT, 0.05, 0.5)
+                             + tone(1568, 0.060, 0.120, BRIGHT, 0.05, 0.6)),
 }
 
 
