@@ -1,0 +1,152 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 763d3656..04c6ba31 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4044,6 +4044,42 @@ static void ETA_FaceTheWayNow(void)
+ 			}
+ 		}
+ 
++		/* A jump just ahead: faced straight across it, to where it
++		   lands, as the tester jumped when they could see - facing the
++		   far side, forward held, and jump. */
++		{
++			vec3_t   landing, across;
++			qboolean up;
++
++			if (CG_AccessibilityMarkerJumpAhead(landing, &up))
++			{
++				etaAimTarget_t way;
++				vec3_t         dir;
++				int            meters;
++
++				VectorSubtract(landing, ps->origin, across);
++				meters = (int)(sqrtf(across[0] * across[0] + across[1] * across[1]) * ETA_QU_TO_METERS + 0.5f);
++				across[2] = 0.0f;
++				/* Not a closed door taken for something to jump over: in
++				   the first catacomb level the way went on through a door
++				   a switch opens, and O faced the test player at it sixty
++				   times, saying to jump. */
++				if (VectorLength(across) >= 4.0f && ETA_DoorToward(vectoyaw(across)) < 0)
++				{
++					memset(&way, 0, sizeof(way));
++					way.entityNum = -1;
++					VectorNormalize2(across, dir);
++					VectorMA(ps->origin, 256.0f, dir, way.point);
++					way.point[2] = ps->origin[2] + ps->viewheight;
++					ETA_AimStartSnap(&way, NULL);
++					ETA_HudNarrator_HoldPassive(cg.time);
++					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Hold W and press space",
++					                  up ? "up" : "over", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++					return;
++				}
++			}
++		}
++
+ 		/* The way drops off an edge here, on purpose - a hole in the
+ 		   floor, no harm in the fall: faced straight at it, and said, for
+ 		   facing turns away from edges. In the village the way went down
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index b9c5bf0f..ed600cb7 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1357,7 +1357,7 @@ static const char *ETA_RouteKey(const char *binding)
+ 	} named[] =
+ 	{
+ 		{ K_SPACE, "space" }, { K_CTRL, "control" }, { K_SHIFT, "shift" }, { K_ALT, "alt" },
+-		{ 'c', "c" }, { 'x', "x" }, { 'z', "z" },
++		{ 'c', "c" }, { 'x', "x" }, { 'z', "z" }, { K_UPARROW, "up arrow" },
+ 	};
+ 	static char text[48];
+ 	int         key = trap_Key_GetKey(binding);
+@@ -1383,6 +1383,26 @@ static const char *ETA_RouteKey(const char *binding)
+ 	return "";
+ }
+ 
++/* A key's name alone, "space", "w": or what it does, when on no key
++   the stock names know. */
++static const char *ETA_RouteKeyName(const char *binding, const char *otherwise)
++{
++	static char names[2][24];
++	static int  which;
++	const char *said = ETA_RouteKey(binding);
++
++	which = !which;
++	if (!Q_strncmp(said, ", press ", 8))
++	{
++		Q_strncpyz(names[which], said + 8, sizeof(names[0]));
++	}
++	else
++	{
++		Q_strncpyz(names[which], otherwise, sizeof(names[0]));
++	}
++	return names[which];
++}
++
+ static const char *ETA_RouteJumpKey(void)
+ {
+ 	return ETA_RouteKey("+moveup");
+@@ -1423,13 +1443,50 @@ static void ETA_RouteSayJump(int special, int count, const vec3_t here)
+ 
+ 	eta_route.saidJump = special;
+ 
++	/* And how: the tester jumped, as a sighted player, by facing the
++	   far side and holding forward with jump - O faces them across. */
+ 	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s, %s%s", landing[2] > edge[2] + 8.0f ? "Jump up" : "Jump over",
++	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s and press %s",
++	                  landing[2] > edge[2] + 8.0f ? "Jump up" : "Jump over",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(landing)),
+-	                  ETA_RouteJumpKey()));
++	                  ETA_RouteKeyName("+forward", "forward"), ETA_RouteKeyName("+moveup", "jump")));
+ 	ETA_Speech_EndReport();
+ }
+ 
++/* The jump just ahead on the way, if there is one: where it lands, and
++   whether it is up onto something. For O, which faces the player across
++   it. */
++qboolean CG_AccessibilityMarkerJumpAhead(vec3_t landingOut, qboolean *up)
++{
++	int    count = ETA_PathFinder_PointCount(), i, last;
++	vec3_t edge, landing, delta;
++
++	if (!eta_marker.active || !eta_route.done || !eta_route.steering)
++	{
++		return qfalse;
++	}
++	last = eta_route.steerIndex + 3 < count ? eta_route.steerIndex + 3 : count - 1;
++	for (i = eta_route.steerIndex > 1 ? eta_route.steerIndex : 1; i <= last; i++)
++	{
++		if (ETA_PathFinder_PointKind(i) != ETA_PATH_JUMP)
++		{
++			continue;
++		}
++		ETA_PathFinder_Point(i - 1, edge);
++		ETA_PathFinder_Point(i, landing);
++		VectorSubtract(edge, cg.predictedPlayerState.origin, delta);
++		delta[2] = 0.0f;
++		if (VectorLength(delta) > 128.0f)
++		{
++			return qfalse;
++		}
++		VectorCopy(landing, landingOut);
++		*up = (qboolean)( landing[2] > edge[2] + 8.0f );
++		return qtrue;
++	}
++	return qfalse;
++}
++
+ /**
+  * @brief "Crouch, low ceiling ahead", once, as the way goes under one,
+  * and "Stand up" past it.
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c476c06a..3ddbbd89 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2252,6 +2252,7 @@ void CG_AccessibilityMarkerWhere( void );
+ void CG_AccessibilityMarkerClear( void );
+ void CG_AccessibilityMarkerForget( void );
+ void CG_AccessibilityMarkerIntoArea( int area );
++qboolean CG_AccessibilityMarkerJumpAhead( vec3_t landing, qboolean *up );
+ void CG_AccessibilityChosenIntoArea( int area );
+ int CG_AccessibilityRouteStep( const float from[3], float to[3] );
+ void CG_AccessibilityChoose( const vec3_t point, const char *name );

@@ -2352,3 +2352,13 @@ player stepped off again and again. A square with a drop within half a
 square of its middle now costs three squares more, so the way keeps to
 the middle. From the tester's save the test player then reached the
 rifle. The tram level's walks still pass.
+
+### 0127 O faces the player across a jump
+
+The tester jumped, as a sighted player, by facing the far side and
+holding forward with jump. With a jump just ahead on the way, O now
+faces the player straight across it, to where it lands, and says
+"Facing across the jump over, 2 meters. Hold W and press space". The
+callout coming up to it says the same: "Jump over, ahead. O faces you
+across; then hold w and press space". Not at a closed door the way goes
+through, which in the first catacomb level was taken for a jump.
