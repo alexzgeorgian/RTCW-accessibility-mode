@@ -1,0 +1,143 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 042fbffd..9f884825 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -94,6 +94,7 @@ static const char *etaLoopSoundFiles[] = {
+ 	"sound/accessibility/chosen_beacon.wav",
+ 	"sound/accessibility/enemy_presence.wav",
+ 	"sound/accessibility/jump_now.wav",
++	"sound/accessibility/edge_tick.wav",
+ };
+ static sfxHandle_t etaLoopSounds[ARRAY_LEN( etaLoopSoundFiles )];
+ 
+@@ -159,6 +160,7 @@ int CG_AccessibilityLoopVolume( eta_loopSoundType_t which ) {
+ 	case ETA_LOOP_BUMP_WALL:
+ 	case ETA_LOOP_BUMP_OBJECT:
+ 	case ETA_LOOP_JUMP_NOW:
++	case ETA_LOOP_EDGE_TICK:
+ 		cvar = &eta_bumpVolume;
+ 		break;
+ 	case ETA_LOOP_ENEMY:
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 782268b7..0801c7ab 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3369,6 +3369,45 @@ static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
+ 	return qtrue;
+ }
+ 
++/*
++ * How near the edge: walking toward a drop with W held, a soft tick,
++ * again and again, quicker the nearer the edge - from about three metres
++ * out, every 0.4 seconds, to every 0.07 at the lip. The tester heard how
++ * deep a ledge was, and never how near it was, so could not tell when to
++ * jump the spike pit. Along the way the player is going, as the edge
++ * guard looks: stairs down are no edge.
++ */
++static void ETA_EdgeTickFrame(const usercmd_t *cmd)
++{
++	static int          lastTick;
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float               walked, rise, interval;
++	qboolean            edge;
++	sfxHandle_t         sfx;
++
++	if (cmd->forwardmove <= 0 || ps->groundEntityNum == ENTITYNUM_NONE || (ps->pm_flags & PMF_LADDER)
++	    || CG_AccessibilityClimbing())
++	{
++		return;
++	}
++	walked = ETA_StairsKeepProbe(ps->viewangles[YAW], &rise, &edge);
++	if (!edge)
++	{
++		return;
++	}
++	interval = 70.0f + walked * 2.5f;
++	if (cg.time - lastTick < (int)interval && cg.time >= lastTick)
++	{
++		return;
++	}
++	lastTick = cg.time;
++	sfx      = CG_AccessibilityLoopSound(ETA_LOOP_EDGE_TICK);
++	if (sfx && CG_AccessibilityBumpVolume() > 0)
++	{
++		trap_S_StartLocalSound(sfx, CHAN_LOCAL_SOUND);
++	}
++}
++
+ static void ETA_EdgeGuardFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3383,6 +3422,7 @@ static void ETA_EdgeGuardFrame(void)
+ 	{
+ 		return;
+ 	}
++	ETA_EdgeTickFrame(&cmd);
+ 	if (ETA_JumpAssistFrame(&cmd))
+ 	{
+ 		return;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index fcefdc8b..857452b9 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -287,6 +287,7 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 	float    lift   = 0.0f;
+ 	qboolean ledge  = qfalse;
+ 	qboolean crouch = qfalse;
++	qboolean lowLift = qfalse;
+ 	int      i;
+ 
+ 	(void)context;
+@@ -346,6 +347,7 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 		{
+ 			ledge = qtrue;
+ 		}
++		lowLift = (qboolean)( i == 0 );
+ 	}
+ 
+ 	/* Room for the player standing; or, on the level, crouched - a jump
+@@ -387,6 +389,30 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 
+ 	to[2] = trace.endpos[2];
+ 
++	/* Two stair risers in one square, each a step: stairs, walked, not
++	   a ledge to jump. The tester was told to jump up stairs it was
++	   simpler to walk up. A step between, at the square's middle, no
++	   higher than a step above the one and below the other, is the
++	   proof. */
++	if (ledge && lowLift && to[2] - from[2] > 0.0f && to[2] - from[2] <= 2.0f * 18.0f + 4.0f)
++	{
++		trace_t mid;
++		vec3_t  top, bottom;
++
++		VectorSet(top, ( from[0] + to[0] ) * 0.5f, ( from[1] + to[1] ) * 0.5f, to[2] + 8.0f);
++		VectorSet(bottom, top[0], top[1], from[2] - 40.0f);
++		trap_CM_BoxTrace(&mid, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
++		if (!mid.startsolid && mid.fraction < 1.0f)
++		{
++			float midFloor = mid.endpos[2] + 24.0f;
++
++			if (midFloor - from[2] <= 18.0f + 1.0f && to[2] - midFloor <= 18.0f + 1.0f)
++			{
++				ledge = qfalse;
++			}
++		}
++	}
++
+ 	/* Up onto a ledge, or over something and down the other side: either
+ 	   way the player has to jump, and is told to. Under a low ceiling,
+ 	   to crouch. */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 9b5cce00..f7817989 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2445,7 +2445,8 @@ typedef enum {
+ 	ETA_LOOP_BUMP_OBJECT,		// walked into a thing - played once, not looped
+ 	ETA_LOOP_CHOSEN,			// the thing chosen with K or J
+ 	ETA_LOOP_ENEMY,				// an enemy in sight
+-	ETA_LOOP_JUMP_NOW			// press jump now - played once, not looped
++	ETA_LOOP_JUMP_NOW,			// press jump now - played once, not looped
++	ETA_LOOP_EDGE_TICK			// an edge ahead, ticked quicker the nearer
+ } eta_loopSoundType_t;
+ 
+ sfxHandle_t CG_AccessibilityLoopSound( eta_loopSoundType_t which );

@@ -2417,3 +2417,17 @@ press jump: at the lip of a gap, or at the square before something to
 jump onto or over, early by the time it takes to hear it and press.
 The jump is the player's own. O and the callout say "Run at it with W,
 and press space at the sound". It plays at the bump sounds' volume.
+
+### 0132 Ticks say how near an edge is; stairs are walked
+
+The tester heard how deep a ledge was, never how near, and so could not
+tell when to jump the spike pit; the jump sound alone did not help.
+Walking toward a drop with W held, a soft low tick (edge_tick.wav) now
+plays again and again, quicker the nearer the edge: from about three
+metres out, every 0.4 seconds, to every 0.07 at the lip - as a car's
+parking sensor. It plays at the bump sounds' volume.
+
+And the tester was told to jump up stairs it was simpler to walk up: the
+way looks a square at a time, and two risers in one square were taken
+for a ledge. A step between, at the square's middle, no more than a
+step above the one and below the other, now makes them stairs.
