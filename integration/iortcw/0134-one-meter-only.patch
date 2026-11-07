@@ -1,0 +1,52 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 4114c621..9110a7fb 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3336,9 +3336,9 @@ static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
+ }
+ 
+ /*
+- * How near the edge, in metres: walking toward a drop with W held, "Edge
+- * in 3 meters", then "2 meters", then "1 meter", each once as the edge
+- * comes nearer; very near, the drop warning says how deep it is. The
++ * How near the edge, in metres: walking toward a drop with W held, "1
++ * meter", once, where it is close enough to jump; the drop warning says
++ * how deep it is. The
+  * tester heard how deep a ledge was, never how near, and could not tell
+  * when to jump the spike pit; a ticking sound, tried, was not what they
+  * wanted - the metres were. Along the way the player is going, as the
+@@ -3388,20 +3388,16 @@ static void ETA_EdgeNearFrame(const usercmd_t *cmd)
+ 	}
+ 	seenAt = cg.time;
+ 
++	/* Once, at a metre: close enough to jump. The tester wanted that
++	   alone, not a count down from three. */
+ 	meters = (int)ceilf(walked * ETA_QU_TO_METERS);
+-	meters = meters < 1 ? 1 : meters;
+-	if (meters > 3)
++	if (meters > 1 || saidMeters)
+ 	{
+ 		return;
+ 	}
+-	/* Each once, nearer. */
+-	if (saidMeters && meters >= saidMeters)
+-	{
+-		return;
+-	}
+-	saidMeters = meters;
++	saidMeters = 1;
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_Speech_Say(meters == 3 ? "Edge in 3 meters" : meters == 2 ? "2 meters" : "1 meter");
++	ETA_Speech_Say("1 meter");
+ }
+ 
+ static void ETA_EdgeGuardFrame(void)
+@@ -4204,7 +4200,7 @@ static void ETA_FaceTheWayNow(void)
+ 					way.point[2] = ps->origin[2] + ps->viewheight;
+ 					ETA_AimStartSnap(&way, NULL);
+ 					ETA_HudNarrator_HoldPassive(cg.time);
+-					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Run at it with W; the edge is said in meters",
++					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Run at it with W, and press space at 1 meter",
+ 					                  up ? "up" : "over", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
+ 					return;
+ 				}

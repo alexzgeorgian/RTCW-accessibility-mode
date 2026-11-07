@@ -2442,3 +2442,10 @@ nearer; the drop warning, "Ledge ahead, 4 metres down", says how deep
 when very near. The ticks and the jump sound of 0131 and 0132 are taken
 out, and their sounds from the pk3. O says "Run at it with W; the edge
 is said in meters".
+
+### 0134 Only "1 meter", where it is close enough to jump
+
+The tester wanted one message where they are close enough to jump, not
+a count down from three: "1 meter" is now said once, walking toward a
+drop with W held; the drop warning says how deep. O says "Run at it with
+W, and press space at 1 meter".
