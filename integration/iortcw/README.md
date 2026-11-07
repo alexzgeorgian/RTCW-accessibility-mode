@@ -2362,3 +2362,19 @@ faces the player straight across it, to where it lands, and says
 callout coming up to it says the same: "Jump over, ahead. O faces you
 across; then hold w and press space". Not at a closed door the way goes
 through, which in the first catacomb level was taken for a jump.
+
+### 0128 No turning back after a turn by hand; menu tabs said
+
+The tester wanted no time after which they were turned to something.
+The lock by itself turned the view back onto an enemy two seconds after
+a turn by hand. Now a turn by hand lets go of that enemy - the one the
+lock was on, or the nearest in sight - for as long as it stays in sight;
+another enemy can still be locked on to, and U still turns to any.
+
+And the menus: the Controls page shows one tab's settings at a time -
+Look, Move, Shoot, Misc - and the tester, reading down it, heard Look's
+settings and the other tabs' names, and took that for the whole menu. A
+button that shows a set of the menu's items in place of another is now
+said as a tab: "Move, tab: Enter shows its settings", or "Look, tab,
+open: its settings are below"; and Enter on it says "Move open. Down
+reads its settings".

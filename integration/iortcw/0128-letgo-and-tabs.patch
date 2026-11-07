@@ -1,0 +1,179 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 04c6ba31..9df213aa 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -250,6 +250,7 @@ typedef struct
+ 	int           refreshAt;
+ 	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
+ 	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
++	int           letGo;           /* the enemy turned away from by hand, from 1; 0 none */
+ } eta_aim_t;
+ 
+ static eta_aim_t eta_aim;
+@@ -882,7 +883,28 @@ static qboolean ETA_AimAcquire(float maxMeters)
+ 	int            count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, byKey);
+ 	int            index = 0, i;
+ 
+-	if (count <= 0 || (!byKey && list[0].meters > maxMeters))
++	/* The lock by itself leaves alone the enemy the player turned away
++	   from by hand, for as long as it stays in sight - not for a couple of
++	   seconds and then back onto it: the tester wanted no time after which
++	   they were turned to something. Out of sight, it is forgotten. */
++	if (!byKey && eta_aim.letGo)
++	{
++		for (i = 0; i < count && list[i].entityNum != eta_aim.letGo - 1; i++)
++		{
++		}
++		if (i == count)
++		{
++			eta_aim.letGo = 0;
++		}
++		else
++		{
++			for (i = 0; i < count && list[i].entityNum == eta_aim.letGo - 1; i++)
++			{
++			}
++			index = i;
++		}
++	}
++	if (count <= 0 || index >= count || (!byKey && list[index].meters > maxMeters))
+ 	{
+ 		return qfalse;
+ 	}
+@@ -2193,12 +2215,6 @@ static void ETA_AutoLock(void)
+ 		return;
+ 	}
+ 
+-	/* A turn by hand keeps it off a moment, so the player can look away. */
+-	if (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS)
+-	{
+-		return;
+-	}
+-
+ 	/* Nor does it take the aim off a thing the player is on. */
+ 	if (ETA_ItemFocused())
+ 	{
+@@ -4631,6 +4647,21 @@ static void CG_AccessibilityTurnDown(int direction)
+ 	{
+ 		ETA_ClimbStop("Climb stopped");
+ 	}
++	/* The enemy the lock was on - or, with none, the nearest in sight -
++	   is let go until it is out of sight; another can still be locked on. */
++	{
++		etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++
++		if (eta_aim.mode == ETA_AIM_LOCK && eta_aim.entityNum >= 0)
++		{
++			eta_aim.letGo = eta_aim.entityNum + 1;
++		}
++		else if (CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qfalse) > 0
++		         && list[0].meters <= ETA_AIM_AUTO_METERS)
++		{
++			eta_aim.letGo = list[0].entityNum + 1;
++		}
++	}
+ 	if (eta_aim.mode != ETA_AIM_NONE)
+ 	{
+ 		ETA_AimStop();
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 6ee9fefa..a0e31a07 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -2116,6 +2116,59 @@ static char eta_lastFieldText[ETA_MAX_MENU_TEXT_LENGTH + 1];
+  * setting when it has one. A text box's label alone is useless - "Name"
+  * does not say what the name currently is - so it says its contents too.
+  */
++/* A button that, pressed, shows a set of the menu's items in place of
++   another - a tab: the Controls page's Look, Move, Shoot and Misc. Its
++   set's name, or NULL. Only the open tab's settings are on the page, and
++   the tester, reading down it, heard Look's and the names of the others,
++   and took that for the whole menu. */
++static const char *ETA_TabShows( itemDef_t *item ) {
++	static char shown[64];
++	const char *p, *q;
++	int n;
++
++	if ( !item || item->type != ITEM_TYPE_BUTTON || !item->action ) {
++		return NULL;
++	}
++	/* The script is kept as its tokens, each in quotes:
++	   "hide" "grpControls" ; "show" "look". */
++	p = strstr( item->action, "hide" );
++	q = strstr( item->action, "show" );
++	if ( !p || !q ) {
++		return NULL;
++	}
++	q += 4;
++	while ( *q == ' ' || *q == '"' ) {
++		q++;
++	}
++	for ( n = 0; q[n] && q[n] != ' ' && q[n] != '"' && q[n] != ';' && q[n] != '}' && n < (int)sizeof( shown ) - 1; n++ ) {
++		shown[n] = q[n];
++	}
++	shown[n] = '\0';
++	return n ? shown : NULL;
++}
++
++/* How many of a tab's settings there are, and whether it is open. */
++static int ETA_TabCount( itemDef_t *item, const char *name, qboolean *open ) {
++	menuDef_t *menu = (menuDef_t*)item->parent;
++	int i, count = 0;
++
++	*open = qfalse;
++	for ( i = 0; menu && i < menu->itemCount; i++ ) {
++		itemDef_t *other = menu->items[i];
++
++		if ( other == item || ( other->window.flags & WINDOW_DECORATION ) || other->type == ITEM_TYPE_TEXT
++			 || !( ( other->window.name && !Q_stricmp( other->window.name, name ) )
++				   || ( other->window.group && !Q_stricmp( other->window.group, name ) ) ) ) {
++			continue;
++		}
++		count++;
++		if ( other->window.flags & WINDOW_VISIBLE ) {
++			*open = qtrue;
++		}
++	}
++	return count;
++}
++
+ const char *ETA_MenuItem_FocusText( itemDef_t *item ) {
+ 	static char text[ETA_MAX_MENU_TEXT_LENGTH + 1];
+ 	char value[ETA_MAX_MENU_TEXT_LENGTH];
+@@ -2142,6 +2195,17 @@ const char *ETA_MenuItem_FocusText( itemDef_t *item ) {
+ 
+ 		eta_lastFieldText[0] = '\0';
+ 
++		{
++			const char *tab = ETA_TabShows( item );
++			qboolean   open;
++			int        count;
++
++			if ( label && tab && ( count = ETA_TabCount( item, tab, &open ) ) > 0 ) {
++				Com_sprintf( text, sizeof( text ), open ? "%s, tab, open: its settings are below"
++							 : "%s, tab: Enter shows its settings", label );
++				return text;
++			}
++		}
+ 		if ( !label || !setting || !*setting ) {
+ 			return label;
+ 		}
+@@ -3588,6 +3652,19 @@ qboolean Item_HandleKey( itemDef_t *item, int key, qboolean down ) {
+ void Item_Action( itemDef_t *item ) {
+ 	if ( item ) {
+ 		Item_RunScript( item, item->action );
++#ifdef FEATURE_ACCESSIBILITY
++		/* A tab opened: said, with how many settings it shows. */
++		{
++			const char *tab = ETA_TabShows( item );
++			qboolean   open;
++			int        count;
++
++			if ( tab && ( count = ETA_TabCount( item, tab, &open ) ) > 0 && open ) {
++				ETA_MenuNarrator_OnValueChanged( ETA_MenuItem_SpokenLabel( item ),
++												 va( "%s open. Down reads its settings", ETA_MenuItem_SpokenLabel( item ) ) );
++			}
++		}
++#endif
+ 	}
+ }
+ 
