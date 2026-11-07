@@ -349,20 +349,6 @@ SOUNDS = {
     "enemy_presence.wav": lambda: (tone(147, 0.090, 0.30, WARM, 0.1, 0.6)
                                    + tone(131, 0.090, 0.70, WARM, 0.1, 0.6)),
 
-    # Jump now: played once, running at a jump on the way, at the moment
-    # a sighted player would press jump - a little before the edge, for
-    # the time it takes to hear it and press. The tester jumps with their
-    # own key, and needed only to know when. Two quick rising high notes,
-    # brighter than anything else in the set, and over at once.
-    "jump_now.wav": lambda: (tone(1047, 0.040, 0.070, BRIGHT, 0.05, 0.5)
-                             + tone(1568, 0.060, 0.120, BRIGHT, 0.05, 0.6)),
-
-    # An edge ahead: one soft short tick, played again and again as the
-    # player walks toward a drop, quicker the nearer the edge - as a car's
-    # parking sensor. The tester heard how deep a ledge was, but never
-    # how near, and could not tell when to jump. Low and dull, so it is
-    # never taken for the jump's bright notes.
-    "edge_tick.wav": lambda: tone(523, 0.022, 0.040, WARM, 0.1, 0.6),
 }
 
 

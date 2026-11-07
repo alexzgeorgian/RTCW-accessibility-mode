@@ -2431,3 +2431,14 @@ And the tester was told to jump up stairs it was simpler to walk up: the
 way looks a square at a time, and two risers in one square were taken
 for a ledge. A step between, at the square's middle, no more than a
 step above the one and below the other, now makes them stairs.
+
+### 0133 The edge said in metres
+
+The tester wanted to be told in metres how near the edge was, and then,
+very near, how deep: not a ticking sound, nor a sound to jump at.
+Walking toward a drop deeper than a step or two with W held, "Edge in 3
+meters", then "2 meters", then "1 meter" is said, each once as it comes
+nearer; the drop warning, "Ledge ahead, 4 metres down", says how deep
+when very near. The ticks and the jump sound of 0131 and 0132 are taken
+out, and their sounds from the pk3. O says "Run at it with W; the edge
+is said in meters".

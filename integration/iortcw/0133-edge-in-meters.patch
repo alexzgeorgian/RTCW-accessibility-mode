@@ -1,0 +1,196 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 9f884825..5ed68a8b 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -93,8 +93,6 @@ static const char *etaLoopSoundFiles[] = {
+ 	"sound/accessibility/bump_object.wav",
+ 	"sound/accessibility/chosen_beacon.wav",
+ 	"sound/accessibility/enemy_presence.wav",
+-	"sound/accessibility/jump_now.wav",
+-	"sound/accessibility/edge_tick.wav",
+ };
+ static sfxHandle_t etaLoopSounds[ARRAY_LEN( etaLoopSoundFiles )];
+ 
+@@ -159,8 +157,6 @@ int CG_AccessibilityLoopVolume( eta_loopSoundType_t which ) {
+ 		break;
+ 	case ETA_LOOP_BUMP_WALL:
+ 	case ETA_LOOP_BUMP_OBJECT:
+-	case ETA_LOOP_JUMP_NOW:
+-	case ETA_LOOP_EDGE_TICK:
+ 		cvar = &eta_bumpVolume;
+ 		break;
+ 	case ETA_LOOP_ENEMY:
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 0801c7ab..4114c621 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3332,59 +3332,33 @@ static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
+ 		return qfalse;
+ 	}
+ 
+-	/* And when to press it: a short sound, once, where a sighted player
+-	   would - at the lip of a gap, or at the square before something to
+-	   jump onto or over - early by the time it takes to hear it and
+-	   press. The tester asked for it in place of the jump made for
+-	   them. */
+-	{
+-		static vec3_t saidEdge;
+-		static int    saidAt;
+-		float         speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
+-		float         early = 16.0f + speed * 0.20f, rise, walked;
+-		vec3_t        flat;
+-		qboolean      now, lip;
+-		sfxHandle_t   sfx;
+-
+-		VectorSubtract(edgeAt, ps->origin, flat);
+-		flat[2] = 0.0f;
+-		now = (qboolean)( VectorLength(flat) < early );
+-		if (!now && !up)
+-		{
+-			walked = ETA_StairsKeepProbe(ps->viewangles[YAW], &rise, &lip);
+-			now    = (qboolean)( lip && walked <= early );
+-		}
+-		if (now && cmd->upmove <= 0
+-		    && ( Distance(saidEdge, edgeAt) > 8.0f || cg.time - saidAt > 3000 || cg.time < saidAt ))
+-		{
+-			VectorCopy(edgeAt, saidEdge);
+-			saidAt = cg.time;
+-			sfx    = CG_AccessibilityLoopSound(ETA_LOOP_JUMP_NOW);
+-			if (sfx && CG_AccessibilityBumpVolume() > 0)
+-			{
+-				trap_S_StartLocalSound(sfx, CHAN_LOCAL_SOUND);
+-			}
+-		}
+-	}
+ 	return qtrue;
+ }
+ 
+ /*
+- * How near the edge: walking toward a drop with W held, a soft tick,
+- * again and again, quicker the nearer the edge - from about three metres
+- * out, every 0.4 seconds, to every 0.07 at the lip. The tester heard how
+- * deep a ledge was, and never how near it was, so could not tell when to
+- * jump the spike pit. Along the way the player is going, as the edge
+- * guard looks: stairs down are no edge.
++ * How near the edge, in metres: walking toward a drop with W held, "Edge
++ * in 3 meters", then "2 meters", then "1 meter", each once as the edge
++ * comes nearer; very near, the drop warning says how deep it is. The
++ * tester heard how deep a ledge was, never how near, and could not tell
++ * when to jump the spike pit; a ticking sound, tried, was not what they
++ * wanted - the metres were. Along the way the player is going, as the
++ * edge guard looks: stairs down are no edge.
+  */
+-static void ETA_EdgeTickFrame(const usercmd_t *cmd)
++static void ETA_EdgeNearFrame(const usercmd_t *cmd)
+ {
+-	static int          lastTick;
++	static int          saidMeters;
++	static int          seenAt;
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	float               walked, rise, interval;
++	float               walked, rise;
+ 	qboolean            edge;
+-	sfxHandle_t         sfx;
++	int                 meters;
+ 
++	/* Forgotten once no edge has been ahead for a moment: W let go and
++	   pressed again on the way to it is the same approach. */
++	if (saidMeters && ( cg.time - seenAt > 1500 || cg.time < seenAt ))
++	{
++		saidMeters = 0;
++	}
+ 	if (cmd->forwardmove <= 0 || ps->groundEntityNum == ENTITYNUM_NONE || (ps->pm_flags & PMF_LADDER)
+ 	    || CG_AccessibilityClimbing())
+ 	{
+@@ -3395,17 +3369,39 @@ static void ETA_EdgeTickFrame(const usercmd_t *cmd)
+ 	{
+ 		return;
+ 	}
+-	interval = 70.0f + walked * 2.5f;
+-	if (cg.time - lastTick < (int)interval && cg.time >= lastTick)
++
++	/* Deeper than a step or two down, as the drop warning counts one. */
++	{
++		vec3_t  dir, lip, bottom;
++		trace_t trace;
++
++		VectorSet(dir, cosf(DEG2RAD(ps->viewangles[YAW])), sinf(DEG2RAD(ps->viewangles[YAW])), 0.0f);
++		VectorMA(ps->origin, walked + ETA_STAIRS_KEEP_STEP + 16.0f, dir, lip);
++		lip[2] = ps->origin[2] + ps->mins[2] + rise + 8.0f;
++		VectorCopy(lip, bottom);
++		bottom[2] -= 64.0f + 8.0f;
++		CG_Trace(&trace, lip, NULL, NULL, bottom, ps->clientNum, MASK_PLAYERSOLID);
++		if (trace.fraction < 1.0f)
++		{
++			return;
++		}
++	}
++	seenAt = cg.time;
++
++	meters = (int)ceilf(walked * ETA_QU_TO_METERS);
++	meters = meters < 1 ? 1 : meters;
++	if (meters > 3)
+ 	{
+ 		return;
+ 	}
+-	lastTick = cg.time;
+-	sfx      = CG_AccessibilityLoopSound(ETA_LOOP_EDGE_TICK);
+-	if (sfx && CG_AccessibilityBumpVolume() > 0)
++	/* Each once, nearer. */
++	if (saidMeters && meters >= saidMeters)
+ 	{
+-		trap_S_StartLocalSound(sfx, CHAN_LOCAL_SOUND);
++		return;
+ 	}
++	saidMeters = meters;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(meters == 3 ? "Edge in 3 meters" : meters == 2 ? "2 meters" : "1 meter");
+ }
+ 
+ static void ETA_EdgeGuardFrame(void)
+@@ -3422,7 +3418,7 @@ static void ETA_EdgeGuardFrame(void)
+ 	{
+ 		return;
+ 	}
+-	ETA_EdgeTickFrame(&cmd);
++	ETA_EdgeNearFrame(&cmd);
+ 	if (ETA_JumpAssistFrame(&cmd))
+ 	{
+ 		return;
+@@ -4208,7 +4204,7 @@ static void ETA_FaceTheWayNow(void)
+ 					way.point[2] = ps->origin[2] + ps->viewheight;
+ 					ETA_AimStartSnap(&way, NULL);
+ 					ETA_HudNarrator_HoldPassive(cg.time);
+-					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Run at it with W, and press space at the sound",
++					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Run at it with W; the edge is said in meters",
+ 					                  up ? "up" : "over", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
+ 					return;
+ 				}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 857452b9..596584fb 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1522,7 +1522,7 @@ static void ETA_RouteSayJump(int special, int count, const vec3_t here)
+ 	/* And how: the tester jumped, as a sighted player, by facing the
+ 	   far side and holding forward with jump - O faces them across. */
+ 	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s, and press %s at the sound",
++	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s, and press %s at the edge",
+ 	                  landing[2] > edge[2] + 8.0f ? "Jump up" : "Jump over",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(landing)),
+ 	                  ETA_RouteKeyName("+forward", "forward"), ETA_RouteKeyName("+moveup", "jump")));
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f7817989..c5c259d9 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2444,9 +2444,7 @@ typedef enum {
+ 	ETA_LOOP_BUMP_WALL,			// walked into a wall - played once, not looped
+ 	ETA_LOOP_BUMP_OBJECT,		// walked into a thing - played once, not looped
+ 	ETA_LOOP_CHOSEN,			// the thing chosen with K or J
+-	ETA_LOOP_ENEMY,				// an enemy in sight
+-	ETA_LOOP_JUMP_NOW,			// press jump now - played once, not looped
+-	ETA_LOOP_EDGE_TICK			// an edge ahead, ticked quicker the nearer
++	ETA_LOOP_ENEMY				// an enemy in sight
+ } eta_loopSoundType_t;
+ 
+ sfxHandle_t CG_AccessibilityLoopSound( eta_loopSoundType_t which );
