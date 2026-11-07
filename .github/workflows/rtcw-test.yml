@@ -236,11 +236,5 @@ jobs:
             ) || echo "::warning::The old releases repository could not be updated; its key may have expired"
           fi
 
-          # Only the newest RTCW test build is listed.
-          for old in $(gh release list --repo "$PUBLIC_RELEASES" --limit 200 \
-                         --json tagName,isPrerelease \
-                         --jq '.[] | select(.isPrerelease) | .tagName | select(startswith("rtcw-test-"))'); do
-            [ "$old" = "$TAG" ] && continue
-            gh release delete "$old" --repo "$PUBLIC_RELEASES" --cleanup-tag --yes
-            echo "removed the older test build $old"
-          done
+          # Every test build stays listed, the newest first: the tester
+          # asked for all of them on this page, not only the newest.
