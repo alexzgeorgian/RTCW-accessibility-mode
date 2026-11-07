@@ -1,0 +1,164 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 698dc0cf..8466d7ed 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -248,7 +248,8 @@ typedef struct
+ 	etaAimTarget_t follow;      /* the chosen thing being walked to */
+ 	qboolean      saidReach;
+ 	int           refreshAt;
+-	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
++	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim until a hand turn or a walk away */
++	vec3_t        itemFocusFrom;   /* where the player was turned */
+ 	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
+ 	int           letGo;           /* the enemy turned away from by hand, from 1; 0 none */
+ } eta_aim_t;
+@@ -1003,6 +1004,7 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ 	eta_aim.entityNum      = target->entityNum;
+ 	eta_aim.started        = cg.time;
+ 	eta_aim.itemFocusUntil = cg.time + ETA_ITEM_FOCUS_MS;
++	VectorCopy(cg.predictedPlayerState.origin, eta_aim.itemFocusFrom);
+ 	eta_aim.lift      = 0.0f;
+ 	eta_aim.itemTry   = -1;
+ 	VectorSet(eta_aim.itemAim, 0.0f, 0.0f, 8.0f);
+@@ -1276,7 +1278,11 @@ static qboolean ETA_ItemFocused(void)
+ 	{
+ 		return qtrue;
+ 	}
+-	if (cg.time < eta_aim.itemFocusUntil && eta_aim.itemFocusUntil - cg.time <= ETA_ITEM_FOCUS_MS)
++	/* Turned by O or F, the player stays turned: no enemy's lock takes
++	   the view away after a while - only a turn by hand, or walking off
++	   four metres, ends it. The tester, faced across the spike pit, felt
++	   the facing not hold long enough. */
++	if (eta_aim.itemFocusUntil && Distance(cg.predictedPlayerState.origin, eta_aim.itemFocusFrom) < 160.0f)
+ 	{
+ 		return qtrue;
+ 	}
+@@ -3299,44 +3305,19 @@ static struct
+ } eta_edge;
+ 
+ /*
+- * The jump on the way, made at the edge. The tester, faced across the
++ * The jump on the way, left to the player. The tester, faced across the
+  * spike pit in the catacombs, held W and jumped, and fell in: the edge
+  * guard let go of W three metres short, and the jump was made from
+  * standing. With the way's next step a jump, and the player going toward
+- * where it lands with W held, the guard leaves them be, and jump is
+- * pressed for them at the lip - the timing a sighted player has, and a
+- * blind one cannot. Jump already held is let go a frame first: held, the
+- * game will not jump again.
++ * where it lands with W held, the guard leaves them be; space is theirs.
+  */
+-static struct
+-{
+-	int phase;   /* 0 none, 1 let go, to press next frame, 2 pressed */
+-	int at;
+-} eta_jumpAssist;
+ 
+ static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              landing, edgeAt, toward;
+-	qboolean            up, edge;
+-	float               rise, walked, speed, off;
++	qboolean            up;
+ 
+-	if (eta_jumpAssist.phase == 1)
+-	{
+-		trap_SendConsoleCommand("+moveup\n");
+-		eta_jumpAssist.phase = 2;
+-		eta_jumpAssist.at    = cg.time;
+-		return qtrue;
+-	}
+-	if (eta_jumpAssist.phase == 2)
+-	{
+-		if (cg.time - eta_jumpAssist.at > 200 || cg.time < eta_jumpAssist.at)
+-		{
+-			trap_SendConsoleCommand("-moveup\n");
+-			eta_jumpAssist.phase = 0;
+-		}
+-		return qtrue;
+-	}
+ 	if (cmd->forwardmove <= 0 || ps->groundEntityNum == ENTITYNUM_NONE
+ 	    || !CG_AccessibilityMarkerJumpAhead(landing, &up, edgeAt))
+ 	{
+@@ -3344,43 +3325,9 @@ static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
+ 	}
+ 	VectorSubtract(landing, ps->origin, toward);
+ 	toward[2] = 0.0f;
+-	off = fabsf(AngleSubtract(ps->viewangles[YAW], vectoyaw(toward)));
+-	if (off > 35.0f)
+-	{
+-		return qfalse;
+-	}
+-	speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
+-	/* At the way's square before the jump - up onto something, or over
+-	   something in the way - or, over a gap, at its lip. */
+-	{
+-		vec3_t   flat;
+-		qboolean lip;
+-
+-		VectorSubtract(edgeAt, ps->origin, flat);
+-		flat[2] = 0.0f;
+-		edge = (qboolean)( VectorLength(flat) < 24.0f + speed * 0.05f );
+-		if (!edge && !up)
+-		{
+-			walked = ETA_StairsKeepProbe(ps->viewangles[YAW], &rise, &lip);
+-			edge   = (qboolean)( lip && walked <= 20.0f + speed * 0.05f );
+-		}
+-	}
+-	if (edge)
+-	{
+-		if (cmd->upmove > 0)
+-		{
+-			trap_SendConsoleCommand("-moveup\n");
+-			eta_jumpAssist.phase = 1;
+-		}
+-		else
+-		{
+-			trap_SendConsoleCommand("+moveup\n");
+-			eta_jumpAssist.phase = 2;
+-			eta_jumpAssist.at    = cg.time;
+-		}
+-	}
+-	/* Going to the jump: not stopped at its edge. */
+-	return qtrue;
++	/* Going toward where the way's jump lands: not stopped at its edge.
++	   The jump is the player's own, with space. */
++	return (qboolean)( fabsf(AngleSubtract(ps->viewangles[YAW], vectoyaw(toward))) <= 35.0f );
+ }
+ 
+ static void ETA_EdgeGuardFrame(void)
+@@ -4182,7 +4129,7 @@ static void ETA_FaceTheWayNow(void)
+ 					way.point[2] = ps->origin[2] + ps->viewheight;
+ 					ETA_AimStartSnap(&way, NULL);
+ 					ETA_HudNarrator_HoldPassive(cg.time);
+-					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Hold W: the jump is made for you at the edge",
++					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Hold W and press space",
+ 					                  up ? "up" : "over", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
+ 					return;
+ 				}
+@@ -4760,6 +4707,7 @@ static void CG_AccessibilityTurnDown(int direction)
+ 		ETA_AimStop();
+ 	}
+ 	eta_aim.manualUntil = cg.time + ETA_AIM_MANUAL_MS;
++	eta_aim.itemFocusUntil = 0;   /* turned away by hand: O's facing given up */
+ 
+ 	if (!eta_turnSteps.integer)
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 29aab95d..8ea8379e 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1496,10 +1496,10 @@ static void ETA_RouteSayJump(int special, int count, const vec3_t here)
+ 	/* And how: the tester jumped, as a sighted player, by facing the
+ 	   far side and holding forward with jump - O faces them across. */
+ 	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s, and the jump is made for you at the edge",
++	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s and press %s",
+ 	                  landing[2] > edge[2] + 8.0f ? "Jump up" : "Jump over",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(landing)),
+-	                  ETA_RouteKeyName("+forward", "forward")));
++	                  ETA_RouteKeyName("+forward", "forward"), ETA_RouteKeyName("+moveup", "jump")));
+ 	ETA_Speech_EndReport();
+ }
+ 

@@ -2391,3 +2391,17 @@ already held is let go a frame first, as the game will not jump again
 while it is held. O and the callout now say "Hold W: the jump is made
 for you at the edge". A door the way's squares took for something to
 jump over is no jump: it was faced, and said, again and again.
+
+### 0130 The jump is the player's; O's facing holds
+
+The tester did not want the jump made for them: they jump with space,
+held with W, as before. 0129's pressing of jump is taken out; the edge
+guard still leaves them be while they go toward the way's jump with W,
+and O says "Hold W and press space" again.
+
+What they meant by a time limit was O's facing: turned across the spike
+pit by O, they were not kept facing it. Turned to something by O or F,
+no enemy's lock took the view before six seconds were up, and then one
+could. Now the facing holds until they turn by hand, press U, or walk
+four metres from where they were turned. Shooting, U, and the lock
+taking an enemy at any other time are as they were.
