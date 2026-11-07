@@ -2378,3 +2378,16 @@ button that shows a set of the menu's items in place of another is now
 said as a tab: "Move, tab: Enter shows its settings", or "Look, tab,
 open: its settings are below"; and Enter on it says "Move open. Down
 reads its settings".
+
+### 0129 The jump on the way is made at the edge
+
+The tester, faced across the spike pit, held W and jumped, and fell in:
+the edge guard let go of W three metres short of the lip, and the jump
+was made from standing. With the way's next step a jump, and the player
+going toward where it lands with W held, the edge guard now leaves them
+be, and jump is pressed for them at the right moment: at the lip of a
+gap, or at the square before something to jump up onto or over. A jump
+already held is let go a frame first, as the game will not jump again
+while it is held. O and the callout now say "Hold W: the jump is made
+for you at the edge". A door the way's squares took for something to
+jump over is no jump: it was faced, and said, again and again.

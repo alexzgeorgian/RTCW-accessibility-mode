@@ -1,0 +1,270 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9df213aa..698dc0cf 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3298,6 +3298,91 @@ static struct
+ 	int    saidAt;
+ } eta_edge;
+ 
++/*
++ * The jump on the way, made at the edge. The tester, faced across the
++ * spike pit in the catacombs, held W and jumped, and fell in: the edge
++ * guard let go of W three metres short, and the jump was made from
++ * standing. With the way's next step a jump, and the player going toward
++ * where it lands with W held, the guard leaves them be, and jump is
++ * pressed for them at the lip - the timing a sighted player has, and a
++ * blind one cannot. Jump already held is let go a frame first: held, the
++ * game will not jump again.
++ */
++static struct
++{
++	int phase;   /* 0 none, 1 let go, to press next frame, 2 pressed */
++	int at;
++} eta_jumpAssist;
++
++static qboolean ETA_JumpAssistFrame(const usercmd_t *cmd)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              landing, edgeAt, toward;
++	qboolean            up, edge;
++	float               rise, walked, speed, off;
++
++	if (eta_jumpAssist.phase == 1)
++	{
++		trap_SendConsoleCommand("+moveup\n");
++		eta_jumpAssist.phase = 2;
++		eta_jumpAssist.at    = cg.time;
++		return qtrue;
++	}
++	if (eta_jumpAssist.phase == 2)
++	{
++		if (cg.time - eta_jumpAssist.at > 200 || cg.time < eta_jumpAssist.at)
++		{
++			trap_SendConsoleCommand("-moveup\n");
++			eta_jumpAssist.phase = 0;
++		}
++		return qtrue;
++	}
++	if (cmd->forwardmove <= 0 || ps->groundEntityNum == ENTITYNUM_NONE
++	    || !CG_AccessibilityMarkerJumpAhead(landing, &up, edgeAt))
++	{
++		return qfalse;
++	}
++	VectorSubtract(landing, ps->origin, toward);
++	toward[2] = 0.0f;
++	off = fabsf(AngleSubtract(ps->viewangles[YAW], vectoyaw(toward)));
++	if (off > 35.0f)
++	{
++		return qfalse;
++	}
++	speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++	/* At the way's square before the jump - up onto something, or over
++	   something in the way - or, over a gap, at its lip. */
++	{
++		vec3_t   flat;
++		qboolean lip;
++
++		VectorSubtract(edgeAt, ps->origin, flat);
++		flat[2] = 0.0f;
++		edge = (qboolean)( VectorLength(flat) < 24.0f + speed * 0.05f );
++		if (!edge && !up)
++		{
++			walked = ETA_StairsKeepProbe(ps->viewangles[YAW], &rise, &lip);
++			edge   = (qboolean)( lip && walked <= 20.0f + speed * 0.05f );
++		}
++	}
++	if (edge)
++	{
++		if (cmd->upmove > 0)
++		{
++			trap_SendConsoleCommand("-moveup\n");
++			eta_jumpAssist.phase = 1;
++		}
++		else
++		{
++			trap_SendConsoleCommand("+moveup\n");
++			eta_jumpAssist.phase = 2;
++			eta_jumpAssist.at    = cg.time;
++		}
++	}
++	/* Going to the jump: not stopped at its edge. */
++	return qtrue;
++}
++
+ static void ETA_EdgeGuardFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3307,9 +3392,17 @@ static void ETA_EdgeGuardFrame(void)
+ 	float               speed, yaw, rise, walked, drop, hurt, deep;
+ 	qboolean            edge, deadly;
+ 
+-	if (!eta_edgeGuard.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
+-	    || ps->groundEntityNum == ENTITYNUM_NONE || (ps->pm_flags & PMF_LADDER) || CG_AccessibilityClimbing()
+-	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || ( !cmd.forwardmove && !cmd.rightmove ) || cmd.upmove > 0)
++	if (cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL || (ps->pm_flags & PMF_LADDER) || CG_AccessibilityClimbing()
++	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd))
++	{
++		return;
++	}
++	if (ETA_JumpAssistFrame(&cmd))
++	{
++		return;
++	}
++	if (!eta_edgeGuard.integer || ps->groundEntityNum == ENTITYNUM_NONE || ( !cmd.forwardmove && !cmd.rightmove )
++	    || cmd.upmove > 0)
+ 	{
+ 		return;
+ 	}
+@@ -4067,7 +4160,7 @@ static void ETA_FaceTheWayNow(void)
+ 			vec3_t   landing, across;
+ 			qboolean up;
+ 
+-			if (CG_AccessibilityMarkerJumpAhead(landing, &up))
++			if (CG_AccessibilityMarkerJumpAhead(landing, &up, NULL))
+ 			{
+ 				etaAimTarget_t way;
+ 				vec3_t         dir;
+@@ -4089,7 +4182,7 @@ static void ETA_FaceTheWayNow(void)
+ 					way.point[2] = ps->origin[2] + ps->viewheight;
+ 					ETA_AimStartSnap(&way, NULL);
+ 					ETA_HudNarrator_HoldPassive(cg.time);
+-					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Hold W and press space",
++					ETA_Speech_Say(va("Facing across the jump %s, %d %s. Hold W: the jump is made for you at the edge",
+ 					                  up ? "up" : "over", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
+ 					return;
+ 				}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index ed600cb7..29aab95d 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1403,10 +1403,6 @@ static const char *ETA_RouteKeyName(const char *binding, const char *otherwise)
+ 	return names[which];
+ }
+ 
+-static const char *ETA_RouteJumpKey(void)
+-{
+-	return ETA_RouteKey("+moveup");
+-}
+ 
+ /**
+  * @brief "Jump up, ahead", once, as the player comes to a jump on the way.
+@@ -1419,6 +1415,56 @@ static const char *ETA_RouteJumpKey(void)
+  * nothing here: the ladder is said as the player reaches it, with F to
+  * climb (cg_draw.c).
+  */
++static qboolean ETA_RouteJumpIsDoor(const vec3_t edge, const vec3_t landing)
++{
++	trace_t through;
++	vec3_t  a, b;
++	int     model;
++
++	VectorCopy(edge, a);
++	VectorCopy(landing, b);
++	a[2] += 32.0f;
++	b[2] += 32.0f;
++
++	CG_Trace(&through, a, NULL, NULL, b, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++	if (through.fraction < 1.0f && through.entityNum >= 0 && through.entityNum < ENTITYNUM_WORLD
++	    && cg_entities[through.entityNum].currentState.eType == ET_MOVER)
++	{
++		return qtrue;
++	}
++	/* And by the map's own door boxes, for one the snapshot does
++	   not hold solid. */
++	for (model = 1; model < MAX_MODELS && model < cgs.numInlineModels; model++)
++	{
++		vec3_t   mins, maxs;
++		qboolean opens;
++		int      k;
++		float    t;
++
++		if (!CG_AccessibilityDoorBox(model, mins, maxs, &opens))
++		{
++			continue;
++		}
++		for (t = 0.0f; t <= 1.0f; t += 0.125f)
++		{
++			for (k = 0; k < 3; k++)
++			{
++				float p = a[k] + ( b[k] - a[k] ) * t;
++
++				if (p < mins[k] - 2.0f || p > maxs[k] + 2.0f)
++				{
++					break;
++				}
++			}
++			if (k == 3)
++			{
++				return qtrue;
++			}
++		}
++	}
++	return qfalse;
++}
++
+ #define ETA_ROUTE_JUMP_SAY 96.0f
+ 
+ static void ETA_RouteSayJump(int special, int count, const vec3_t here)
+@@ -1440,23 +1486,27 @@ static void ETA_RouteSayJump(int special, int count, const vec3_t here)
+ 	{
+ 		return;
+ 	}
++	if (ETA_RouteJumpIsDoor(edge, landing))
++	{
++		return;
++	}
+ 
+ 	eta_route.saidJump = special;
+ 
+ 	/* And how: the tester jumped, as a sighted player, by facing the
+ 	   far side and holding forward with jump - O faces them across. */
+ 	ETA_Speech_BeginReport();
+-	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s and press %s",
++	ETA_Speech_Say(va("%s, %s. O faces you across; then hold %s, and the jump is made for you at the edge",
+ 	                  landing[2] > edge[2] + 8.0f ? "Jump up" : "Jump over",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(landing)),
+-	                  ETA_RouteKeyName("+forward", "forward"), ETA_RouteKeyName("+moveup", "jump")));
++	                  ETA_RouteKeyName("+forward", "forward")));
+ 	ETA_Speech_EndReport();
+ }
+ 
+ /* The jump just ahead on the way, if there is one: where it lands, and
+    whether it is up onto something. For O, which faces the player across
+    it. */
+-qboolean CG_AccessibilityMarkerJumpAhead(vec3_t landingOut, qboolean *up)
++qboolean CG_AccessibilityMarkerJumpAhead(vec3_t landingOut, qboolean *up, vec3_t edgeOut)
+ {
+ 	int    count = ETA_PathFinder_PointCount(), i, last;
+ 	vec3_t edge, landing, delta;
+@@ -1480,7 +1530,18 @@ qboolean CG_AccessibilityMarkerJumpAhead(vec3_t landingOut, qboolean *up)
+ 		{
+ 			return qfalse;
+ 		}
++		/* A closed door between: no jump, whatever the way's squares
++		   took it for - in the first catacomb level, a door a switch
++		   opens was "the jump over", and faced again and again. */
++		if (ETA_RouteJumpIsDoor(edge, landing))
++		{
++			return qfalse;
++		}
+ 		VectorCopy(landing, landingOut);
++		if (edgeOut)
++		{
++			VectorCopy(edge, edgeOut);
++		}
+ 		*up = (qboolean)( landing[2] > edge[2] + 8.0f );
+ 		return qtrue;
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3ddbbd89..c5c259d9 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2252,7 +2252,7 @@ void CG_AccessibilityMarkerWhere( void );
+ void CG_AccessibilityMarkerClear( void );
+ void CG_AccessibilityMarkerForget( void );
+ void CG_AccessibilityMarkerIntoArea( int area );
+-qboolean CG_AccessibilityMarkerJumpAhead( vec3_t landing, qboolean *up );
++qboolean CG_AccessibilityMarkerJumpAhead( vec3_t landing, qboolean *up, vec3_t edge );
+ void CG_AccessibilityChosenIntoArea( int area );
+ int CG_AccessibilityRouteStep( const float from[3], float to[3] );
+ void CG_AccessibilityChoose( const vec3_t point, const char *name );
