@@ -2449,3 +2449,11 @@ The tester wanted one message where they are close enough to jump, not
 a count down from three: "1 meter" is now said once, walking toward a
 drop with W held; the drop warning says how deep. O says "Run at it with
 W, and press space at 1 meter".
+
+### 0135 The lock on enemies as it was
+
+The tester found the lock on enemies broken, and asked for it as it was.
+0128's letting go of an enemy turned from by hand, and 0130's holding of
+O's facing against the lock until a hand turn or a walk away, are taken
+out: a turn by hand keeps the lock off two seconds, and a thing turned
+to keeps it off six, as before.

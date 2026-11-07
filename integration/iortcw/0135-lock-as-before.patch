@@ -1,0 +1,108 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9110a7fb..1aea9938 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -248,10 +248,8 @@ typedef struct
+ 	etaAimTarget_t follow;      /* the chosen thing being walked to */
+ 	qboolean      saidReach;
+ 	int           refreshAt;
+-	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim until a hand turn or a walk away */
+-	vec3_t        itemFocusFrom;   /* where the player was turned */
++	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
+ 	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
+-	int           letGo;           /* the enemy turned away from by hand, from 1; 0 none */
+ } eta_aim_t;
+ 
+ static eta_aim_t eta_aim;
+@@ -884,28 +882,7 @@ static qboolean ETA_AimAcquire(float maxMeters)
+ 	int            count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, byKey);
+ 	int            index = 0, i;
+ 
+-	/* The lock by itself leaves alone the enemy the player turned away
+-	   from by hand, for as long as it stays in sight - not for a couple of
+-	   seconds and then back onto it: the tester wanted no time after which
+-	   they were turned to something. Out of sight, it is forgotten. */
+-	if (!byKey && eta_aim.letGo)
+-	{
+-		for (i = 0; i < count && list[i].entityNum != eta_aim.letGo - 1; i++)
+-		{
+-		}
+-		if (i == count)
+-		{
+-			eta_aim.letGo = 0;
+-		}
+-		else
+-		{
+-			for (i = 0; i < count && list[i].entityNum == eta_aim.letGo - 1; i++)
+-			{
+-			}
+-			index = i;
+-		}
+-	}
+-	if (count <= 0 || index >= count || (!byKey && list[index].meters > maxMeters))
++	if (count <= 0 || (!byKey && list[0].meters > maxMeters))
+ 	{
+ 		return qfalse;
+ 	}
+@@ -1004,7 +981,6 @@ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ 	eta_aim.entityNum      = target->entityNum;
+ 	eta_aim.started        = cg.time;
+ 	eta_aim.itemFocusUntil = cg.time + ETA_ITEM_FOCUS_MS;
+-	VectorCopy(cg.predictedPlayerState.origin, eta_aim.itemFocusFrom);
+ 	eta_aim.lift      = 0.0f;
+ 	eta_aim.itemTry   = -1;
+ 	VectorSet(eta_aim.itemAim, 0.0f, 0.0f, 8.0f);
+@@ -1278,11 +1254,7 @@ static qboolean ETA_ItemFocused(void)
+ 	{
+ 		return qtrue;
+ 	}
+-	/* Turned by O or F, the player stays turned: no enemy's lock takes
+-	   the view away after a while - only a turn by hand, or walking off
+-	   four metres, ends it. The tester, faced across the spike pit, felt
+-	   the facing not hold long enough. */
+-	if (eta_aim.itemFocusUntil && Distance(cg.predictedPlayerState.origin, eta_aim.itemFocusFrom) < 160.0f)
++	if (cg.time < eta_aim.itemFocusUntil && eta_aim.itemFocusUntil - cg.time <= ETA_ITEM_FOCUS_MS)
+ 	{
+ 		return qtrue;
+ 	}
+@@ -2221,6 +2193,12 @@ static void ETA_AutoLock(void)
+ 		return;
+ 	}
+ 
++	/* A turn by hand keeps it off a moment, so the player can look away. */
++	if (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS)
++	{
++		return;
++	}
++
+ 	/* Nor does it take the aim off a thing the player is on. */
+ 	if (ETA_ItemFocused())
+ 	{
+@@ -4758,27 +4736,11 @@ static void CG_AccessibilityTurnDown(int direction)
+ 	{
+ 		ETA_ClimbStop("Climb stopped");
+ 	}
+-	/* The enemy the lock was on - or, with none, the nearest in sight -
+-	   is let go until it is out of sight; another can still be locked on. */
+-	{
+-		etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+-
+-		if (eta_aim.mode == ETA_AIM_LOCK && eta_aim.entityNum >= 0)
+-		{
+-			eta_aim.letGo = eta_aim.entityNum + 1;
+-		}
+-		else if (CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qfalse) > 0
+-		         && list[0].meters <= ETA_AIM_AUTO_METERS)
+-		{
+-			eta_aim.letGo = list[0].entityNum + 1;
+-		}
+-	}
+ 	if (eta_aim.mode != ETA_AIM_NONE)
+ 	{
+ 		ETA_AimStop();
+ 	}
+ 	eta_aim.manualUntil = cg.time + ETA_AIM_MANUAL_MS;
+-	eta_aim.itemFocusUntil = 0;   /* turned away by hand: O's facing given up */
+ 
+ 	if (!eta_turnSteps.integer)
+ 	{
