@@ -1,0 +1,65 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 24033acd..855f1971 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4065,6 +4065,12 @@ static vec3_t eta_doorOrigins[MAX_MODELS];
+ static signed char eta_doorSeen[MAX_MODELS];
+ static qboolean    eta_doorStartOpen[MAX_MODELS];
+ 
++/* A door the map gives the locked crosshair: F does not open it, only
++   what it is wired to. The first catacomb level's trap room shuts its
++   last door, and O took the way through it as a door F opens; the
++   tester, shut in, heard no way round. */
++static qboolean    eta_doorHintLocked[MAX_MODELS];
++
+ /* The map's buttons, by brush model: the server sends them as movers
+    like any door, and nothing on them says which they are. */
+ static qboolean eta_buttonModel[MAX_MODELS];
+@@ -4654,8 +4660,9 @@ static void ETA_ReadMapEntities(void)
+ 	for (i = 0; i < MAX_MODELS; i++)
+ 	{
+ 		eta_doorLocked[i] = -1;
+-		eta_doorSeen[i]      = 0;
+-		eta_doorStartOpen[i] = qfalse;
++		eta_doorSeen[i]       = 0;
++		eta_doorStartOpen[i]  = qfalse;
++		eta_doorHintLocked[i] = qfalse;
+ 		VectorClear(eta_doorOrigins[i]);
+ 	}
+ 	eta_exitCount       = 0;
+@@ -4915,6 +4922,7 @@ static void ETA_ReadMapEntities(void)
+ 			{
+ 				eta_doorLocked[index] = (signed char)(lock[0] && atoi(lock) == -1);
+ 				eta_doorStartOpen[index] = (qboolean)( !Q_stricmp(classname, "func_door") && ( atoi(spawnflags) & 1 ) );
++				eta_doorHintLocked[index] = (qboolean)!Q_stricmp(hint, "hint_door_locked");
+ 				if (origin[0])
+ 				{
+ 					sscanf(origin, "%f %f %f", &eta_doorOrigins[index][0],
+@@ -5315,10 +5323,13 @@ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+ 		*opens = qfalse;
+ 		break;
+ 	case 'd':
+-		*opens = qtrue;
++		/* The game says it opens by hand; one the map gives the locked
++		   crosshair does not - F at the trap room's last door did
++		   nothing. Open now, the way takes it as open anyway. */
++		*opens = (qboolean)!eta_doorHintLocked[modelindex];
+ 		break;
+ 	default:
+-		*opens = (qboolean)!eta_doorLocked[modelindex];
++		*opens = (qboolean)( !eta_doorLocked[modelindex] && !eta_doorHintLocked[modelindex] );
+ 		break;
+ 	}
+ 	return qtrue;
+@@ -7478,8 +7489,10 @@ qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out)
+ 		VectorAdd(mins, maxs, mid);
+ 		VectorScale(mid, 0.5f, mid);
+ 		far = Distance(mid, wayOut);
++		/* Come across, or near: shut in the trap room, its switch had not
++		   been taken in yet, and O sent the tester about the level. */
+ 		if (far >= bestFar || !CG_AccessibilityDoorOpener(model, mid, at) || CG_AccessibilityThingPressedAt(at)
+-		    || !CG_AccessibilityThingKnownAt(at))
++		    || ( !CG_AccessibilityThingKnownAt(at) && Distance(at, cg.predictedPlayerState.origin) > ETA_WAYOUT_DOOR_NEAR ))
+ 		{
+ 			continue;
+ 		}

@@ -2537,3 +2537,18 @@ middle, below the floor, and said "Nothing to use within 15 meters". A
 trigger whose middle is out of sight is now looked for at its part
 nearest the eye, and F finds it: "Door, ahead, 4 meters". Getting near
 enough to use it is not yet worked out.
+
+### 0141 Shut in by the trap room
+
+The trap room of the first catacomb level shuts its doors, and the last
+door with them, when walked into. The tester, past the zombies, came to
+the last door shut and heard no way round: O took it for a door F opens
+- the game says so of it - and F at it did nothing; and O did not offer
+the switch, not yet come across.
+
+A door the map gives the locked crosshair is now taken as locked: F
+does not open it, only what it is wired to. Only this level's four trap
+doors have it. And the switch that opens the way out is offered when it
+is within 30 meters, come across or not: from the shut last door, "The
+way out is behind a locked door. Its switch is 22 meters away", and O
+again leads to the room's switch.
