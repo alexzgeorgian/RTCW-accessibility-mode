@@ -1,0 +1,125 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c9551113..6ecc4d47 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4057,6 +4057,30 @@ static void ETA_FaceTheWayUnreachable(void)
+ 			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
+ 			return;
+ 		}
++		/* Nowhere new to go, and something to break close by: the
++		   way on is through it. The base exit level begins in an air
++		   duct, a grate across it, and O went on to rooms with things
++		   not found that it could not reach. */
++		{
++			char   broken[64];
++			vec3_t at;
++
++			if (!CG_AccessibilityAreasSomethingNew() && CG_AccessibilityThingsBreakableNear(640.0f, at, broken, sizeof(broken)))
++			{
++				vec3_t to;
++				int    meters;
++
++				VectorSubtract(at, cg.predictedPlayerState.origin, to);
++				meters = (int)(VectorLength(to) * ETA_QU_TO_METERS + 0.5f);
++				CG_AccessibilityChoose(at, "the thing to break");
++				CG_AccessibilityChosenIsThing();
++				ETA_Speech_Say(va("No way on from here but through something to break: %s, %d %s, %s. "
++				                  "O again leads to it; then fire at it, or F turns you to it",
++				                  broken, meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at))));
++				return;
++			}
++		}
+ 		ETA_Speech_Say("The way out is not open yet");
+ 		/* First the openings not yet explored, as X's; only when
+ 		   none is left, the rooms where things are still to be
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 80540f53..043a0bc0 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -700,6 +700,38 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	}
+ }
+ 
++/* The nearest thing to break come across, within so far and in sight:
++   its place and name. */
++qboolean CG_AccessibilityThingsBreakableNear(float within, vec3_t out, char *name, size_t size)
++{
++	int   i, best = -1;
++	float bestFar = within;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		const eta_thing_t *thing = &eta_things.things[i];
++		float             far;
++
++		if (thing->kind != ETA_THING_BREAKABLE || thing->done || !thing->known)
++		{
++			continue;
++		}
++		far = Distance(cg.predictedPlayerState.origin, thing->point);
++		if (far < bestFar && ETA_ThingHereInSight(thing->point))
++		{
++			best    = i;
++			bestFar = far;
++		}
++	}
++	if (best < 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_things.things[best].point, out);
++	Q_strncpyz(name, eta_things.things[best].name, size);
++	return qtrue;
++}
++
+ /* A switch here come across already, as T has it: on its list. */
+ qboolean CG_AccessibilityThingKnownAt(const vec3_t point)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 73ebb328..24033acd 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7045,7 +7045,29 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 		VectorMA(target.point, 12.0f, toward, seen);
+ 		if (!ETA_SeesPoint(eye, seen, -1))
+ 		{
+-			continue;
++			/* Its middle hidden - below a floor: the rocket level's
++			   truck tailgate is used through a trigger reaching under
++			   the truck's bed, and F found nothing to use. Its part
++			   nearest the eye, a little inside. */
++			vec3_t mins, maxs;
++			int    k;
++
++			if (!cgs.inlineDrawModel[eta_users[i].model])
++			{
++				continue;
++			}
++			trap_R_ModelBounds(cgs.inlineDrawModel[eta_users[i].model], mins, maxs);
++			for (k = 0; k < 3; k++)
++			{
++				float lo = mins[k] + 4.0f, hi = maxs[k] - 4.0f;
++
++				seen[k] = lo > hi ? ( mins[k] + maxs[k] ) * 0.5f : eye[k] < lo ? lo : eye[k] > hi ? hi : eye[k];
++			}
++			if (!ETA_SeesPoint(eye, seen, -1))
++			{
++				continue;
++			}
++			VectorCopy(seen, target.point);
+ 		}
+ 
+ 		/* Its door open: pressed again, it would only shut it. The
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 1dff61fe..6d8358ff 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2430,6 +2430,7 @@ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
+ qboolean CG_AccessibilityThingKnownAt( const vec3_t point );
++qboolean CG_AccessibilityThingsBreakableNear( float within, vec3_t out, char *name, size_t size );
+ qboolean CG_AccessibilityDoorOwnSwitch( int model, const vec3_t doorAt, vec3_t out );
+ qboolean CG_AccessibilityHatchSwitchAbove( vec3_t out );
+ 

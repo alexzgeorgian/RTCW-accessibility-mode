@@ -2522,3 +2522,18 @@ way out was shut, and O said "No way found from here yet. O tries
 again" each time it was pressed, and never went on. The way out not
 found in time is now taken as not open yet: on to the places not
 explored.
+
+### 0140 Starts closed in: a grate to break, a truck's tailgate
+
+The base exit level begins in an air duct with a metal grate across it,
+and O found no way and went on to rooms it could not reach. Where there
+is nowhere new to go and something to break is close by and in sight,
+O now says "No way on from here but through something to break", how
+far and where, and O again leads to it.
+
+The rocket level begins in the back of a truck, its tailgate opened by
+an invisible trigger reaching under the truck's bed. F looked for its
+middle, below the floor, and said "Nothing to use within 15 meters". A
+trigger whose middle is out of sight is now looked for at its part
+nearest the eye, and F finds it: "Door, ahead, 4 meters". Getting near
+enough to use it is not yet worked out.
