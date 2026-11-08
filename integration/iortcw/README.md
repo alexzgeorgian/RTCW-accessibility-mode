@@ -2552,3 +2552,18 @@ doors have it. And the switch that opens the way out is offered when it
 is within 30 meters, come across or not: from the shut last door, "The
 way out is behind a locked door. Its switch is 22 meters away", and O
 again leads to the room's switch.
+
+### 0142 Shut in a room by a door a switch close by opens
+
+The tester found the first catacomb level's secret room, its door shut
+behind them, and O said everything was explored; the button that opens
+the door from inside is in the room, two meters off. When the way out
+is not open, O now looks first for a door close by, shut, that a
+switch close by opens - within 12 meters, its switch within 16 - and
+says "Shut in here: the door out opens with a switch", how far and
+where; O again leads to it.
+
+And F, at a switch O led to where it is pressed from, turned the player
+to that spot on the floor instead of to the switch: the place F turns
+to is now the switch itself, the place O leads to where it is pressed
+from.

@@ -1,0 +1,208 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 6ecc4d47..9e4867cc 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4039,11 +4039,28 @@ static void ETA_FaceTheWayUnreachable(void)
+ 	   to use X all the time. O again goes on to X's next. */
+ 	if (!Q_stricmp(what, "the way out"))
+ 	{
+-		vec3_t opener;
++		vec3_t opener, aim;
+ 
+ 		ETA_HudNarrator_HoldPassive(cg.time);
++		/* Shut in here by a door a switch close by opens: to that
++		   switch first. */
++		if (CG_AccessibilityShutInSwitch(opener, aim))
++		{
++			vec3_t toSwitch;
++			int    meters;
++
++			VectorSubtract(opener, cg.predictedPlayerState.origin, toSwitch);
++			meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
++			CG_AccessibilityChoose(opener, "the switch that opens the door out of here");
++			CG_AccessibilityChosenIsThing();
++			CG_AccessibilityChosenAimAt(aim);
++			ETA_Speech_Say(va("Shut in here: the door out opens with a switch, %d %s away, %s. O again leads to it, "
++			                  "and F presses it there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
++			return;
++		}
+ 		/* Shut behind a door a switch opens: to the switch. */
+-		if (CG_AccessibilityWayOutSwitch(origin, opener))
++		if (CG_AccessibilityWayOutSwitch(origin, opener, aim))
+ 		{
+ 			vec3_t toSwitch;
+ 			int    meters;
+@@ -4052,6 +4069,7 @@ static void ETA_FaceTheWayUnreachable(void)
+ 			meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
+ 			CG_AccessibilityChoose(opener, "the switch that opens the way out");
+ 			CG_AccessibilityChosenIsThing();
++			CG_AccessibilityChosenAimAt(aim);
+ 			ETA_Speech_Say(va("The way out is behind a locked door. Its switch is %d %s away, %s. O again leads to it, "
+ 			                  "and F presses it there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
+ 			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
+@@ -4306,17 +4324,20 @@ static void ETA_FaceTheWayNow(void)
+ 					vec3_t toSwitch;
+ 					int    meters;
+ 
+-					vec3_t stand;
++					vec3_t stand, aim;
+ 
+ 					VectorSubtract(opener, ps->origin, toSwitch);
+ 					meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
+-					/* Led to where it can be pressed from. */
++					/* Led to where it can be pressed from; F turns to
++					   the switch itself. */
++					VectorCopy(opener, aim);
+ 					if (CG_AccessibilitySwitchStand(opener, stand))
+ 					{
+ 						VectorCopy(stand, opener);
+ 					}
+ 					CG_AccessibilityChoose(opener, "the switch that opens the door");
+ 					CG_AccessibilityChosenIsThing();
++					CG_AccessibilityChosenAimAt(aim);
+ 					ETA_Speech_Say(va("A locked door ahead. Its switch is %d %s away, %s. O again leads to it, "
+ 					                  "and F presses it there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
+ 					                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 855f1971..7aac21ba 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5542,9 +5542,20 @@ static vec3_t   eta_ledPoint;
+ static qboolean eta_chosenThing, eta_ledThing;
+ static char     eta_ledName[64];
+ 
++/* Where F turns to for the thing, when that is not where O leads: a
++   switch in a wall, led to where it is pressed from. F had turned the
++   tester to the floor in front of it. */
++static vec3_t eta_chosenAim, eta_ledAim;
++
+ void CG_AccessibilityChosenIsThing(void)
+ {
+ 	eta_chosenThing = qtrue;
++	VectorCopy(eta_chosenPoint, eta_chosenAim);
++}
++
++void CG_AccessibilityChosenAimAt(const vec3_t at)
++{
++	VectorCopy(at, eta_chosenAim);
+ }
+ 
+ qboolean CG_AccessibilityLedTo(vec3_t out, char *name, size_t nameSize)
+@@ -5553,7 +5564,7 @@ qboolean CG_AccessibilityLedTo(vec3_t out, char *name, size_t nameSize)
+ 	{
+ 		return qfalse;
+ 	}
+-	VectorCopy(eta_ledPoint, out);
++	VectorCopy(eta_ledAim, out);
+ 	Q_strncpyz(name, eta_ledName, nameSize);
+ 	return qtrue;
+ }
+@@ -5564,7 +5575,7 @@ qboolean CG_AccessibilityThingChoice(vec3_t out, char *name, size_t nameSize, qb
+ {
+ 	if (eta_chosenSet && eta_chosenThing)
+ 	{
+-		VectorCopy(eta_chosenPoint, out);
++		VectorCopy(eta_chosenAim, out);
+ 		Q_strncpyz(name, eta_chosenName, nameSize);
+ 		*pending = qtrue;
+ 		return qtrue;
+@@ -5641,6 +5652,7 @@ void CG_AccessibilityWayOut(void)
+ 		eta_ledThing  = eta_chosenThing;
+ 		eta_ledAt     = cg.time;
+ 		VectorCopy(eta_chosenPoint, eta_ledPoint);
++		VectorCopy(eta_chosenThing ? eta_chosenAim : eta_chosenPoint, eta_ledAim);
+ 		Q_strncpyz(eta_ledName, eta_chosenName, sizeof(eta_ledName));
+ 		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
+ 		CG_AccessibilityMarkerIntoArea(eta_chosenArea - 1);
+@@ -7455,6 +7467,58 @@ qboolean CG_AccessibilitySwitchStand(const vec3_t at, vec3_t out)
+ 	return found;
+ }
+ 
++/*
++ * Shut in: a door close by, shut, that a switch close by opens - the way
++ * out of here before the way out of the level. The tester found the
++ * first catacomb level's secret room, its door shut behind them, and O
++ * said all was explored; the button that opens it from inside is in the
++ * room. Of such doors within 12 meters, the nearest; its switch within
++ * 16 meters, where it is pressed from.
++ */
++#define ETA_SHUT_IN_DOOR_NEAR   480.0f
++#define ETA_SHUT_IN_SWITCH_NEAR 640.0f
++
++qboolean CG_AccessibilityShutInSwitch(vec3_t out, vec3_t aim)
++{
++	const float *here = cg.predictedPlayerState.origin;
++	int         model;
++	float       bestFar = ETA_SHUT_IN_DOOR_NEAR;
++	qboolean    found   = qfalse;
++
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		vec3_t   mins, maxs, mid, at;
++		qboolean opens;
++		float    far;
++		int      shut;
++
++		if (!eta_doorOpener[model] || !CG_AccessibilityDoorBox(model, mins, maxs, &opens))
++		{
++			continue;
++		}
++		shut = CG_AccessibilityDoorShutNow(model);
++		if (shut == 0 || ( shut < 0 && eta_doorSeen[model] != 2 ))
++		{
++			continue;
++		}
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		far = Distance(mid, here);
++		if (far >= bestFar || !CG_AccessibilityDoorOpener(model, mid, at) || Distance(at, here) > ETA_SHUT_IN_SWITCH_NEAR)
++		{
++			continue;
++		}
++		bestFar = far;
++		VectorCopy(at, aim);
++		if (!CG_AccessibilitySwitchStand(at, out))
++		{
++			VectorCopy(at, out);
++		}
++		found = qtrue;
++	}
++	return found;
++}
++
+ /*
+  * The way out shut behind a door only a switch opens: that switch. The
+  * tester found the journal in the first catacomb level and was told to
+@@ -7469,7 +7533,7 @@ qboolean CG_AccessibilitySwitchStand(const vec3_t at, vec3_t out)
+  */
+ #define ETA_WAYOUT_DOOR_NEAR 1200.0f
+ 
+-qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out)
++qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out, vec3_t aim)
+ {
+ 	int   model, best = 0;
+ 	float bestFar = ETA_WAYOUT_DOOR_NEAR;
+@@ -7504,6 +7568,7 @@ qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out)
+ 	{
+ 		return qfalse;
+ 	}
++	VectorCopy(bestAt, aim);
+ 	if (!CG_AccessibilitySwitchStand(bestAt, out))
+ 	{
+ 		VectorCopy(bestAt, out);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 6d8358ff..9d74377a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2425,7 +2425,9 @@ qboolean CG_AccessibilityEnemyAimPoint( int entityNum, vec3_t out );
+ qboolean CG_AccessibilityDoorAhead( void );
+ int CG_AccessibilityDoorAheadModel( vec3_t doorAt );
+ qboolean CG_AccessibilityDoorOpener( int model, const vec3_t doorAt, vec3_t out );
+-qboolean CG_AccessibilityWayOutSwitch( const vec3_t wayOut, vec3_t out );
++qboolean CG_AccessibilityWayOutSwitch( const vec3_t wayOut, vec3_t out, vec3_t aim );
++qboolean CG_AccessibilityShutInSwitch( vec3_t out, vec3_t aim );
++void CG_AccessibilityChosenAimAt( const vec3_t at );
+ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
