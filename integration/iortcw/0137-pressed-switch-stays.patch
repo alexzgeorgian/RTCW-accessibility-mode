@@ -1,0 +1,137 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index bcd11d47..95794709 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -68,6 +68,7 @@ typedef struct
+ 	int             goneAt;      /* dropped by someone: the game takes it away then; 0 never */
+ 	qboolean        ride;        /* the tram, standing near: on the list wherever the player is */
+ 	qboolean        known;       /* come across: been near it, in sight */
++	qboolean        pressed;     /* a switch pressed, or its door open: still listed, last */
+ } eta_thing_t;
+ 
+ /*
+@@ -127,6 +128,7 @@ static struct
+ 	int         count;
+ 	int         lookedAt;
+ 	int         target;     /* the one T leads to, or -1 */
++	qboolean    targetPressed; /* it was pressed already when chosen */
+ 	qboolean    seeded;     /* the map's own things put in */
+ 	int         pressedAt;  /* T or Y last pressed */
+ 	int         list[ETA_THINGS_MAX];   /* T and Y's list, nearest first */
+@@ -278,8 +280,9 @@ static void ETA_ThingsSeed(void)
+ 		{
+ 			ETA_TreasureName(eta_things.things[j].name, sizeof(eta_things.things[j].name));
+ 		}
+-		eta_things.things[j].done   = qfalse;
+-		eta_things.things[j].hinted = qfalse;
++		eta_things.things[j].done    = qfalse;
++		eta_things.things[j].pressed = qfalse;
++		eta_things.things[j].hinted  = qfalse;
+ 		eta_things.things[j].noWayArea = 0;
+ 		eta_things.things[j].goneAt    = 0;
+ 		eta_things.count++;
+@@ -441,8 +444,9 @@ static void ETA_ThingsRecord(void)
+ 		{
+ 			ETA_TreasureName(eta_things.things[j].name, sizeof(eta_things.things[j].name));
+ 		}
+-		eta_things.things[j].done   = qfalse;
+-		eta_things.things[j].hinted = qfalse;
++		eta_things.things[j].done    = qfalse;
++		eta_things.things[j].pressed = qfalse;
++		eta_things.things[j].hinted  = qfalse;
+ 		eta_things.things[j].noWayArea = 0;
+ 		eta_things.things[j].goneAt    = ETA_ThingDropped(list[i].entityNum) ? cg.time + ETA_THINGS_DROPPED_MS : 0;
+ 		eta_things.things[j].known     = qtrue;
+@@ -536,7 +540,8 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 	*left = 0;
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+-		if (!eta_things.things[i].done && !eta_things.things[i].ride && eta_things.things[i].known
++		if (!eta_things.things[i].done && !eta_things.things[i].pressed && !eta_things.things[i].ride
++		    && eta_things.things[i].known
+ 		    && ( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
+ 		         || ( area >= 0 && area == CG_AccessibilityAreaHere() && ETA_ThingHereInSight(eta_things.things[i].point) ) ))
+ 		{
+@@ -682,13 +687,15 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	{
+ 		eta_thing_t *thing = &eta_things.things[i];
+ 
+-		/* Not the tram's button: pressed again and again, each way. Nor a
+-		   door's switch, back while its door is shut (the frame below). */
++		/* Not the tram's button: pressed again and again, each way. A
++		   switch pressed stays on the list, said pressed, after the rest:
++		   the tester pressed a door's switch, lost their way, and could
++		   not find the switch again on T to open the door. */
+ 		if (thing->kind == ETA_THING_SWITCH && !thing->done && Q_stricmpn(thing->name, "Tram button", 11)
+-		    && CG_AccessibilitySwitchDoorShut(thing->point) < 0
++		    && Q_stricmpn(thing->name, "Spot ", 5)
+ 		    && ( ( entityNum >= 0 && thing->entityNum == entityNum ) || ETA_ThingNear(thing->point, point, 64.0f) ))
+ 		{
+-			thing->done = qtrue;
++			thing->pressed = qtrue;
+ 		}
+ 	}
+ }
+@@ -780,6 +787,9 @@ static void ETA_ThingsStep(int step)
+ 				   lead to. */
+ 				fa += ETA_ThingNoWay(&eta_things.things[eta_things.list[i]], area) ? 1.0e6f : 0.0f;
+ 				fb += ETA_ThingNoWay(&eta_things.things[eta_things.list[j]], area) ? 1.0e6f : 0.0f;
++				/* A switch pressed already: after those still to do. */
++				fa += eta_things.things[eta_things.list[i]].pressed ? 1.0e5f : 0.0f;
++				fb += eta_things.things[eta_things.list[j]].pressed ? 1.0e5f : 0.0f;
+ 
+ 				if (fb < fa)
+ 				{
+@@ -834,6 +844,7 @@ static void ETA_ThingsStep(int step)
+ 	}
+ 	eta_things.target = eta_things.list[eta_things.listPos];
+ 	thing             = &eta_things.things[eta_things.target];
++	eta_things.targetPressed = thing->pressed;
+ 	if (eta_things.target == eta_things.nextStep)
+ 	{
+ 		Com_sprintf(shown, sizeof(shown), "In another area, the level's next step: %s", thing->name);
+@@ -851,6 +862,11 @@ static void ETA_ThingsStep(int step)
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
+ 
++	if (!why[0] && thing->pressed)
++	{
++		Q_strncpyz(why, CG_AccessibilitySwitchDoorShut(thing->point) == 0 ? ", pressed already, its door is open"
++		           : ", pressed already", sizeof(why));
++	}
+ 	if (!why[0] && thing->kind == ETA_THING_SWITCH && CG_AccessibilitySwitchOffAt(thing->point))
+ 	{
+ 		Q_strncpyz(why, ", switched off for now", sizeof(why));
+@@ -903,6 +919,7 @@ static void ETA_ThingsStep(int step)
+ 		                  thing->ride ? "Walk in, and stay inside"
+ 		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
++		                  : thing->pressed ? "F presses it again"
+ 		                  : why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
+ 		                  ? "F does nothing with it yet"
+ 		                  : why[0] ? "Walking onto it does nothing yet"
+@@ -1033,9 +1050,10 @@ void CG_AccessibilityThingsFrame(void)
+ 
+ 				if (shut >= 0)
+ 				{
+-					/* Back: T's list made again, with it on. */
+-					eta_things.found += (thing->done && shut && thing->known);
+-					thing->done = (qboolean)!shut;
++					/* Its door open: pressed, still listed. Shut
++					   again: to press, T's list made again. */
++					eta_things.found += (thing->pressed && shut && thing->known);
++					thing->pressed = (qboolean)!shut;
+ 					continue;
+ 				}
+ 			}
+@@ -1082,7 +1100,9 @@ void CG_AccessibilityThingsFrame(void)
+ 		}
+ 
+ 		/* The one T led to, done. */
+-		if (eta_things.target >= 0 && eta_things.target < eta_things.count && eta_things.things[eta_things.target].done)
++		if (eta_things.target >= 0 && eta_things.target < eta_things.count
++		    && ( eta_things.things[eta_things.target].done
++		         || ( eta_things.things[eta_things.target].pressed && !eta_things.targetPressed ) ))
+ 		{
+ 			char progress[160];
+ 			int  counts[ETA_THING_KINDS], left, area = CG_AccessibilityAreaHere(), all;

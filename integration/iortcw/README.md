@@ -2478,3 +2478,12 @@ catacomb level, and the tester did not know which jumps were needed. A
 jump across is now taken only where there is a gap, somewhere between
 with no floor within a step or two below, and never through a locked
 door. The jump over the spike pit stays.
+
+### 0137 A pressed switch stays on T
+
+The tester pressed a door's switch, lost their way, and could not find
+the switch on T again: once pressed, or once its door was open, it was
+taken off the list for good. A switch pressed now stays on T, after the
+things still to do, said "pressed already", or "pressed already, its
+door is open", and "F presses it again" near it. It is not counted in
+the things left. Its door shut again, it is a switch to press as before.
