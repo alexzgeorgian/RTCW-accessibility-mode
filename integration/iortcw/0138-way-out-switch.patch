@@ -1,0 +1,304 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 8a1a0fbd..1a3ff01a 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4025,7 +4025,24 @@ static void ETA_FaceTheWayUnreachable(void)
+ 	   to use X all the time. O again goes on to X's next. */
+ 	if (!Q_stricmp(what, "the way out"))
+ 	{
++		vec3_t opener;
++
+ 		ETA_HudNarrator_HoldPassive(cg.time);
++		/* Shut behind a door a switch opens: to the switch. */
++		if (CG_AccessibilityWayOutSwitch(origin, opener))
++		{
++			vec3_t toSwitch;
++			int    meters;
++
++			VectorSubtract(opener, cg.predictedPlayerState.origin, toSwitch);
++			meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
++			CG_AccessibilityChoose(opener, "the switch that opens the way out");
++			CG_AccessibilityChosenIsThing();
++			ETA_Speech_Say(va("The way out is behind a locked door. Its switch is %d %s away, %s. O again leads to it, "
++			                  "and F presses it there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
++			return;
++		}
+ 		ETA_Speech_Say("The way out is not open yet");
+ 		/* First the openings not yet explored, as X's; only when
+ 		   none is left, the rooms where things are still to be
+@@ -4251,8 +4268,15 @@ static void ETA_FaceTheWayNow(void)
+ 					vec3_t toSwitch;
+ 					int    meters;
+ 
++					vec3_t stand;
++
+ 					VectorSubtract(opener, ps->origin, toSwitch);
+ 					meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
++					/* Led to where it can be pressed from. */
++					if (CG_AccessibilitySwitchStand(opener, stand))
++					{
++						VectorCopy(stand, opener);
++					}
+ 					CG_AccessibilityChoose(opener, "the switch that opens the door");
+ 					CG_AccessibilityChosenIsThing();
+ 					ETA_Speech_Say(va("A locked door ahead. Its switch is %d %s away, %s. O again leads to it, "
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index a3c56905..7d43145d 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -748,7 +748,7 @@ static void ETA_RouteLockedDoors(void)
+ 	for (index = 0; eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX && CG_AccessibilityLockedDoor(index, &model, origin);
+ 	     index++)
+ 	{
+-		qboolean open = qfalse;
++		qboolean open = CG_AccessibilityDoorOpenUnseen(model);
+ 
+ 		for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 95794709..8820ec80 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -700,6 +700,22 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	}
+ }
+ 
++/* A switch here pressed already, as T has it. */
++qboolean CG_AccessibilityThingPressedAt(const vec3_t point)
++{
++	int i;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		if (eta_things.things[i].kind == ETA_THING_SWITCH && eta_things.things[i].pressed
++		    && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 89649612..88bf74ea 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4058,6 +4058,13 @@ static int eta_exitCount;
+    that point, so its midpoint alone is not where it stands. */
+ static vec3_t eta_doorOrigins[MAX_MODELS];
+ 
++/* A door as last seen - 1 open, 2 shut, 0 not seen yet - and whether the
++   map has it start open. The way took a door out of sight for shut: the
++   room the first catacomb level's last switch is in stands open until
++   the player is in it, and O found no way into it from the corridor. */
++static signed char eta_doorSeen[MAX_MODELS];
++static qboolean    eta_doorStartOpen[MAX_MODELS];
++
+ /* The map's buttons, by brush model: the server sends them as movers
+    like any door, and nothing on them says which they are. */
+ static qboolean eta_buttonModel[MAX_MODELS];
+@@ -4647,6 +4654,8 @@ static void ETA_ReadMapEntities(void)
+ 	for (i = 0; i < MAX_MODELS; i++)
+ 	{
+ 		eta_doorLocked[i] = -1;
++		eta_doorSeen[i]      = 0;
++		eta_doorStartOpen[i] = qfalse;
+ 		VectorClear(eta_doorOrigins[i]);
+ 	}
+ 	eta_exitCount       = 0;
+@@ -4905,6 +4914,7 @@ static void ETA_ReadMapEntities(void)
+ 			if (index > 0 && index < MAX_MODELS)
+ 			{
+ 				eta_doorLocked[index] = (signed char)(lock[0] && atoi(lock) == -1);
++				eta_doorStartOpen[index] = (qboolean)( !Q_stricmp(classname, "func_door") && ( atoi(spawnflags) & 1 ) );
+ 				if (origin[0])
+ 				{
+ 					sscanf(origin, "%f %f %f", &eta_doorOrigins[index][0],
+@@ -6337,9 +6347,39 @@ static void ETA_WorldRead(void)
+ 	}
+ }
+ 
++/* Out of sight: open as last seen, or as the map starts it. */
++qboolean CG_AccessibilityDoorOpenUnseen(int model)
++{
++	if (model <= 0 || model >= MAX_MODELS)
++	{
++		return qfalse;
++	}
++	return (qboolean)( eta_doorSeen[model] == 1 || ( !eta_doorSeen[model] && eta_doorStartOpen[model] ) );
++}
++
++static void ETA_DoorsSeen(void)
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		int                 model = es->modelindex;
++
++		if (es->eType != ET_MOVER || model <= 0 || model >= MAX_MODELS || eta_doorLocked[model] < 0)
++		{
++			continue;
++		}
++		eta_doorSeen[model] = ( es->apos.trType != TR_STATIONARY || es->pos.trType != TR_STATIONARY
++		                        || VectorLength(es->apos.trBase) > 1.0f
++		                        || Distance(es->pos.trBase, eta_doorOrigins[model]) > 1.0f ) ? 1 : 2;
++	}
++}
++
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
+ 	ETA_WorldRead();
++	ETA_DoorsSeen();
+ 
+ 	ETA_BeaconDoors();
+ 	ETA_BeaconLadders();
+@@ -7310,6 +7350,128 @@ qboolean CG_AccessibilityDoorOpener(int model, const vec3_t doorAt, vec3_t out)
+ 	return (qboolean)(Distance(out, doorAt) > 64.0f);
+ }
+ 
++/*
++ * Where to stand to press a switch set in a wall: on the side it can be
++ * pressed from. The switch that opens the first catacomb level's way out
++ * is in the wall of a room, and O led to the corridor behind that wall,
++ * where F did nothing. A point a little out from the switch, each way
++ * across, from which nothing of the world stands between it and the
++ * switch, and with a floor under it; the one whose floor is nearest the
++ * switch's height.
++ */
++qboolean CG_AccessibilitySwitchStand(const vec3_t at, vec3_t out)
++{
++	static const float dirs[4][2] = { { 1.0f, 0.0f }, { -1.0f, 0.0f }, { 0.0f, 1.0f }, { 0.0f, -1.0f } };
++	vec3_t  mins, maxs;
++	float   bestRise = 1.0e9f;
++	int     model, k;
++	qboolean found = qfalse;
++
++	for (model = 1; model < cgs.numInlineModels; model++)
++	{
++		if (Distance(cgs.inlineModelMidpoints[model], at) < 1.0f)
++		{
++			break;
++		}
++	}
++	if (model >= cgs.numInlineModels || !cgs.inlineDrawModel[model])
++	{
++		return qfalse;
++	}
++	trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++
++	for (k = 0; k < 4; k++)
++	{
++		vec3_t  c, down;
++		trace_t trace;
++		float   half = dirs[k][0] ? ( maxs[0] - mins[0] ) * 0.5f : ( maxs[1] - mins[1] ) * 0.5f;
++		float   rise;
++
++		VectorSet(c, at[0] + dirs[k][0] * ( half + 40.0f ), at[1] + dirs[k][1] * ( half + 40.0f ), at[2]);
++		if (trap_CM_PointContents(c, 0) & MASK_PLAYERSOLID)
++		{
++			continue;
++		}
++		/* Nothing of the world between: the trace gets into the
++		   switch's own box. */
++		trap_CM_BoxTrace(&trace, c, at, NULL, NULL, 0, MASK_SOLID);
++		if (trace.fraction < 1.0f
++		    && ( trace.endpos[0] < mins[0] - 4.0f || trace.endpos[0] > maxs[0] + 4.0f
++		         || trace.endpos[1] < mins[1] - 4.0f || trace.endpos[1] > maxs[1] + 4.0f
++		         || trace.endpos[2] < mins[2] - 4.0f || trace.endpos[2] > maxs[2] + 4.0f ))
++		{
++			continue;
++		}
++		/* A floor under it, within a body and a half. */
++		VectorCopy(c, down);
++		down[2] -= 112.0f;
++		trap_CM_BoxTrace(&trace, c, down, NULL, NULL, 0, MASK_PLAYERSOLID);
++		if (trace.startsolid || trace.fraction >= 1.0f)
++		{
++			continue;
++		}
++		rise = at[2] - trace.endpos[2];
++		if (rise < bestRise)
++		{
++			bestRise = rise;
++			VectorCopy(trace.endpos, out);
++			out[2] += 24.0f;
++			found = qtrue;
++		}
++	}
++	return found;
++}
++
++/*
++ * The way out shut behind a door only a switch opens: that switch. The
++ * tester found the journal in the first catacomb level and was told to
++ * find the exit; O said the way out was not open yet and sent them about
++ * the places not explored, while the last door is opened by a switch on
++ * a wall far from it. Of the doors a switch opens, shut or out of sight,
++ * the one nearest the way out, within 30 meters of it; not one whose
++ * switch has been pressed already.
++ */
++#define ETA_WAYOUT_DOOR_NEAR 1200.0f
++
++qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out)
++{
++	int   model, best = 0;
++	float bestFar = ETA_WAYOUT_DOOR_NEAR;
++	vec3_t bestAt = { 0.0f, 0.0f, 0.0f };
++
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		vec3_t   mins, maxs, mid, at;
++		qboolean opens;
++		float    far;
++
++		if (!eta_doorOpener[model] || !CG_AccessibilityDoorBox(model, mins, maxs, &opens)
++		    || CG_AccessibilityDoorShutNow(model) == 0)
++		{
++			continue;
++		}
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		far = Distance(mid, wayOut);
++		if (far >= bestFar || !CG_AccessibilityDoorOpener(model, mid, at) || CG_AccessibilityThingPressedAt(at))
++		{
++			continue;
++		}
++		best    = model;
++		bestFar = far;
++		VectorCopy(at, bestAt);
++	}
++	if (!best)
++	{
++		return qfalse;
++	}
++	if (!CG_AccessibilitySwitchStand(bestAt, out))
++	{
++		VectorCopy(bestAt, out);
++	}
++	return qtrue;
++}
++
+ /**
+  * @brief The door the player is walking into, if it is one the server
+  * sends: its brush model and where it stands. 0 for none.
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c5c259d9..fa11b889 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2425,6 +2425,10 @@ qboolean CG_AccessibilityEnemyAimPoint( int entityNum, vec3_t out );
+ qboolean CG_AccessibilityDoorAhead( void );
+ int CG_AccessibilityDoorAheadModel( vec3_t doorAt );
+ qboolean CG_AccessibilityDoorOpener( int model, const vec3_t doorAt, vec3_t out );
++qboolean CG_AccessibilityWayOutSwitch( const vec3_t wayOut, vec3_t out );
++qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
++qboolean CG_AccessibilityDoorOpenUnseen( int model );
++qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
+ qboolean CG_AccessibilityDoorOwnSwitch( int model, const vec3_t doorAt, vec3_t out );
+ qboolean CG_AccessibilityHatchSwitchAbove( vec3_t out );
+ 

@@ -2487,3 +2487,22 @@ taken off the list for good. A switch pressed now stays on T, after the
 things still to do, said "pressed already", or "pressed already, its
 door is open", and "F presses it again" near it. It is not counted in
 the things left. Its door shut again, it is a switch to press as before.
+
+### 0138 O to the switch that opens the way out
+
+In the first catacomb level the tester found the journal and was told
+to find the exit; O said the way out was not open yet and sent them
+about the places not explored. The last door is shut by a trap: walking
+into the room before it shuts its doors, and a switch set in the room's
+wall opens them again, and the last door with them.
+
+O, finding the way out shut behind a door only a switch opens, now says
+"The way out is behind a locked door. Its switch is so many meters away"
+and O again leads to that switch: of such doors the one nearest the way
+out, not one whose switch has been pressed already.
+
+A switch set in a wall is led to on the side it is pressed from: O had
+led to the corridor behind the room's wall, where F did nothing. And a
+door out of sight is taken as last seen, or open if the map starts it
+open: the way had taken the trap room's open doors for shut, and found
+no way into it.
