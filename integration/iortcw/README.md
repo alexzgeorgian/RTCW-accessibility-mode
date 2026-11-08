@@ -2457,3 +2457,24 @@ The tester found the lock on enemies broken, and asked for it as it was.
 O's facing against the lock until a hand turn or a walk away, are taken
 out: a turn by hand keeps the lock off two seconds, and a thing turned
 to keeps it off six, as before.
+
+### 0136 T lists every pack; O to a locked door's switch; jumps only over gaps
+
+In the catacombs the tester found health and ammunition that T did not
+have. Things within half a meter of each other were taken for one: a
+weapon by its clips, two packs side by side, listed as one. An item is
+now the same as another only by its entity, or, for one the map put in
+and not yet seen, by its name and where it is. And an item T took for
+gone - its place in view, the game not sending it - is listed again as
+soon as it is seen: the view was looked through doors, so packs behind
+a shut door were taken for gone. The view for that now stops at doors.
+
+O, facing a locked door whose switch is elsewhere, says how far and
+where the switch is, and O again leads to it; F presses it there.
+
+The way jumped wherever the next square was not walkable: over candle
+posts, rubble and a door's sill under the last door of the first
+catacomb level, and the tester did not know which jumps were needed. A
+jump across is now taken only where there is a gap, somewhere between
+with no floor within a step or two below, and never through a locked
+door. The jump over the spike pit stays.

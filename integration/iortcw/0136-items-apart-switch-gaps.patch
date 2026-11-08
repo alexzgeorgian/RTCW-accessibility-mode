@@ -1,0 +1,186 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1aea9938..8a1a0fbd 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4242,9 +4242,25 @@ static void ETA_FaceTheWayNow(void)
+ 				ETA_AimStartSnap(&way, NULL);
+ 				ETA_HudNarrator_HoldPassive(cg.time);
+ 				VectorAdd(cg_entities[door].lerpOrigin, cgs.inlineModelMidpoints[model], doorAt);
+-				ETA_Speech_Say(CG_AccessibilityDoorOpener(model, doorAt, opener)
+-				               ? "Facing the way. A door, that opens with a switch"
+-				               : "Facing the way. A door: F opens it");
++				/* Locked, its switch elsewhere: O leads to the switch next,
++				   and F presses it there. In the catacombs O said "A door,
++				   that opens with a switch" and no more, and a test walk
++				   kept pressing into the shut door. */
++				if (CG_AccessibilityDoorOpener(model, doorAt, opener) && CG_AccessibilityDoorShutNow(model))
++				{
++					vec3_t toSwitch;
++					int    meters;
++
++					VectorSubtract(opener, ps->origin, toSwitch);
++					meters = (int)(VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f);
++					CG_AccessibilityChoose(opener, "the switch that opens the door");
++					CG_AccessibilityChosenIsThing();
++					ETA_Speech_Say(va("A locked door ahead. Its switch is %d %s away, %s. O again leads to it, "
++					                  "and F presses it there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++					                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
++					return;
++				}
++				ETA_Speech_Say("Facing the way. A door: F opens it");
+ 				return;
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 596584fb..a3c56905 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -1043,6 +1043,37 @@ static int ETA_RouteLeap(void *context, const float from[3], float to[3])
+ 
+ 	(void)context;
+ 
++	/* Only across a gap: somewhere between, the floor drops away - no
++	   floor within a step or two below the edge. Tried wherever the next
++	   square was not walkable, it jumped over a candle post, a door's
++	   sill, under the last door of the first catacomb level - the tester
++	   did not know whether all those jumps were needed. Nor through a
++	   door locked shut. */
++	{
++		int   k, n = (int)( sqrtf(( to[0] - from[0] ) * ( to[0] - from[0] ) + ( to[1] - from[1] ) * ( to[1] - from[1] ))
++		                    / 16.0f );
++		qboolean gap = qfalse;
++
++		for (k = 1; k < n && !gap; k++)
++		{
++			float  f = (float)k / (float)n;
++			vec3_t top, bottom;
++
++			VectorSet(top, from[0] + ( to[0] - from[0] ) * f, from[1] + ( to[1] - from[1] ) * f, from[2]);
++			VectorCopy(top, bottom);
++			bottom[2] = from[2] - 24.0f - 40.0f;
++			trap_CM_BoxTrace(&trace, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
++			if (!trace.startsolid && trace.fraction >= 1.0f)
++			{
++				gap = qtrue;
++			}
++		}
++		if (!gap || ETA_RouteThroughLocked(from, to))
++		{
++			return ETA_PATH_NONE;
++		}
++	}
++
+ 	/* Up as a jump goes, and across at that height. */
+ 	VectorCopy(from, start);
+ 	VectorCopy(from, end);
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index eb00fbd7..bcd11d47 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -150,6 +150,34 @@ static qboolean ETA_ThingNear(const vec3_t a, const vec3_t b, float near)
+ 	return (qboolean)(dx * dx + dy * dy < near * near && fabsf(a[2] - b[2]) < 64.0f);
+ }
+ 
++/*
++ * Items lying side by side are each their own: two packs of ammunition a
++ * hand apart, or a weapon by its clips, were taken for one thing within
++ * half a meter, and the tester found packs T did not have. An item is
++ * the same as another only by its entity, or, for one the map put in and
++ * not yet seen, by its name and where it is.
++ */
++static qboolean ETA_ThingIsItem(int kind)
++{
++	return (qboolean)( kind == ETA_THING_ITEM || kind == ETA_THING_TREASURE );
++}
++
++/* The names up to their first comma: "9mm, inside something to break"
++   is the 9mm K lists once it is out. */
++static qboolean ETA_ThingSameName(const char *a, const char *b)
++{
++	while (*a && *a != ',' && *b && *b != ',')
++	{
++		if (tolower(*(const unsigned char *)a) != tolower(*(const unsigned char *)b))
++		{
++			return qfalse;
++		}
++		a++;
++		b++;
++	}
++	return (qboolean)( ( !*a || *a == ',' ) && ( !*b || *b == ',' ) );
++}
++
+ /* What a thing on K and J's list is, or -1 for one this does not keep: a
+    door or a doorway (V's ways), a ladder or stairs, a mounted gun. */
+ static int ETA_ThingKind(const etaAimTarget_t *target)
+@@ -228,7 +256,8 @@ static void ETA_ThingsSeed(void)
+ 		}
+ 		for (j = 0; j < eta_things.count; j++)
+ 		{
+-			if (ETA_ThingNear(eta_things.things[j].point, at, ETA_THINGS_SAME))
++			if (!item && !ETA_ThingIsItem(eta_things.things[j].kind)
++			    && ETA_ThingNear(eta_things.things[j].point, at, ETA_THINGS_SAME))
+ 			{
+ 				break;
+ 			}
+@@ -328,14 +357,50 @@ static void ETA_ThingsRecord(void)
+ 				}
+ 				continue;
+ 			}
+-			if (( same && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME * 2.0f) )
+-			    || ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME))
++			if (ETA_ThingIsItem(kind) != ETA_ThingIsItem(thing->kind))
++			{
++				continue;
++			}
++			if (same && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME * 2.0f))
+ 			{
+ 				break;
+ 			}
++			if (!ETA_ThingIsItem(kind) && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME))
++			{
++				break;
++			}
++		}
++		/* An item not known by its entity yet: the nearest the map put
++		   in by that name, not yet given one. */
++		if (j == eta_things.count && !dropped && ETA_ThingIsItem(kind))
++		{
++			float best = ETA_THINGS_SAME * ETA_THINGS_SAME + 1.0f;
++			int   k;
++
++			for (k = 0; k < eta_things.count; k++)
++			{
++				const eta_thing_t *thing = &eta_things.things[k];
++				float             dx = thing->point[0] - list[i].point[0], dy = thing->point[1] - list[i].point[1];
++
++				if (thing->entityNum < 0 && !thing->goneAt && ETA_ThingIsItem(thing->kind)
++				    && ETA_ThingNear(thing->point, list[i].point, ETA_THINGS_SAME)
++				    && ETA_ThingSameName(thing->name, list[i].name) && dx * dx + dy * dy < best)
++				{
++					best = dx * dx + dy * dy;
++					j    = k;
++				}
++			}
+ 		}
+ 		if (j < eta_things.count)
+ 		{
++			/* There to take, as K and J list it: not gone, whatever was
++			   thought before - one behind a shut door had been taken
++			   for gone, its place in view through the door. */
++			if (ETA_ThingIsItem(kind) && !dropped && eta_things.things[j].done && !eta_things.things[j].goneAt)
++			{
++				eta_things.things[j].done = qfalse;
++				eta_things.found++;
++			}
+ 			/* One the map put in, now seen: by its entity from now on,
+ 			   and by the name K and J give it. */
+ 			if (eta_things.things[j].entityNum < 0 && list[i].entityNum >= 0)
+@@ -1007,7 +1072,7 @@ void CG_AccessibilityThingsFrame(void)
+ 
+ 				VectorCopy(ps->origin, eye);
+ 				eye[2] += ps->viewheight;
+-				trap_CM_BoxTrace(&trace, eye, thing->point, vec3_origin, vec3_origin, 0, MASK_SOLID);
++				CG_Trace(&trace, eye, NULL, NULL, thing->point, ps->clientNum, MASK_SOLID);
+ 				if (trace.fraction < 0.97f)
+ 				{
+ 					continue;
