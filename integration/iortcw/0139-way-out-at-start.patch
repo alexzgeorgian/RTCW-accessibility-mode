@@ -1,0 +1,98 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1a3ff01a..c9551113 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3879,6 +3879,7 @@ static void ETA_WayCueFrame(void)
+ static int eta_facePendingAt;
+ 
+ static void ETA_FaceTheWayNow(void);
++static void ETA_FaceTheWayUnreachable(void);
+ 
+ void CG_AccessibilityFaceTheWay(void)
+ {
+@@ -3914,7 +3915,20 @@ static void ETA_FacePendingFrame(void)
+ 	}
+ 	if (cg.time < eta_facePendingAt || cg.time - eta_facePendingAt > ETA_FACE_WAIT_MS)
+ 	{
++		vec3_t      origin;
++		const char *name = NULL;
++
+ 		eta_facePendingAt = 0;
++		/* The way out, on a big level: the search gave up before it
++		   knew the way out was shut, and O said "tries again" every
++		   time, on and on - at the start of three levels in a check of
++		   them all. Taken as not open yet: on to the places not
++		   explored. */
++		if (CG_AccessibilityMarkerInfo(origin, &name) && name && !Q_stricmp(name, "the way out"))
++		{
++			ETA_FaceTheWayUnreachable();
++			return;
++		}
+ 		ETA_Speech_Say("No way found from here yet. O tries again");
+ 		return;
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 8820ec80..80540f53 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -700,6 +700,22 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 	}
+ }
+ 
++/* A switch here come across already, as T has it: on its list. */
++qboolean CG_AccessibilityThingKnownAt(const vec3_t point)
++{
++	int i;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		if (eta_things.things[i].kind == ETA_THING_SWITCH && eta_things.things[i].known
++		    && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* A switch here pressed already, as T has it. */
+ qboolean CG_AccessibilityThingPressedAt(const vec3_t point)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 88bf74ea..73ebb328 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7429,7 +7429,10 @@ qboolean CG_AccessibilitySwitchStand(const vec3_t at, vec3_t out)
+  * the places not explored, while the last door is opened by a switch on
+  * a wall far from it. Of the doors a switch opens, shut or out of sight,
+  * the one nearest the way out, within 30 meters of it; not one whose
+- * switch has been pressed already.
++ * switch has been pressed already, nor one not come across yet: at the
++ * start of the first level it was a switch 128 meters off, at the far
++ * end of a level not yet explored, and the places not explored are the
++ * way on there.
+  */
+ #define ETA_WAYOUT_DOOR_NEAR 1200.0f
+ 
+@@ -7453,7 +7456,8 @@ qboolean CG_AccessibilityWayOutSwitch(const vec3_t wayOut, vec3_t out)
+ 		VectorAdd(mins, maxs, mid);
+ 		VectorScale(mid, 0.5f, mid);
+ 		far = Distance(mid, wayOut);
+-		if (far >= bestFar || !CG_AccessibilityDoorOpener(model, mid, at) || CG_AccessibilityThingPressedAt(at))
++		if (far >= bestFar || !CG_AccessibilityDoorOpener(model, mid, at) || CG_AccessibilityThingPressedAt(at)
++		    || !CG_AccessibilityThingKnownAt(at))
+ 		{
+ 			continue;
+ 		}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index fa11b889..1dff61fe 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2429,6 +2429,7 @@ qboolean CG_AccessibilityWayOutSwitch( const vec3_t wayOut, vec3_t out );
+ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
++qboolean CG_AccessibilityThingKnownAt( const vec3_t point );
+ qboolean CG_AccessibilityDoorOwnSwitch( int model, const vec3_t doorAt, vec3_t out );
+ qboolean CG_AccessibilityHatchSwitchAbove( vec3_t out );
+ 

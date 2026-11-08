@@ -2506,3 +2506,19 @@ led to the corridor behind the room's wall, where F did nothing. And a
 door out of sight is taken as last seen, or open if the map starts it
 open: the way had taken the trap room's open doors for shut, and found
 no way into it.
+
+### 0139 The way out at the start of a level
+
+A check of all 26 levels, O pressed for the way out where each begins:
+
+0138 led to a switch near the way out wherever the way out was shut, and
+at the start of the first level that was a switch 128 meters off, at the
+far end of a level not yet explored; five levels began so. A switch is
+now led to only once it has been come across, as T has it; until then O
+goes on to the places not explored, as before.
+
+On three big levels the search for the way gave up before it knew the
+way out was shut, and O said "No way found from here yet. O tries
+again" each time it was pressed, and never went on. The way out not
+found in time is now taken as not open yet: on to the places not
+explored.
