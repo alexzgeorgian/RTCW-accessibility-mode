@@ -2720,3 +2720,27 @@ open hidden doors. Walls close on you here when it is pressed: press
 it, then run straight back at once." The ways are from the middle of
 the three; "hidden doors" when what the last sets off is, through
 relays, doors.
+
+### 0150 The lift, its bridge, and a door only a switch opens
+
+The second catacomb level's last puzzle: once the three buttons are
+pressed, the stone pillar in the middle of the crossroads sinks level
+with the floor; stood on, it lifts the player to the floor above, and a
+bridge slides out slowly to the north. Across it a switch opens the
+door on the south side of the upper floor, reached round a walkway at
+the side of the shaft (a jump from the pillar across the gap also
+lands there; tested). Nothing said any of it, and at that door the
+crosshair said "Door, F opens it": F does nothing at a door switches are
+aimed at (the game locks it to the player, KEY_LOCKED_TARGET).
+
+Read from the scripts as the crushers are: a trigger for the player
+whose event sends a script mover up well past it is a lift; a door its
+event sets off, through relays, is its bridge. Said, tested in the
+level: "A lift has come down level with the floor, ahead, 6 meters:
+stand on it, and it lifts you up. O leads there" (O is set to it);
+"Going up. A bridge comes out as you rise: wait for it"; "Bridge
+sliding out, ahead: wait for it"; "At the top" (once it has stood still
+a second: its moves run on one from another); "Bridge out, ahead: cross
+now"; "Bridge pulling back". The door says "Door: a switch opens it,
+not F". And a trap on another floor - the blade below the corridor
+upstairs - is not announced.
