@@ -2591,3 +2591,22 @@ shut that a switch opens, the nearest the player, and says "Everything
 open is explored. The way on is a locked door 14 meters from here; its
 switch is 44 meters away", and O again leads to where the switch is
 pressed from - before the rooms with things not found.
+
+### 0145 The lock on a slower computer, and a U lock that keeps the aim
+
+The tester heard "Locked" and their shots went wide. The lock turns
+with the game's own turn keys, held a frame at a time, and fast while
+far off. Below about 47 frames a second a fast frame turned further
+than the lock let go at, so the keys stopped while it stayed fast: it
+stood 12 to 23 degrees off the enemy. It is fast now only while a whole
+fast frame falls short of the point. And the last degrees are a nudge
+measured to the degree: a press and a release a few milliseconds apart,
+which the engine counts as exactly that much turn (IN_KeyUp). At 25, 30
+and 60 frames a second the lock now settles within a tenth of a degree.
+
+And the lock the player presses U for turns them as a sighted player
+already looking at the enemy with the mouse: while it is on, the game
+is told (+wbutton6, WBUTTON_STEADYAIM), and its turn does not widen the
+aim's spread (bg_pmove.c). The tester is attacked the moment enemies
+come, and cannot wait for the aim to settle. The lock by itself, and
+the player's own turns, count as the game has them.

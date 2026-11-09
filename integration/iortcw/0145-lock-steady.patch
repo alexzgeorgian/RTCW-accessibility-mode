@@ -1,0 +1,162 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f3b4031c..dbc0bafc 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -205,6 +205,11 @@ static void ETA_TurnStopStep(qboolean arrived)
+  */
+ #define ETA_AIM_KEY_UP      "996"
+ #define ETA_AIM_KEY_DOWN    "995"
++#define ETA_AIM_PULSE_LEFT  "989"
++#define ETA_AIM_PULSE_RIGHT "988"
++#define ETA_AIM_PULSE_UP    "987"
++#define ETA_AIM_PULSE_DOWN  "986"
++#define ETA_AIM_KEY_STEADY  "985"
+ #define ETA_AIM_SNAP_MS     1500
+ #define ETA_AIM_LOST_MS     400
+ #define ETA_AIM_MAX_TARGETS 16
+@@ -235,6 +240,8 @@ typedef struct
+ 	int           started;
+ 	int           yaw;          /* the turn key held: -1 left, 1 right */
+ 	int           pitch;        /* the look key held: -1 up, 1 down */
++	int           pulseAt;      /* the last measured nudge, for the lock */
++	qboolean      steady;       /* +wbutton6 down: the lock's turn leaves the aim steady */
+ 	int           lostSince;
+ 	qboolean      saidLost;
+ 	int           cycleIndex;
+@@ -369,7 +376,67 @@ static qboolean ETA_AimSteerAngles(const vec3_t wanted, float tolerance)
+ 	pitchError = AngleSubtract(wanted[PITCH], ps->viewangles[PITCH]);
+ 	worst      = MAX(fabs(yawError), fabs(pitchError));
+ 
+-	ETA_TurnBoost((qboolean)(worst > ETA_TURN_SLOW_DEGREES));
++	/* Fast only while a whole frame of it falls short of the point. Below
++	   about 47 frames a second a fast frame turned further than the lock
++	   lets go at, so the keys stopped while it stayed fast: the lock stood
++	   12 to 23 degrees off the enemy, said "Locked", and the tester's
++	   shots missed. */
++	ETA_TurnBoost((qboolean)(worst > MAX(ETA_TURN_SLOW_DEGREES,
++	                                     0.14f * (float)cg.frametime * ETA_TURN_FAST_FACTOR)));
++
++	/*
++	 * The lock, the last of the way: a nudge measured to the degree, not
++	 * a key held a frame at a time. Held, the key turns as far as a frame
++	 * lets it, and the lock let go within half that - two or three
++	 * degrees on a slower computer, beside an enemy ten metres off: the
++	 * tester heard "Locked" and their shots went wide. The engine counts
++	 * how long a key was down from the times given with it (IN_KeyUp), so
++	 * a press and a release a few milliseconds apart turn exactly so far.
++	 * One at a time, a frame or two apart, as each takes a frame to show.
++	 */
++	if (eta_aim.mode == ETA_AIM_LOCK && !eta_turn.fast)
++	{
++		char  buf[32];
++		float yawRate, pitchRate, frameMs = cg.frametime > 0 ? (float)cg.frametime : 16.0f;
++		int   yawMs = 0, pitchMs = 0;
++
++		trap_Cvar_VariableStringBuffer("cl_yawspeed", buf, sizeof(buf));
++		yawRate = ( atof(buf) > 1.0f ? atof(buf) : 140.0f ) * 0.001f;
++		trap_Cvar_VariableStringBuffer("cl_pitchspeed", buf, sizeof(buf));
++		pitchRate = ( atof(buf) > 1.0f ? atof(buf) : 140.0f ) * 0.001f;
++
++		if (fabs(yawError) <= yawRate * frameMs && fabs(pitchError) <= pitchRate * frameMs)
++		{
++			ETA_AimKeys(0, 0);
++			if (fabs(yawError) > 0.25f)
++			{
++				yawMs = (int)( fabs(yawError) / yawRate + 0.5f );
++			}
++			if (fabs(pitchError) > 0.25f)
++			{
++				pitchMs = (int)( fabs(pitchError) / pitchRate + 0.5f );
++			}
++			if (( yawMs || pitchMs ) && ( cg.time - eta_aim.pulseAt >= (int)( 2.0f * frameMs ) || cg.time < eta_aim.pulseAt ))
++			{
++				eta_aim.pulseAt = cg.time;
++				if (yawMs)
++				{
++					const char *key = yawError > 0.0f ? ETA_AIM_PULSE_LEFT : ETA_AIM_PULSE_RIGHT;
++					const char *dir = yawError > 0.0f ? "left" : "right";
++
++					trap_SendConsoleCommand(va("+%s %s 1000\n-%s %s %d\n", dir, key, dir, key, 1000 + yawMs));
++				}
++				if (pitchMs)
++				{
++					const char *key = pitchError > 0.0f ? ETA_AIM_PULSE_DOWN : ETA_AIM_PULSE_UP;
++					const char *dir = pitchError > 0.0f ? "lookdown" : "lookup";
++
++					trap_SendConsoleCommand(va("+%s %s 1000\n-%s %s %d\n", dir, key, dir, key, 1000 + pitchMs));
++				}
++			}
++			return (qboolean)( !yawMs && !pitchMs );
++		}
++	}
+ 
+ 	/* Let go within half a frame's turn of the point, as the tap does. */
+ 	perFrame = 0.14f * (float)cg.frametime * (eta_turn.fast ? ETA_TURN_FAST_FACTOR : 1.0f);
+@@ -4550,6 +4617,29 @@ static void ETA_EnemyCueFrame(void)
+ 
+ void CG_AccessibilityAimFrame(void)
+ {
++	/* The lock pressed for with U turns the player as a sighted player
++	   already looking at the enemy: the game is told, and the turn does
++	   not throw the aim off (WBUTTON_STEADYAIM, bg_pmove.c). Let go when
++	   the lock is, and once as the cgame starts, in case a map changed
++	   with it down. */
++	{
++		static qboolean released;
++		qboolean        want = (qboolean)( eta_aim.mode == ETA_AIM_LOCK && !eta_aim.automatic && cg.snap
++		                                   && cg.predictedPlayerState.pm_type == PM_NORMAL );
++
++		if (!released)
++		{
++			released = qtrue;
++			trap_SendConsoleCommand("-wbutton6 " ETA_AIM_KEY_STEADY "\n");
++			eta_aim.steady = qfalse;
++		}
++		if (want != eta_aim.steady)
++		{
++			trap_SendConsoleCommand(va("%swbutton6 %s\n", want ? "+" : "-", ETA_AIM_KEY_STEADY));
++			eta_aim.steady = want;
++		}
++	}
++
+ 	if (cg.snap && cg.snap->ps.pm_type == PM_NORMAL)
+ 	{
+ 		ETA_HitFrame();
+diff --git a/SP/code/game/bg_pmove.c b/SP/code/game/bg_pmove.c
+index 8f04941c..fb7ceb3b 100644
+--- a/SP/code/game/bg_pmove.c
++++ b/SP/code/game/bg_pmove.c
+@@ -2651,6 +2651,17 @@ void PM_AdjustAimSpreadScale( void ) {
+ 
+ 
+ 
++#ifdef FEATURE_ACCESSIBILITY
++		/* Turned by the lock the player pressed U for: as a sighted player
++		   already looking at the enemy, the turn does not throw the aim
++		   off. The tester, blind, locked on and fired at once - the
++		   enemies were on them - and the shots went wide. Only that lock
++		   sets it (cg_accessibility_keys.c); the lock by itself, and the
++		   player's own turns, count as the game has them. */
++		if ( pm->cmd.wbuttons & WBUTTON_STEADYAIM ) {
++			viewchange = 0;
++		}
++#endif
+ 		viewchange = (float)viewchange / cmdTime;   // convert into this movement for a second
+ 		viewchange -= AIMSPREAD_VIEWRATE_MIN / wpnScale;
+ 		if ( viewchange <= 0 ) {
+diff --git a/SP/code/qcommon/q_shared.h b/SP/code/qcommon/q_shared.h
+index c2888d36..9a974248 100644
+--- a/SP/code/qcommon/q_shared.h
++++ b/SP/code/qcommon/q_shared.h
+@@ -1538,6 +1538,11 @@ typedef struct playerState_s {
+ 
+ // unused
+ #define WBUTTON_EXTRA6      64
++#ifdef FEATURE_ACCESSIBILITY
++/* The lock the player asked for is turning them (+wbutton6): the aim's
++   spread is not widened by it (bg_pmove.c). */
++#define WBUTTON_STEADYAIM   WBUTTON_EXTRA6
++#endif
+ #define WBUTTON_EXTRA7      128
+ //----(SA) end
+ 
