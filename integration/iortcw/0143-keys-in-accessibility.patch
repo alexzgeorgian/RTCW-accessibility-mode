@@ -1,0 +1,66 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 0512222b..7ba5a949 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8027,6 +8027,9 @@ static const struct {
+ 	{ "eta_acc_sounds",         "Sounds",                         qfalse },
+ 	{ "eta_acc_volumes",        "Volumes",                        qfalse },
+ 	{ "eta_acc_moving",         "Moving and aiming",              qfalse },
++	{ "eta_acc_keys_around",    "Keys: getting around",           qfalse },
++	{ "eta_acc_keys_things",    "Keys: things and enemies",       qfalse },
++	{ "eta_acc_keys_told",      "Keys: what you are told",        qfalse },
+ };
+ 
+ /*
+@@ -8112,7 +8115,8 @@ static void UI_AccessibilityPregame( menuDef_t *menu ) {
+  * their own, as they do each other's.
+  */
+ static const char *eta_accessibilityMenus[] = {
+-	"eta_accessibility", "eta_acc_told", "eta_acc_sounds", "eta_acc_volumes", "eta_acc_moving"
++	"eta_accessibility", "eta_acc_told", "eta_acc_sounds", "eta_acc_volumes", "eta_acc_moving",
++	"eta_acc_keys_around", "eta_acc_keys_things", "eta_acc_keys_told"
+ };
+ 
+ #define ETA_ACCESSIBILITY_TAB "eta_accessibility_tab"
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index a0e31a07..4f5aa8a4 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4605,6 +4605,37 @@ static bind_t g_bindings[] =
+ 	{"+leanleft",        -1,             -1, -1, -1},
+ 	{"+leanright",       -1,             -1, -1, -1},
+ 	{"kill",         -1,             -1, -1, -1}
++#ifdef FEATURE_ACCESSIBILITY
++	/* The mode's own keys, so the Accessibility pages can show and change
++	   them as the Controls page does the game's: the tester wanted them
++	   in the settings, the game's own pages left as they are. The keys
++	   are the mode's defaults (UI_AccessibilityBinds, ui_main.c). */
++	,
++	{"accessibilityWayOut",          'o',            -1, -1, -1},
++	{"accessibilityAreaExits",       'x',            -1, -1, -1},
++	{"accessibilityAreasBack",       ';',            -1, -1, -1},
++	{"accessibilityWaypointPlace",   'p',            -1, -1, -1},
++	{"accessibilityWaypointNext",    'l',            -1, -1, -1},
++	{"accessibilityWaypointPrev",    'k',            -1, -1, -1},
++	{"accessibilityMarkerClear",     K_BACKSPACE,    -1, -1, -1},
++	{"+accessibilityTurnLeft",       K_LEFTARROW,    -1, -1, -1},
++	{"+accessibilityTurnRight",      K_RIGHTARROW,   -1, -1, -1},
++	{"accessibilityCrouch",          'c',            -1, -1, -1},
++	{"accessibilityThingsNext",      't',            -1, -1, -1},
++	{"accessibilityThingsPrev",      'y',            -1, -1, -1},
++	{"+accessibilityActivate",       'f',            K_ENTER, -1, -1},
++	{"accessibilityEnemyLock",       'u',            -1, -1, -1},
++	{"+accessibilityAimLock",        K_INS,          -1, -1, -1},
++	{"accessibilityEnemyCallouts",   'm',            -1, -1, -1},
++	{"accessibilityStatus",          'j',            K_F1, -1, -1},
++	{"accessibilityHealth",          'h',            -1, -1, -1},
++	{"accessibilityAmmo",            'i',            -1, -1, -1},
++	{"accessibilityFacing",          'v',            -1, -1, -1},
++	{"accessibilityObjectives",      K_F2,           -1, -1, -1},
++	{"accessibilityRepeat",          K_F6,           -1, -1, -1},
++	{"accessibilityReadScreen",      K_F7,           -1, -1, -1},
++	{"accessibilityStopSpeech",      K_F8,           -1, -1, -1}
++#endif
+ };
+ 
+ 

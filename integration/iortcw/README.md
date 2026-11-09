@@ -2567,3 +2567,16 @@ And F, at a switch O led to where it is pressed from, turned the player
 to that spot on the floor instead of to the switch: the place F turns
 to is now the switch itself, the place O leads to where it is pressed
 from.
+
+### 0143 The mode's keys in the Accessibility pages
+
+The tester wanted everything the mode adds in its own Accessibility
+section of the settings, the game's own pages left as the game has them;
+the mode's keys were nowhere in the menus. Three pages are added, KEYS:
+GETTING AROUND, KEYS: THINGS AND ENEMIES and KEYS: WHAT YOU ARE TOLD,
+each row its key as the game's Controls page has its own: "Health, H".
+Enter, then a key, puts it on that key ("bound to H or Q"); Backspace
+clears it; Escape leaves it as it was. The mode's commands are added to
+the menus' list of commands (ui_shared.c), with the mode's own keys as
+their defaults, and the pages to the Accessibility pages Escape steps
+back through (ui_main.c).
