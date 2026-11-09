@@ -2610,3 +2610,13 @@ is told (+wbutton6, WBUTTON_STEADYAIM), and its turn does not widen the
 aim's spread (bg_pmove.c). The tester is attacked the moment enemies
 come, and cannot wait for the aim to settle. The lock by itself, and
 the player's own turns, count as the game has them.
+
+### 0146 The lock leads a moving enemy
+
+The tester still missed at ten metres. The lock aimed where the game
+last showed the enemy, a snapshot and more behind where the server has
+them when the shot is fired: measured on the server, the view was a
+third of a metre behind a zombie coming on, eight metres off. The lock
+now aims a tenth of a second ahead along the enemy's movement, as a
+sighted player leads a running man: measured again, 0.4 units off at
+ten and a half metres, 2.4 at fourteen, and the shots hit.

@@ -1,0 +1,27 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 99dd32fe..133fcdd6 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6647,10 +6647,22 @@ static void ETA_AimInsert(etaAimTarget_t *list, int *count, int max, const etaAi
+ 
+ /* Where to aim at a character: the middle of the body as it stands or
+    crouches. */
++/* Shown where the server had them a snapshot and more ago: a moving
++   enemy is aimed at a little ahead, where they are when the shot is
++   fired, as a sighted player leads a running man. The tester's shots
++   went wide at ten metres; the view was a third of a metre behind a
++   zombie coming on. */
++#define ETA_AIM_LEAD_SECONDS 0.1f
++
+ static void ETA_PlayerAimPoint(const centity_t *cent, vec3_t out)
+ {
+ 	VectorCopy(cent->lerpOrigin, out);
+ 	out[2] += (cent->currentState.eFlags & EF_CROUCHING) ? 6.0f : 20.0f;
++	if (cent->currentState.pos.trType == TR_INTERPOLATE)
++	{
++		out[0] += cent->currentState.pos.trDelta[0] * ETA_AIM_LEAD_SECONDS;
++		out[1] += cent->currentState.pos.trDelta[1] * ETA_AIM_LEAD_SECONDS;
++	}
+ }
+ 
+ /**
