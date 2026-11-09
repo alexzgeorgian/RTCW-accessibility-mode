@@ -2580,3 +2580,14 @@ clears it; Escape leaves it as it was. The mode's commands are added to
 the menus' list of commands (ui_shared.c), with the mode's own keys as
 their defaults, and the pages to the Accessibility pages Escape steps
 back through (ui_main.c).
+
+### 0144 All explored: the switch of a locked door come to
+
+In the second catacomb level the tester had explored every area; O and
+X said there was nothing new, and the door on was shut, its switch 44
+meters off and seven meters up. When the way out is not open and
+nothing is left to explore, O now looks for a door come to and seen
+shut that a switch opens, the nearest the player, and says "Everything
+open is explored. The way on is a locked door 14 meters from here; its
+switch is 44 meters away", and O again leads to where the switch is
+pressed from - before the rooms with things not found.
