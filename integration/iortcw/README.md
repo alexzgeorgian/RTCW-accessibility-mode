@@ -2653,3 +2653,26 @@ wait"; and once drawn back up, "Blade back up, safe to cross" - a blade
 drawn back slowly does not cut, so only a fast move counts as moving.
 Crossed on that word, without god mode, the test player came through
 whole.
+
+### 0148 The way goes round furniture, and points only where a body fits
+
+One of the test walks on the tram level failed every time, and had been
+put down to bad luck. It was not: the walk began inside a chair. A chair
+is no part of the map's walls - the game sends it as a solid box of its
+own - so the way ran straight through it, and from there every step was
+blocked while O kept saying "Facing the way".
+
+The way now goes round anything solid the game sends with a box of its
+own and that stands still - chairs and the like, not people - by its
+outline and a body's half width, as it goes round a pressure plate; a
+step that starts inside such an outline may leave it. And the point O
+turns the player toward, the furthest one along the way in a straight
+line, must have room for the player's full width and standing height
+all the way: the probe that finds the way is narrower than a player, so
+that doorways are found, but the player walks the line with their body.
+
+The test walk now starts beside the chair, not in it, and the other
+walk thought unlucky - it began half inside a wall and a step - starts
+clear of them. And the walk test now tries a step each way from its
+start first, and says "START STUCK" at once when the player cannot move
+at all, so a bad start is never again taken for bad luck.

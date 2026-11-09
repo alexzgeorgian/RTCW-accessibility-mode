@@ -1,0 +1,118 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index aed258a3..c0c365b1 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -751,7 +751,7 @@ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+  * again, it said through. The tester went round and round. One a soldier
+  * has opened stands open, and the way goes through while it does.
+  */
+-#define ETA_ROUTE_LOCKED_MAX 32
++#define ETA_ROUTE_LOCKED_MAX 64
+ 
+ static struct
+ {
+@@ -823,6 +823,38 @@ static void ETA_RouteLockedDoors(void)
+ 		eta_routeLockedCount++;
+ 	}
+ 
++	/* Furniture: a chair is no part of the map's walls, and the way went
++	   through one in the kitchen by the tram station - a player walking
++	   it bumps into the chair. Anything solid the game sends with a box
++	   of its own (not a brush), standing still, is gone round as a plate
++	   is: by its outline, and a body's half width round it. Not people:
++	   they move. */
++	for (n = 0; cg.snap && n < cg.snap->numEntities && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		float                x, down, up;
++
++		if (( es->eType != ET_MOVER && es->eType != ET_GENERAL ) || !es->solid || es->solid == SOLID_BMODEL
++		    || es->pos.trType != TR_STATIONARY)
++		{
++			continue;
++		}
++		x    = (float)( es->solid & 255 );
++		down = (float)( ( es->solid >> 8 ) & 255 );
++		up   = (float)( ( ( es->solid >> 16 ) & 255 ) - 32 );
++		VectorCopy(cg_entities[es->number].lerpOrigin, origin);
++		eta_routeLocked[eta_routeLockedCount].clip = -1;
++		VectorClear(eta_routeLocked[eta_routeLockedCount].origin);
++		for (k = 0; k < 2; k++)
++		{
++			eta_routeLocked[eta_routeLockedCount].mins[k] = origin[k] - x - ( ETA_ROUTE_BODY_HALF + 1.0f );
++			eta_routeLocked[eta_routeLockedCount].maxs[k] = origin[k] + x + ( ETA_ROUTE_BODY_HALF + 1.0f );
++		}
++		eta_routeLocked[eta_routeLockedCount].mins[2] = origin[2] - down - 24.0f;
++		eta_routeLocked[eta_routeLockedCount].maxs[2] = origin[2] + up + 24.0f;
++		eta_routeLockedCount++;
++	}
++
+ 	eta_routeBreakables = 0;
+ 	for (n = 0; !eta_routeOpenBreakables && cg.snap && n < cg.snap->numEntities
+ 	     && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
+@@ -891,12 +923,20 @@ static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3])
+ 		{
+ 			continue;
+ 		}
+-		/* A plate, flat underfoot: the walk is into it when it crosses
+-		   its outline at all. */
++		/* A plate, flat underfoot, or a piece of furniture: the walk is
++		   into it when it crosses its outline at all. */
+ 		if (eta_routeLocked[i].clip < 0)
+ 		{
+ 			float t0 = 0.0f, t1 = 1.0f;
+ 
++			/* Already standing in its outline: stepping off it is no
++			   walk into it. */
++			if (from[0] > eta_routeLocked[i].mins[0] && from[0] < eta_routeLocked[i].maxs[0]
++			    && from[1] > eta_routeLocked[i].mins[1] && from[1] < eta_routeLocked[i].maxs[1])
++			{
++				continue;
++			}
++
+ 			for (k = 0; k < 2; k++)
+ 			{
+ 				float d = to[k] - from[k];
+@@ -1060,6 +1100,33 @@ static float ETA_RouteWalkable(const vec3_t from, const vec3_t to)
+ 	return reach;
+ }
+ 
++/*
++ * Room for the player's own body, its full width and standing height, on
++ * the straight line to a point. The line the ping points along is looked
++ * at with a probe narrower than a player, so that a doorway is found
++ * wherever the squares fall; but the player walks it with their body. At
++ * the start of a walk on the tram level the ping pointed past the corner
++ * of a wall the probe slipped by and the player did not: W walked into
++ * it, and O said "Facing the way" again, a hundred times over. A line
++ * the body does not fit is not pointed along: the point nearer, which
++ * the search stepped to square by square, is.
++ */
++static qboolean ETA_RouteBodyClear(const vec3_t from, const vec3_t to)
++{
++	static const vec3_t mins = { -ETA_ROUTE_BODY_HALF + 1.0f, -ETA_ROUTE_BODY_HALF + 1.0f, -24.0f + 18.0f };
++	static const vec3_t maxs = { ETA_ROUTE_BODY_HALF - 1.0f, ETA_ROUTE_BODY_HALF - 1.0f, ETA_ROUTE_BODY_TOP };
++	trace_t             trace;
++	vec3_t              a, b;
++
++	VectorCopy(from, a);
++	VectorCopy(to, b);
++	a[2] = b[2] = MAX(a[2], b[2]);
++	trap_CM_BoxTrace(&trace, a, b, mins, maxs, 0, MASK_PLAYERSOLID);
++	/* Already pressed into something where they stand: said by the
++	   other looks, not this one. */
++	return (qboolean)( trace.startsolid || trace.fraction >= 1.0f );
++}
++
+ static qboolean ETA_RouteClear(const vec3_t from, const vec3_t to)
+ {
+ 	return (qboolean)(ETA_RouteWalkable(from, to) >= 1.0f && !ETA_RouteLineAvoided(from, to)
+@@ -2012,7 +2079,7 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ 				continue;
+ 			}
+ 
+-			if (ETA_RouteClear(here, point))
++			if (ETA_RouteClear(here, point) && ETA_RouteBodyClear(here, point))
+ 			{
+ 				best = i;
+ 				break;
