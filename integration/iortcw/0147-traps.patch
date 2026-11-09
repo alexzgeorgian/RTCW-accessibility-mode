@@ -1,0 +1,678 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 7d43145d..aed258a3 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -643,6 +643,7 @@ static qboolean ETA_RouteLineAvoided(const float from[3], const float to[3])
+ #define ETA_ROUTE_SHIFT 8.0f
+ 
+ static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3]);
++static qboolean ETA_RouteNearPlate(const float at[3]);
+ 
+ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ {
+@@ -651,7 +652,7 @@ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ 	float dx    = to[0] - from[0], dy = to[1] - from[1];
+ 	float ax    = dx < 0.0f ? -dx : dx, ay = dy < 0.0f ? -dy : dy;
+ 	int   across, count, i, found = ETA_PATH_NONE;
+-	float jumpTo[3];
++	float jumpTo[3] = { 0.0f, 0.0f, 0.0f };
+ 
+ 	/* Across the step: y for a step east or west, x for one north or
+ 	   south. A diagonal step is taken as it is. */
+@@ -705,6 +706,35 @@ static int ETA_RouteMove(void *context, const float from[3], float to[3])
+ 		}
+ 	}
+ 
++	/* Near a plate: the strip beside one is narrower than a square, so
++	   a step stopped there, by the plate or the wall beyond it, is moved
++	   a little either way, along it or across, to land in the strip. */
++	if (ETA_RouteNearPlate(to))
++	{
++		static const float moves[5] = { 16.0f, -16.0f, 8.0f, -8.0f, 24.0f };
++		int                axis;
++
++		for (axis = 0; axis < 2; axis++)
++		{
++			for (i = 0; i < 5; i++)
++			{
++				float tried[3];
++
++				VectorCopy(to, tried);
++				tried[axis] += moves[i];
++				if (ETA_RouteLineAvoided(from, tried) || ETA_RouteThroughLocked(from, tried))
++				{
++					continue;
++				}
++				if (ETA_RouteMoveExact(context, from, tried) == ETA_PATH_WALK && !ETA_RouteThroughLocked(from, tried))
++				{
++					VectorCopy(tried, to);
++					return ETA_PATH_WALK;
++				}
++			}
++		}
++	}
++
+ 	if (found != ETA_PATH_NONE)
+ 	{
+ 		VectorCopy(jumpTo, to);
+@@ -777,6 +807,22 @@ static void ETA_RouteLockedDoors(void)
+ 		eta_routeLockedCount++;
+ 	}
+ 
++	/* Pressure plates: gone round, between them where there is room.
++	   Only a body's half width round each, and a little, not the doors'
++	   wide berth: the saw room's have a body and a half between them and
++	   the wall. */
++	for (index = 0; eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX && CG_AccessibilityPlateBox(index, mins, maxs); index++)
++	{
++		eta_routeLocked[eta_routeLockedCount].clip = -1;   /* flat: by its outline */
++		VectorClear(eta_routeLocked[eta_routeLockedCount].origin);
++		for (k = 0; k < 3; k++)
++		{
++			eta_routeLocked[eta_routeLockedCount].mins[k] = mins[k] - ( k < 2 ? ETA_ROUTE_BODY_HALF + 1.0f : 32.0f );
++			eta_routeLocked[eta_routeLockedCount].maxs[k] = maxs[k] + ( k < 2 ? ETA_ROUTE_BODY_HALF + 1.0f : 32.0f );
++		}
++		eta_routeLockedCount++;
++	}
++
+ 	eta_routeBreakables = 0;
+ 	for (n = 0; !eta_routeOpenBreakables && cg.snap && n < cg.snap->numEntities
+ 	     && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
+@@ -804,6 +850,25 @@ static void ETA_RouteLockedDoors(void)
+ }
+ 
+ /* Whether a walk from one point to another goes into a door locked shut. */
++/* A plate this near: the squares about it are fitted to the strips
++   beside it. */
++static qboolean ETA_RouteNearPlate(const float at[3])
++{
++	int i;
++
++	for (i = 0; i < eta_routeLockedCount; i++)
++	{
++		if (eta_routeLocked[i].clip < 0
++		    && at[0] > eta_routeLocked[i].mins[0] - 64.0f && at[0] < eta_routeLocked[i].maxs[0] + 64.0f
++		    && at[1] > eta_routeLocked[i].mins[1] - 64.0f && at[1] < eta_routeLocked[i].maxs[1] + 64.0f
++		    && at[2] > eta_routeLocked[i].mins[2] - 32.0f && at[2] < eta_routeLocked[i].maxs[2] + 32.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3])
+ {
+ 	static const vec3_t mins = { -ETA_ROUTE_HALF_WIDTH, -ETA_ROUTE_HALF_WIDTH, -24.0f + 18.0f };
+@@ -826,6 +891,45 @@ static qboolean ETA_RouteThroughLocked(const float from[3], const float to[3])
+ 		{
+ 			continue;
+ 		}
++		/* A plate, flat underfoot: the walk is into it when it crosses
++		   its outline at all. */
++		if (eta_routeLocked[i].clip < 0)
++		{
++			float t0 = 0.0f, t1 = 1.0f;
++
++			for (k = 0; k < 2; k++)
++			{
++				float d = to[k] - from[k];
++
++				if (fabsf(d) < 0.001f)
++				{
++					if (from[k] < eta_routeLocked[i].mins[k] || from[k] > eta_routeLocked[i].maxs[k])
++					{
++						break;
++					}
++				}
++				else
++				{
++					float a = ( eta_routeLocked[i].mins[k] - from[k] ) / d, b = ( eta_routeLocked[i].maxs[k] - from[k] ) / d;
++
++					if (a > b)
++					{
++						float t = a; a = b; b = t;
++					}
++					t0 = MAX(t0, a);
++					t1 = MIN(t1, b);
++					if (t0 > t1)
++					{
++						break;
++					}
++				}
++			}
++			if (k == 2)
++			{
++				return qtrue;
++			}
++			continue;
++		}
+ 		trap_CM_TransformedBoxTrace(&trace, from, to, mins, maxs, eta_routeLocked[i].clip, MASK_PLAYERSOLID,
+ 		                            eta_routeLocked[i].origin, vec3_origin);
+ 		if (trace.startsolid || trace.fraction < 1.0f)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 133fcdd6..be8bba81 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4075,6 +4075,47 @@ static qboolean    eta_doorHintLocked[MAX_MODELS];
+    like any door, and nothing on them says which they are. */
+ static qboolean eta_buttonModel[MAX_MODELS];
+ 
++/*
++ * Traps. The second catacomb level has a room of three saws a pressure
++ * plate sets going, a swinging blade, and spikes a treasure drops: the
++ * tester asked which saw was which, and when it was safe. T had listed
++ * the plates as buttons, "F uses it", and O walked over them.
++ *
++ * A plate: a button the map makes go off at a touch (func_button's
++ * TOUCH, spawnflag 8), low and flat. Not a switch to press: said as a
++ * plate, kept off T, and gone round by the way.
++ *
++ * A trap: a script mover the map names as one - a saw, blade, spike,
++ * axe, crusher or pendulum - grouped with the others of its kind close
++ * by. Said with its number as the player comes near, nearest first, and
++ * when they start and stop moving.
++ */
++static qboolean eta_plateModel[MAX_MODELS];
++
++#define ETA_MAX_TRAP_MOVERS 16
++static struct
++{
++	int    model;
++	vec3_t at;          /* where the map puts it: at rest it may be in a wall, and not sent */
++	char   kind[16];    /* "saw", "blade", "spikes", "trap" */
++	int  group;
++	int  number;        /* within the group, as said; 0 not yet */
++	qboolean rested;    /* how it rests known: as first seen still, before it ever moved fast */
++	vec3_t   restAngles;
++} eta_trapMovers[ETA_MAX_TRAP_MOVERS];
++static int eta_trapMoverCount;
++static struct
++{
++	qboolean announced;
++	int      state;      /* as last said: ETA_TRAP_* */
++	qboolean everFast;
++	int      stillSince;
++} eta_trapGroups[ETA_MAX_TRAP_MOVERS];
++static int eta_trapGroupCount;
++static int eta_plateSaidAt[MAX_MODELS];
++static char eta_plateWall[MAX_MODELS];   /* 0 not yet found; 'n' 's' 'e' 'w' the wall to keep to; '-' none */
++
++
+ /* The map's breakables (func_explosive), by brush model: the server
+    sends each as a breakable, but not whether it breaks for the player -
+    one with no health is only a part of a scripted scene - nor what it is
+@@ -4650,6 +4691,11 @@ static void ETA_ReadMapEntities(void)
+ 	int      namedCount = 0, userCount = 0, linkCount = 0, secretCount = 0, aimedCount = 0;
+ 
+ 	memset(eta_buttonModel, 0, sizeof(eta_buttonModel));
++	memset(eta_plateModel, 0, sizeof(eta_plateModel));
++	eta_trapMoverCount = 0;
++	eta_trapGroupCount = 0;
++	memset(eta_plateSaidAt, 0, sizeof(eta_plateSaidAt));
++	memset(eta_plateWall, 0, sizeof(eta_plateWall));
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+ 	memset(eta_opensDoor, 0, sizeof(eta_opensDoor));
+@@ -4864,7 +4910,41 @@ static void ETA_ReadMapEntities(void)
+ 
+ 			if (index > 0 && index < MAX_MODELS)
+ 			{
+-				eta_buttonModel[index] = qtrue;
++				if (atoi(spawnflags) & 8)
++				{
++					eta_plateModel[index] = qtrue;   /* a plate, not a switch */
++				}
++				else
++				{
++					eta_buttonModel[index] = qtrue;
++				}
++			}
++		}
++
++		if (!Q_stricmp(classname, "script_mover") && model[0] == '*' && eta_trapMoverCount < ETA_MAX_TRAP_MOVERS)
++		{
++			const char *name = scriptname[0] ? scriptname : targetname;
++			const char *kind = Q_stristr(name, "razor") ? NULL
++			                   : Q_stristr(name, "saw") ? "saw"
++			                   : Q_stristr(name, "blade") || Q_stristr(name, "axe") || Q_stristr(name, "pendul") ? "blade"
++			                   : Q_stristr(name, "spike") ? "spikes"
++			                   : Q_stristr(name, "crush") || Q_stristr(name, "trap") ? "trap" : NULL;
++			int index = atoi(model + 1);
++
++			if (kind && index > 0 && index < MAX_MODELS && !Q_stristr(name, "trapdoor") && !Q_stristr(name, "trapwall"))
++			{
++				eta_trapMovers[eta_trapMoverCount].model  = index;
++				VectorCopy(cgs.inlineModelMidpoints[index], eta_trapMovers[eta_trapMoverCount].at);
++				if (origin[0])
++				{
++					sscanf(origin, "%f %f %f", &eta_trapMovers[eta_trapMoverCount].at[0],
++					       &eta_trapMovers[eta_trapMoverCount].at[1], &eta_trapMovers[eta_trapMoverCount].at[2]);
++				}
++				eta_trapMovers[eta_trapMoverCount].group  = -1;
++				eta_trapMovers[eta_trapMoverCount].rested = qfalse;
++				eta_trapMovers[eta_trapMoverCount].number = 0;
++				Q_strncpyz(eta_trapMovers[eta_trapMoverCount].kind, kind, sizeof(eta_trapMovers[0].kind));
++				eta_trapMoverCount++;
+ 			}
+ 		}
+ 
+@@ -6399,8 +6479,406 @@ static void ETA_DoorsSeen(void)
+ 	}
+ }
+ 
++/* The plates, for the way to go round: qfalse past the last. */
++qboolean CG_AccessibilityPlateBox(int index, vec3_t mins, vec3_t maxs)
++{
++	int model;
++
++	for (model = 1; model < MAX_MODELS && model < cgs.numInlineModels; model++)
++	{
++		if (eta_plateModel[model] && cgs.inlineDrawModel[model] && index-- == 0)
++		{
++			trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++#define ETA_TRAP_NEAR       480.0f   /* this near a trap: said, numbered */
++#define ETA_TRAP_HEAR       640.0f   /* this near: when it starts and stops */
++#define ETA_TRAP_FORGET     1000.0f  /* this far: said again when come back to */
++#define ETA_TRAP_GROUP      640.0f   /* movers this near each other: one trap */
++#define ETA_TRAP_STOP_MS    500      /* still this long: stopped */
++#define ETA_TRAP_FAST_SPEED   120.0f /* units a second: a saw's cut; slower is drawn back */
++#define ETA_TRAP_FAST_TURN    45.0f  /* degrees a second: a blade's swing; the crypt's draws back at 20 */
++#define ETA_TRAP_AWAY_TURN    70.0f  /* turned this far from rest: hanging in the way */
++enum { ETA_TRAP_REST, ETA_TRAP_FAST, ETA_TRAP_AWAY };
++#define ETA_PLATE_NEAR      96.0f   /* about a third of a second away, running */
++#define ETA_PLATE_SAY_MS    5000
++
++
++static const char *ETA_TrapPlural(const char *kind, int count)
++{
++	if (!Q_stricmp(kind, "spikes"))
++	{
++		return "spikes";
++	}
++	return count == 1 ? kind : !Q_stricmp(kind, "saw") ? "saws" : !Q_stricmp(kind, "blade") ? "blades" : "traps";
++}
++
++/*
++ * The wall to keep to, to pass a plate: across the way it lies in -
++ * the narrower of the two - the side whose wall a body walking against
++ * it clears the plate by. Found once. '-' when neither does: a plate in
++ * the middle of a wide floor is simply stepped round.
++ */
++static char ETA_PlateWall(int model)
++{
++	static const char names[2][2] = { { 'w', 'e' }, { 's', 'n' } };
++	vec3_t            mins, maxs, mid, start, end;
++	float             wall[2][2], room = 1.0e9f;
++	int               axis, side, across = -1;
++
++	if (eta_plateWall[model])
++	{
++		return eta_plateWall[model];
++	}
++	eta_plateWall[model] = '-';
++	trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++	VectorAdd(mins, maxs, mid);
++	VectorScale(mid, 0.5f, mid);
++	mid[2] = maxs[2] + 24.0f;
++	for (axis = 0; axis < 2; axis++)
++	{
++		for (side = 0; side < 2; side++)
++		{
++			trace_t trace;
++
++			VectorCopy(mid, start);
++			VectorCopy(mid, end);
++			end[axis] += side ? 512.0f : -512.0f;
++			trap_CM_BoxTrace(&trace, start, end, NULL, NULL, 0, MASK_PLAYERSOLID);
++			wall[axis][side] = trace.endpos[axis];
++		}
++		if (wall[axis][1] - wall[axis][0] < room)
++		{
++			room   = wall[axis][1] - wall[axis][0];
++			across = axis;
++		}
++	}
++	if (across < 0 || room > 512.0f)
++	{
++		return eta_plateWall[model];
++	}
++	/* A body against the wall: 18 either side of its middle, and a
++	   little more. */
++	for (side = 0; side < 2; side++)
++	{
++		float body = side ? wall[across][1] - 36.0f : wall[across][0] + 36.0f;   /* its far edge */
++
++		if (side ? body > maxs[across] + 2.0f : body < mins[across] - 2.0f)
++		{
++			eta_plateWall[model] = names[across][side];
++			break;
++		}
++	}
++	return eta_plateWall[model];
++}
++
++static void ETA_TrapsFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              centers[ETA_MAX_TRAP_MOVERS];
++	qboolean            fast[ETA_MAX_TRAP_MOVERS], away[ETA_MAX_TRAP_MOVERS];
++	int                 i, j, k, g;
++
++	/* Not while the level sets itself up: its scripts put the traps in
++	   place at once, which is no blow, and not where they rest. */
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode || cg.time - cgs.levelStartTime < 3000)
++	{
++		return;
++	}
++
++	/* Where each is now; whether it moves fast, as a blow does - a
++	   blade drawn back up slowly does not cut; and whether it is turned
++	   away from how it rests - a blade hanging down after its swing is
++	   in the way, though still. One that slides - a saw - stops in its
++	   slot at either end, and is not in the way stopped. */
++	for (i = 0; i < eta_trapMoverCount; i++)
++	{
++		fast[i] = away[i] = qfalse;
++		VectorCopy(eta_trapMovers[i].at, centers[i]);
++		for (j = 0; j < cg.snap->numEntities; j++)
++		{
++			const entityState_t *es = &cg.snap->entities[j];
++
++			if (es->eType == ET_MOVER && es->modelindex == eta_trapMovers[i].model)
++			{
++				const centity_t *cent = &cg_entities[es->number];
++				qboolean         still = (qboolean)( !( es->pos.trType != TR_STATIONARY && es->pos.trDuration )
++				                                     && !( es->apos.trType != TR_STATIONARY && es->apos.trDuration ) );
++
++				VectorAdd(cent->lerpOrigin, cgs.inlineModelMidpoints[es->modelindex], centers[i]);
++				fast[i] = (qboolean)( !still && ( VectorLength(es->pos.trDelta) > ETA_TRAP_FAST_SPEED
++				                                  || VectorLength(es->apos.trDelta) > ETA_TRAP_FAST_TURN ) );
++				if (still && !eta_trapMovers[i].rested && eta_trapMovers[i].group >= 0
++				    && !eta_trapGroups[eta_trapMovers[i].group].everFast)
++				{
++					VectorCopy(cent->lerpAngles, eta_trapMovers[i].restAngles);
++				}
++				if (eta_trapMovers[i].rested || ( eta_trapMovers[i].group >= 0 && eta_trapGroups[eta_trapMovers[i].group].everFast ))
++				{
++					eta_trapMovers[i].rested = qtrue;
++					for (k = 0; k < 3; k++)
++					{
++						away[i] = (qboolean)( away[i] || fabsf(AngleNormalize180(cent->lerpAngles[k] - eta_trapMovers[i].restAngles[k])) > ETA_TRAP_AWAY_TURN );
++					}
++				}
++				break;
++			}
++		}
++		/* Grouped, by where the map puts them, with one of its kind close by. */
++		if (eta_trapMovers[i].group < 0 && eta_trapGroupCount < ETA_MAX_TRAP_MOVERS)
++		{
++			for (j = 0; j < eta_trapMoverCount; j++)
++			{
++				if (j != i && eta_trapMovers[j].group >= 0
++				    && !Q_stricmp(eta_trapMovers[j].kind, eta_trapMovers[i].kind)
++				    && Distance(eta_trapMovers[i].at, eta_trapMovers[j].at) < ETA_TRAP_GROUP)
++				{
++					eta_trapMovers[i].group = eta_trapMovers[j].group;
++					break;
++				}
++			}
++			if (eta_trapMovers[i].group < 0)
++			{
++				eta_trapMovers[i].group = eta_trapGroupCount;
++				memset(&eta_trapGroups[eta_trapGroupCount], 0, sizeof(eta_trapGroups[0]));
++				eta_trapGroupCount++;
++			}
++		}
++	}
++
++	for (g = 0; g < eta_trapGroupCount; g++)
++	{
++		int         members[ETA_MAX_TRAP_MOVERS], count = 0;
++		float       nearest = 1.0e9f;
++		qboolean    anyFast = qfalse, anyAway = qfalse;
++		const char *kind = "trap";
++
++		for (i = 0; i < eta_trapMoverCount; i++)
++		{
++			if (eta_trapMovers[i].group == g)
++			{
++				members[count++] = i;
++				nearest   = MIN(nearest, Distance(ps->origin, centers[i]));
++				anyFast   = (qboolean)( anyFast || fast[i] );
++				anyAway   = (qboolean)( anyAway || away[i] );
++				kind      = eta_trapMovers[i].kind;
++			}
++		}
++		if (!count)
++		{
++			continue;
++		}
++		if (anyFast)
++		{
++			eta_trapGroups[g].everFast = qtrue;
++		}
++
++		if (nearest > ETA_TRAP_FORGET)
++		{
++			eta_trapGroups[g].announced = qfalse;
++			continue;
++		}
++
++		/* Come near: what it is, each by its number, nearest first - the
++		   numbers kept from the first time, so the first stays the
++		   first. */
++		if (nearest < ETA_TRAP_NEAR && !eta_trapGroups[g].announced)
++		{
++			char text[MAX_STRING_CHARS];
++			int  next = 1;
++
++			for (i = 0; i < count; i++)
++			{
++				next = MAX(next, eta_trapMovers[members[i]].number + 1);
++			}
++			/* Nearest first. */
++			for (i = 0; i < count; i++)
++			{
++				for (j = i + 1; j < count; j++)
++				{
++					if (Distance(ps->origin, centers[members[j]]) < Distance(ps->origin, centers[members[i]]))
++					{
++						k = members[i]; members[i] = members[j]; members[j] = k;
++					}
++				}
++			}
++			for (i = 0; i < count; i++)
++			{
++				if (!eta_trapMovers[members[i]].number)
++				{
++					eta_trapMovers[members[i]].number = next++;
++				}
++			}
++			eta_trapGroups[g].announced  = qtrue;
++			eta_trapGroups[g].state      = anyFast ? ETA_TRAP_FAST : anyAway ? ETA_TRAP_AWAY : ETA_TRAP_REST;
++			eta_trapGroups[g].stillSince = 0;
++
++			if (count > 1)
++			{
++				Com_sprintf(text, sizeof(text), "Trap ahead: %d %s, %s.", count, ETA_TrapPlural(kind, count),
++				            anyFast ? "moving" : anyAway ? "stopped in the way" : "at rest");
++			}
++			else
++			{
++				Com_sprintf(text, sizeof(text), "Trap ahead: %s, %s.", !Q_stricmp(kind, "spikes") ? "spikes" : va("a %s", kind),
++				            anyFast ? ( !Q_stricmp(kind, "blade") ? "swinging" : "moving" ) : anyAway ? "stopped in the way" : "at rest");
++			}
++			for (i = 0; i < count; i++)
++			{
++				const float *at     = centers[members[i]];
++				int          meters = (int)( Distance(ps->origin, at) * ETA_QU_TO_METERS + 0.5f );
++				float        left   = CG_AccessibilityLeftOfView(at);
++				/* Where it comes from: three saws in one place are told
++				   apart by that, the wall on either side or the ceiling. */
++				const char *place = at[2] > ps->origin[2] + ps->viewheight + 24.0f ? "ceiling, "
++				                    : at[2] < ps->origin[2] - 16.0f ? "floor, "
++				                    : fabsf(left) < 15.0f || fabsf(left) > 165.0f ? ""
++				                    : left > 0.0f ? "left wall, " : "right wall, ";
++
++				Q_strcat(text, sizeof(text), va(" %s%s, %s%s, %d %s.", count > 1 ? va("%c%s ", toupper(kind[0]), kind + 1) : "",
++				                                count > 1 ? va("%d", eta_trapMovers[members[i]].number) : va("%c%s", toupper(kind[0]), kind + 1),
++				                                place, ETA_HudNarrator_RelativeDirection(left),
++				                                meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++			}
++			/* The plates that set it off, if the map has some close by. */
++			{
++				int model;
++
++				for (model = 1; model < MAX_MODELS && model < cgs.numInlineModels; model++)
++				{
++					if (eta_plateModel[model] && !eta_opensDoor[model]
++					    && Distance(cgs.inlineModelMidpoints[model], centers[members[0]]) < ETA_TRAP_GROUP)
++					{
++						Q_strcat(text, sizeof(text), va(" Plates on the floor set %s off: each is said as you come to it, and the wall to keep to.", count > 1 ? "them" : "it"));
++						break;
++					}
++				}
++			}
++			/* It may start as the player comes on: said each time it
++			   starts and stops from here on. */
++			Q_strcat(text, sizeof(text), count > 1 ? " If they move, stop: I say when they are back at rest, safe to cross"
++			                                       : " If it moves, stop: I say when it is back at rest, safe to cross");
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(text);
++			continue;
++		}
++
++		/* Starting and stopping, while near enough to hear it: moving
++		   fast, a danger; stopped out of place, still in the way; back
++		   where it rests, safe. */
++		if (nearest < ETA_TRAP_HEAR && eta_trapGroups[g].announced)
++		{
++			const char *name = ETA_TrapPlural(kind, count);
++			char        Name[32];
++
++			Q_strncpyz(Name, name, sizeof(Name));
++			Name[0] = (char)toupper(Name[0]);
++			if (anyFast)
++			{
++				eta_trapGroups[g].stillSince = 0;
++				if (eta_trapGroups[g].state != ETA_TRAP_FAST)
++				{
++					eta_trapGroups[g].state = ETA_TRAP_FAST;
++					ETA_Speech_Say(va("%s %s", Name, !Q_stricmp(kind, "blade") ? "swinging" : "moving"));
++				}
++			}
++			else if (!eta_trapGroups[g].stillSince)
++			{
++				eta_trapGroups[g].stillSince = cg.time;
++			}
++			else if (cg.time - eta_trapGroups[g].stillSince >= ETA_TRAP_STOP_MS || cg.time < eta_trapGroups[g].stillSince)
++			{
++				if (anyAway && eta_trapGroups[g].state == ETA_TRAP_FAST)
++				{
++					eta_trapGroups[g].state = ETA_TRAP_AWAY;
++					ETA_Speech_Say(va("%s stopped in the way: wait", Name));
++				}
++				else if (!anyAway && eta_trapGroups[g].state != ETA_TRAP_REST)
++				{
++					eta_trapGroups[g].state = ETA_TRAP_REST;
++					ETA_Speech_Say(va("%s %s, safe to cross", Name, !Q_stricmp(kind, "blade") ? "back up" : "stopped"));
++				}
++			}
++		}
++		else
++		{
++			eta_trapGroups[g].state = anyFast ? ETA_TRAP_FAST : anyAway ? ETA_TRAP_AWAY : ETA_TRAP_REST;
++		}
++	}
++
++	/* The nearest plate just ahead, walked toward: which way round it. */
++	{
++		float speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++		float best  = 1.0e9f;
++		int   model, plate = 0;
++		vec3_t mid = { 0.0f, 0.0f, 0.0f }, mins, maxs;
++
++		for (model = 1; speed > 40.0f && model < MAX_MODELS && model < cgs.numInlineModels; model++)
++		{
++			vec3_t at, to;
++			float  dx, dy;
++
++			if (!eta_plateModel[model] || !cgs.inlineDrawModel[model])
++			{
++				continue;
++			}
++			trap_R_ModelBounds(cgs.inlineDrawModel[model], mins, maxs);
++			dx = ps->origin[0] < mins[0] ? mins[0] - ps->origin[0] : ps->origin[0] > maxs[0] ? ps->origin[0] - maxs[0] : 0.0f;
++			dy = ps->origin[1] < mins[1] ? mins[1] - ps->origin[1] : ps->origin[1] > maxs[1] ? ps->origin[1] - maxs[1] : 0.0f;
++			if (dx > ETA_PLATE_NEAR || dy > ETA_PLATE_NEAR || fabsf(ps->origin[2] - 24.0f - maxs[2]) > 40.0f
++			    || dx * dx + dy * dy > best)
++			{
++				continue;
++			}
++			VectorAdd(mins, maxs, at);
++			VectorScale(at, 0.5f, at);
++			VectorSubtract(at, ps->origin, to);
++			if (to[0] * ps->velocity[0] + to[1] * ps->velocity[1] <= 0.0f)
++			{
++				continue;
++			}
++			best  = dx * dx + dy * dy;
++			plate = model;
++			VectorCopy(at, mid);
++		}
++		if (plate && !( cg.time - eta_plateSaidAt[plate] < ETA_PLATE_SAY_MS && cg.time >= eta_plateSaidAt[plate] ))
++		{
++			char wall = ETA_PlateWall(plate);
++
++			eta_plateSaidAt[plate] = cg.time;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			if (wall != '-')
++			{
++				/* The wall's way from the player, as faced: on the left or
++				   the right while going along. */
++				vec3_t toWall = { 0.0f, 0.0f, 0.0f };
++				float  left;
++
++				toWall[wall == 'n' || wall == 's' ? 1 : 0] = wall == 'n' || wall == 'e' ? 1.0f : -1.0f;
++				left = AngleNormalize180(vectoyaw(toWall) - ps->viewangles[YAW]);
++				ETA_Speech_Say(va("Pressure plate %s: %s. Keep to the %s wall%s",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
++				                  eta_opensDoor[plate] ? "it opens a door" : "it sets off a trap",
++				                  wall == 'n' ? "north" : wall == 's' ? "south" : wall == 'e' ? "east" : "west",
++				                  fabsf(left) < 30.0f || fabsf(left) > 150.0f ? "" : left > 0.0f ? ", on your left" : ", on your right"));
++			}
++			else
++			{
++				ETA_Speech_Say(va("Pressure plate %s: %s. Step round it",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
++				                  eta_opensDoor[plate] ? "it opens a door" : "it sets off a trap"));
++			}
++		}
++	}
++}
++
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
++	ETA_TrapsFrame();
+ 	ETA_WorldRead();
+ 	ETA_DoorsSeen();
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c2f0cd7a..40de6e2d 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2431,6 +2431,7 @@ qboolean CG_AccessibilitySeenDoorSwitch( vec3_t out, vec3_t aim, float *doorFar
+ void CG_AccessibilityChosenAimAt( const vec3_t at );
+ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
++qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
+ qboolean CG_AccessibilityThingKnownAt( const vec3_t point );
+ qboolean CG_AccessibilityThingsBreakableNear( float within, vec3_t out, char *name, size_t size );

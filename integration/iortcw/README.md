@@ -2620,3 +2620,36 @@ third of a metre behind a zombie coming on, eight metres off. The lock
 now aims a tenth of a second ahead along the enemy's movement, as a
 sighted player leads a running man: measured again, 0.4 units off at
 ten and a half metres, 2.4 at fourteen, and the shots hit.
+
+### 0147 Traps: the saws, the swinging blade, and the pressure plates
+
+The second catacomb level has a room of three saws, set going by
+pressure plates in the floor, and a corridor with a swinging blade. The
+tester asked which saw is which, and when it is safe. T listed the
+plates as switches ("F uses it"), and O walked over them.
+
+A plate - a button the map sets off at a touch (func_button's TOUCH,
+spawnflag 8) - is no longer a switch: it is off T. Coming toward one,
+the nearest is said with the wall that clears it: "Pressure plate ahead
+right: it sets off a trap. Keep to the north wall, on your left". The
+wall is found once, from the map: the side of the narrow way whose wall
+a body walking against it clears the plate by. In the saw room that is
+the north wall for the first two plates and the south wall for the
+last. O's way goes round the plates too, between them where a body
+fits, its steps moved a little near a plate to land in the narrow
+strips beside them.
+
+A trap - a script mover the map names a saw, blade, spike, axe,
+crusher or pendulum - is grouped with the others of its kind near it.
+Coming near: "Trap ahead: 3 saws, at rest. Saw 1, right wall, ahead
+right, 6 meters. Saw 2, ceiling, ahead, 7 meters. Saw 3, left wall,
+ahead left, 10 meters", the numbers kept from then on. The three saws
+are not one after another: a plate sets all three going at once across
+the same stretch, from either wall and the ceiling, so each is told by
+where it comes from. Then, while near: "Saws moving", and when they are
+back, "Saws stopped, safe to cross". The blade: "Blade swinging"; after
+its swing it hangs low across the corridor, "Blade stopped in the way:
+wait"; and once drawn back up, "Blade back up, safe to cross" - a blade
+drawn back slowly does not cut, so only a fast move counts as moving.
+Crossed on that word, without god mode, the test player came through
+whole.
