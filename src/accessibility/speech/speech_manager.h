@@ -8,6 +8,8 @@ extern "C" {
 
 void ETA_Speech_Init(void);
 void ETA_Speech_Say(const char *message);
+/* While hold is set, ETA_Speech_Say says nothing: an urgent warning is heard out. */
+void ETA_Speech_HoldForUrgent(int hold);
 
 /*
  * Says text of any length - a page of orders, a letter - as pieces of at

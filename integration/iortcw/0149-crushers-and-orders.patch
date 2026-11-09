@@ -1,0 +1,878 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index be8bba81..63ba05db 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4643,6 +4643,376 @@ static const char *ETA_UserTargetName(const char *classname)
+ 	return "Switch";
+ }
+ 
++/*
++ * Crushers. In the second catacomb level a button at the end of a
++ * corridor sets two walls sliding in from either side, over where the
++ * player stands to press it: the tester pressed it and was crushed, and
++ * nothing had said so. What a switch sets going is in the level's own
++ * scripts - the switch fires a script trigger, whose lines in the
++ * player's AI script set script movers going, whose own script sends
++ * them to path corners - so it is read from them: a switch whose movers
++ * end up over the place it is pressed from is a crusher, and said so
++ * before it is pressed. And while any mover closes on the player, the
++ * way out of its path is said at once.
++ */
++#define ETA_MAX_SCRIPT_TRIGGERS 128
++#define ETA_MAX_SCRIPT_MOVERS   256
++#define ETA_MAX_CORNERS         512
++static struct
++{
++	char targetname[48];
++	char event[48];
++} eta_scriptTriggers[ETA_MAX_SCRIPT_TRIGGERS];
++static int eta_scriptTriggerCount;
++static struct
++{
++	char   scriptname[48];
++	int    model;
++	vec3_t origin;    /* where the map puts it */
++} eta_scriptMovers[ETA_MAX_SCRIPT_MOVERS];
++static int eta_scriptMoverCount;
++static struct
++{
++	char   targetname[48];
++	vec3_t at;
++} eta_corners[ETA_MAX_CORNERS];
++static int      eta_cornerCount;
++static qboolean eta_crushSwitch[MAX_MODELS];
++/*
++ * Switches pressed in an order. In the same level three hidden buttons,
++ * pressed south, east, west, open two hidden doors upstairs; in any
++ * other order, not. The order is in the scripts too: each switch's event
++ * sets off one event of a counting entity, which goes on only when its
++ * count stands at that switch's place ("accum 0 abort_if_not_equal 1",
++ * then "accum 0 inc 1"). A count the switches only add to, in any order -
++ * the pillar's - gives every switch the same place, and is no order.
++ */
++#define ETA_MAX_ORDERED 16
++static struct
++{
++	int  model;
++	char counter[48];   /* the counting entity */
++	int  place;         /* 0 first */
++	char alerts[48];    /* what the event sets off, when it sets something */
++} eta_ordered[ETA_MAX_ORDERED];
++static int eta_orderedCount;
++static int eta_switchPlace[MAX_MODELS];        /* 1 first; 0 none */
++static int eta_switchPlaces[MAX_MODELS];       /* of how many */
++static qboolean eta_switchOpensHidden[MAX_MODELS];   /* the last sets off hidden doors */
++static int eta_switchNoticeAt[MAX_MODELS];
++#define ETA_CRUSH_WARNING ": walls close on you. Press, then run back"
++
++/* The level's script file, its name the map's with ext for .bsp: NULL
++   when there is none, or it is too long for buf. */
++static char *ETA_ReadMapScript(const char *ext, char *buf, int size)
++{
++	fileHandle_t f;
++	char         name[MAX_QPATH];
++	int          length;
++
++	COM_StripExtension(cgs.mapname, name, sizeof(name));
++	Q_strcat(name, sizeof(name), ext);
++	length = trap_FS_FOpenFile(name, &f, FS_READ);
++	if (length <= 0 || !f)
++	{
++		return NULL;
++	}
++	if (length >= size)
++	{
++		trap_FS_FCloseFile(f);
++		return NULL;
++	}
++	trap_FS_Read(buf, length, f);
++	buf[length] = '\0';
++	trap_FS_FCloseFile(f);
++	return buf;
++}
++
++/*
++ * In a script: the words of the block "trigger <event>" of <owner>'s,
++ * found two deep (owner { ... trigger event { here } }), handed to
++ * found() one line's first four words at a time. A brace is counted by
++ * a word's first letter: one of the levels has "{7".
++ */
++typedef void (*eta_scriptLine_t)(const char *a, const char *b, const char *c, const char *d, void *context);
++
++static void ETA_ScriptEvent(char *text, const char *owner, const char *event, eta_scriptLine_t found, void *context)
++{
++	char       *p = text;
++	char        top[64] = "", words[4][64];
++	int         depth = 0, inEvent = 0, n = 0, lastLine = 0;
++	char       *token;
++
++	COM_BeginParseSession("accessibility");
++	while (( token = COM_ParseExt(&p, qtrue) ) != NULL && token[0])
++	{
++		if (token[0] == '{')
++		{
++			depth++;
++			if (depth == 2 && n == 2 && !Q_stricmp(words[0], "trigger") && !Q_stricmp(words[1], event)
++			    && !Q_stricmp(top, owner))
++			{
++				inEvent = 2;
++			}
++			n = 0;
++			continue;
++		}
++		if (token[0] == '}')
++		{
++			if (inEvent && depth == inEvent && n)
++			{
++				found(words[0], n > 1 ? words[1] : "", n > 2 ? words[2] : "", n > 3 ? words[3] : "", context);
++			}
++			if (depth == inEvent)
++			{
++				inEvent = 0;
++			}
++			depth = MAX(0, depth - 1);
++			n = 0;
++			continue;
++		}
++		if (depth == 0)
++		{
++			Q_strncpyz(top, token, sizeof(top));
++			continue;
++		}
++		/* A new line: the last one's words are done. */
++		if (n && COM_GetCurrentParseLine() != lastLine)
++		{
++			if (inEvent && depth == inEvent)
++			{
++				found(words[0], n > 1 ? words[1] : "", n > 2 ? words[2] : "", n > 3 ? words[3] : "", context);
++			}
++			n = 0;
++		}
++		lastLine = COM_GetCurrentParseLine();
++		if (n < 4)
++		{
++			Q_strncpyz(words[n], token, sizeof(words[0]));
++		}
++		n++;
++	}
++}
++
++typedef struct
++{
++	int    switchModel;
++	char   movers[8][2][48];   /* mover, its event */
++	int    moverCount;
++	char  *script;
++	vec3_t moverMins, moverMaxs;
++	vec3_t zoneMins, zoneMaxs;   /* where the switch is pressed from */
++	qboolean crush;
++} eta_crushSearch_t;
++
++/* Whether a mover at at overlaps the place a switch is pressed from. */
++static qboolean ETA_CrushOver(const eta_crushSearch_t *search, const vec3_t at)
++{
++	int k;
++
++	for (k = 0; k < 3; k++)
++	{
++		if (at[k] + search->moverMaxs[k] <= search->zoneMins[k] || at[k] + search->moverMins[k] >= search->zoneMaxs[k])
++		{
++			return qfalse;
++		}
++	}
++	return qtrue;
++}
++
++static void ETA_CrushMoverLine(const char *a, const char *b, const char *c, const char *d, void *context)
++{
++	eta_crushSearch_t *search = (eta_crushSearch_t *)context;
++	int                i;
++
++	(void)c;
++	(void)d;
++	if (Q_stricmp(a, "gotomarker") || !b[0])
++	{
++		return;
++	}
++	for (i = 0; i < eta_cornerCount && Q_stricmp(eta_corners[i].targetname, b); i++)
++	{
++	}
++	if (i < eta_cornerCount && ETA_CrushOver(search, eta_corners[i].at))
++	{
++		search->crush = qtrue;
++	}
++}
++
++static void ETA_CrushAiLine(const char *a, const char *b, const char *c, const char *d, void *context)
++{
++	eta_crushSearch_t *search = (eta_crushSearch_t *)context;
++
++	(void)d;
++	if (!Q_stricmp(a, "trigger") && b[0] && c[0] && search->moverCount < (int)ARRAY_LEN(search->movers))
++	{
++		Q_strncpyz(search->movers[search->moverCount][0], b, sizeof(search->movers[0][0]));
++		Q_strncpyz(search->movers[search->moverCount][1], c, sizeof(search->movers[0][1]));
++		search->moverCount++;
++	}
++}
++
++/* Whether what a switch is aimed at - a script trigger named name - sets
++   going a mover that ends over where the switch is pressed from. */
++/* The level's AI and mover scripts, read once a level: qfalse without
++   both. */
++static char eta_aiText[160 * 1024], eta_scriptText[160 * 1024];
++
++static qboolean ETA_MapScripts(void)
++{
++	static char     readFor[MAX_QPATH];
++	static qboolean have;
++
++	if (Q_stricmp(readFor, cgs.mapname))
++	{
++		Q_strncpyz(readFor, cgs.mapname, sizeof(readFor));
++		have = (qboolean)( ETA_ReadMapScript(".ai", eta_aiText, sizeof(eta_aiText)) != NULL
++		                   && ETA_ReadMapScript(".script", eta_scriptText, sizeof(eta_scriptText)) != NULL );
++	}
++	return have;
++}
++
++/* The player's script event a switch's target fires: NULL if none. */
++static const char *ETA_SwitchEvent(const char *name)
++{
++	int i;
++
++	for (i = 0; i < eta_scriptTriggerCount; i++)
++	{
++		if (!Q_stricmp(eta_scriptTriggers[i].targetname, name))
++		{
++			return eta_scriptTriggers[i].event;
++		}
++	}
++	return NULL;
++}
++
++static qboolean ETA_CrushFrom(const char *name, int switchModel)
++{
++	char             *ai = eta_aiText, *script = eta_scriptText;
++	const char       *event = ETA_SwitchEvent(name);
++	eta_crushSearch_t search;
++	int               j, m;
++
++	if (!event || !ETA_MapScripts())
++	{
++		return qfalse;
++	}
++	memset(&search, 0, sizeof(search));
++	search.switchModel = switchModel;
++	if (switchModel <= 0 || switchModel >= MAX_MODELS || !cgs.inlineDrawModel[switchModel])
++	{
++		return qfalse;
++	}
++	/* Where it is pressed from: in front of it, a body's reach. */
++	trap_R_ModelBounds(cgs.inlineDrawModel[switchModel], search.zoneMins, search.zoneMaxs);
++	for (j = 0; j < 2; j++)
++	{
++		search.zoneMins[j] -= 64.0f;
++		search.zoneMaxs[j] += 64.0f;
++	}
++	search.zoneMins[2] -= 48.0f;
++	search.zoneMaxs[2] += 16.0f;
++	/* Parsing writes nothing to the text, so it is read again each time. */
++	ETA_ScriptEvent(ai, "player", event, ETA_CrushAiLine, &search);
++	for (j = 0; j < search.moverCount && !search.crush; j++)
++	{
++		for (m = 0; m < eta_scriptMoverCount && Q_stricmp(eta_scriptMovers[m].scriptname, search.movers[j][0]); m++)
++		{
++		}
++		if (m == eta_scriptMoverCount || eta_scriptMovers[m].model <= 0 || eta_scriptMovers[m].model >= MAX_MODELS
++		    || !cgs.inlineDrawModel[eta_scriptMovers[m].model])
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[eta_scriptMovers[m].model], search.moverMins, search.moverMaxs);
++		/* Not the switch's own moving part, nor a table tipped over
++		   where it stands: something as tall as a body, that comes from
++		   somewhere clear of the place. */
++		if (search.moverMaxs[2] - search.moverMins[2] < 48.0f || ETA_CrushOver(&search, eta_scriptMovers[m].origin))
++		{
++			continue;
++		}
++		ETA_ScriptEvent(script, search.movers[j][0], search.movers[j][1], ETA_CrushMoverLine, &search);
++	}
++	return search.crush;
++}
++
++typedef struct
++{
++	char pairs[8][2][48];    /* entity, its event, from the player's script */
++	int  pairCount;
++	int  place;              /* -1 none */
++	int  added;              /* "inc" seen after the check */
++	char alerts[48];
++} eta_orderSearch_t;
++
++static void ETA_OrderAiLine(const char *a, const char *b, const char *c, const char *d, void *context)
++{
++	eta_orderSearch_t *search = (eta_orderSearch_t *)context;
++
++	(void)d;
++	if (!Q_stricmp(a, "trigger") && b[0] && c[0] && search->pairCount < (int)ARRAY_LEN(search->pairs))
++	{
++		Q_strncpyz(search->pairs[search->pairCount][0], b, sizeof(search->pairs[0][0]));
++		Q_strncpyz(search->pairs[search->pairCount][1], c, sizeof(search->pairs[0][1]));
++		search->pairCount++;
++	}
++}
++
++static void ETA_OrderScriptLine(const char *a, const char *b, const char *c, const char *d, void *context)
++{
++	eta_orderSearch_t *search = (eta_orderSearch_t *)context;
++
++	(void)b;
++	if (!Q_stricmp(a, "accum") && !Q_stricmp(c, "abort_if_not_equal") && d[0] && search->place < 0 && !search->added)
++	{
++		search->place = atoi(d);
++	}
++	else if (!Q_stricmp(a, "accum") && !Q_stricmp(c, "inc"))
++	{
++		search->added = 1;
++	}
++	else if (!Q_stricmp(a, "alertentity") && b[0] && !search->alerts[0])
++	{
++		Q_strncpyz(search->alerts, b, sizeof(search->alerts));
++	}
++}
++
++/* The places a switch's event holds in counted orders: added to
++   eta_ordered. */
++static void ETA_OrderFrom(const char *name, int switchModel)
++{
++	const char       *event = ETA_SwitchEvent(name);
++	eta_orderSearch_t search;
++	int               j;
++
++	if (!event || !ETA_MapScripts())
++	{
++		return;
++	}
++	memset(&search, 0, sizeof(search));
++	ETA_ScriptEvent(eta_aiText, "player", event, ETA_OrderAiLine, &search);
++	for (j = 0; j < search.pairCount && eta_orderedCount < ETA_MAX_ORDERED; j++)
++	{
++		eta_orderSearch_t one;
++
++		memset(&one, 0, sizeof(one));
++		one.place = -1;
++		ETA_ScriptEvent(eta_scriptText, search.pairs[j][0], search.pairs[j][1], ETA_OrderScriptLine, &one);
++		if (one.place < 0)
++		{
++			continue;
++		}
++		eta_ordered[eta_orderedCount].model = switchModel;
++		eta_ordered[eta_orderedCount].place = one.place;
++		Q_strncpyz(eta_ordered[eta_orderedCount].counter, search.pairs[j][0], sizeof(eta_ordered[0].counter));
++		Q_strncpyz(eta_ordered[eta_orderedCount].alerts, one.alerts, sizeof(eta_ordered[0].alerts));
++		eta_orderedCount++;
++	}
++}
++
+ static void ETA_ReadMapEntities(void)
+ {
+ 	char token[MAX_TOKEN_CHARS];
+@@ -4696,6 +5066,13 @@ static void ETA_ReadMapEntities(void)
+ 	eta_trapGroupCount = 0;
+ 	memset(eta_plateSaidAt, 0, sizeof(eta_plateSaidAt));
+ 	memset(eta_plateWall, 0, sizeof(eta_plateWall));
++	memset(eta_crushSwitch, 0, sizeof(eta_crushSwitch));
++	memset(eta_switchPlace, 0, sizeof(eta_switchPlace));
++	memset(eta_switchPlaces, 0, sizeof(eta_switchPlaces));
++	memset(eta_switchOpensHidden, 0, sizeof(eta_switchOpensHidden));
++	memset(eta_switchNoticeAt, 0, sizeof(eta_switchNoticeAt));
++	eta_orderedCount = 0;
++	eta_scriptTriggerCount = eta_scriptMoverCount = eta_cornerCount = 0;
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+ 	memset(eta_opensDoor, 0, sizeof(eta_opensDoor));
+@@ -4948,6 +5325,36 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* For the crushers: script triggers the player's script answers,
++		   script movers by name, and path corners. */
++		if (!Q_stricmp(classname, "target_script_trigger") && targetname[0] && target[0]
++		    && !Q_stricmp(ainame, "player") && eta_scriptTriggerCount < ETA_MAX_SCRIPT_TRIGGERS)
++		{
++			Q_strncpyz(eta_scriptTriggers[eta_scriptTriggerCount].targetname, targetname, sizeof(eta_scriptTriggers[0].targetname));
++			Q_strncpyz(eta_scriptTriggers[eta_scriptTriggerCount].event, target, sizeof(eta_scriptTriggers[0].event));
++			eta_scriptTriggerCount++;
++		}
++		if (!Q_stricmp(classname, "script_mover") && scriptname[0] && model[0] == '*'
++		    && eta_scriptMoverCount < ETA_MAX_SCRIPT_MOVERS)
++		{
++			Q_strncpyz(eta_scriptMovers[eta_scriptMoverCount].scriptname, scriptname, sizeof(eta_scriptMovers[0].scriptname));
++			eta_scriptMovers[eta_scriptMoverCount].model = atoi(model + 1);
++			VectorClear(eta_scriptMovers[eta_scriptMoverCount].origin);
++			if (origin[0])
++			{
++				sscanf(origin, "%f %f %f", &eta_scriptMovers[eta_scriptMoverCount].origin[0],
++				       &eta_scriptMovers[eta_scriptMoverCount].origin[1], &eta_scriptMovers[eta_scriptMoverCount].origin[2]);
++			}
++			eta_scriptMoverCount++;
++		}
++		if (!Q_stricmp(classname, "path_corner") && targetname[0] && origin[0] && eta_cornerCount < ETA_MAX_CORNERS)
++		{
++			Q_strncpyz(eta_corners[eta_cornerCount].targetname, targetname, sizeof(eta_corners[0].targetname));
++			sscanf(origin, "%f %f %f", &eta_corners[eta_cornerCount].at[0], &eta_corners[eta_cornerCount].at[1],
++			       &eta_corners[eta_cornerCount].at[2]);
++			eta_cornerCount++;
++		}
++
+ 		/* A breakable: one with health (the game's own default is 100),
+ 		   named by what it is made of, or by what breaks it when only
+ 		   explosives (spawnflag 32) or dynamite (64) will. */
+@@ -5228,6 +5635,132 @@ static void ETA_ReadMapEntities(void)
+ 		eta_userCount++;
+ 	}
+ 
++	/* Each switch, by what it is aimed at: straight at a script
++	   trigger, or through one relay. */
++	for (i = 0; i < linkCount; i++)
++	{
++		int j;
++
++		if (( links[i].kind != 'u' && links[i].kind != 'b' ) || !links[i].target[0]
++		    || links[i].model <= 0 || links[i].model >= MAX_MODELS)
++		{
++			continue;
++		}
++		ETA_OrderFrom(links[i].target, links[i].model);
++		if (ETA_CrushFrom(links[i].target, links[i].model))
++		{
++			eta_crushSwitch[links[i].model] = qtrue;
++			continue;
++		}
++		for (j = 0; j < linkCount; j++)
++		{
++			if (links[j].kind == 'r' && !Q_stricmp(links[j].targetname, links[i].target)
++			    && ETA_CrushFrom(links[j].target, links[i].model))
++			{
++				eta_crushSwitch[links[i].model] = qtrue;
++				break;
++			}
++		}
++	}
++	/* A button an invisible trigger presses: the trigger is what the
++	   player uses. */
++	for (i = 0; i < linkCount; i++)
++	{
++		int j;
++
++		if (links[i].kind != 'b' || !links[i].targetname[0] || links[i].model <= 0 || links[i].model >= MAX_MODELS
++		    || !eta_crushSwitch[links[i].model])
++		{
++			continue;
++		}
++		for (j = 0; j < linkCount; j++)
++		{
++			if (links[j].kind == 'u' && !Q_stricmp(links[j].target, links[i].targetname)
++			    && links[j].model > 0 && links[j].model < MAX_MODELS)
++			{
++				eta_crushSwitch[links[j].model] = qtrue;
++			}
++		}
++	}
++
++	/* An order: the switches one counter is counted by, each in a place
++	   of its own, the places from the first on. */
++	for (i = 0; i < eta_orderedCount; i++)
++	{
++		int  j, count = 0, most = -1, seen = 0;
++		char alerts[48] = "";
++
++		for (j = 0; j < eta_orderedCount; j++)
++		{
++			if (!Q_stricmp(eta_ordered[j].counter, eta_ordered[i].counter))
++			{
++				count++;
++				most = MAX(most, eta_ordered[j].place);
++				if (eta_ordered[j].place >= 0 && eta_ordered[j].place < 31)
++				{
++					seen |= 1 << eta_ordered[j].place;
++				}
++				if (eta_ordered[j].alerts[0])
++				{
++					Q_strncpyz(alerts, eta_ordered[j].alerts, sizeof(alerts));
++				}
++			}
++		}
++		if (count < 2 || most != count - 1 || seen != ( 1 << count ) - 1)
++		{
++			continue;
++		}
++		eta_switchPlace[eta_ordered[i].model]  = eta_ordered[i].place + 1;
++		eta_switchPlaces[eta_ordered[i].model] = count;
++		/* What it all opens: doors, through relays, two deep. */
++		if (alerts[0])
++		{
++			char name[48];
++			int  k, pass;
++
++			Q_strncpyz(name, alerts, sizeof(name));
++			for (pass = 0; pass < 3; pass++)
++			{
++				for (k = 0; k < linkCount; k++)
++				{
++					if (!Q_stricmp(links[k].targetname, name) && links[k].kind == 'd')
++					{
++						eta_switchOpensHidden[eta_ordered[i].model] = qtrue;
++					}
++				}
++				for (k = 0; k < linkCount; k++)
++				{
++					if (links[k].kind == 'r' && !Q_stricmp(links[k].targetname, name))
++					{
++						Q_strncpyz(name, links[k].target, sizeof(name));
++						break;
++					}
++				}
++			}
++		}
++	}
++	/* A button an invisible trigger presses: the trigger is what is used. */
++	for (i = 0; i < linkCount; i++)
++	{
++		int j;
++
++		if (links[i].kind != 'b' || !links[i].targetname[0] || links[i].model <= 0 || links[i].model >= MAX_MODELS
++		    || !eta_switchPlace[links[i].model])
++		{
++			continue;
++		}
++		for (j = 0; j < linkCount; j++)
++		{
++			if (links[j].kind == 'u' && !Q_stricmp(links[j].target, links[i].targetname)
++			    && links[j].model > 0 && links[j].model < MAX_MODELS)
++			{
++				eta_switchPlace[links[j].model]       = eta_switchPlace[links[i].model];
++				eta_switchPlaces[links[j].model]      = eta_switchPlaces[links[i].model];
++				eta_switchOpensHidden[links[j].model] = eta_switchOpensHidden[links[i].model];
++			}
++		}
++	}
++
+ 	CG_AccessibilityUnlockResolve();
+ }
+ 
+@@ -6172,6 +6705,15 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		{
+ 			Q_strcat(name, nameSize, ETA_ForDoor(eta_opensDoor[eta_users[index].model]));
+ 		}
++		if (name[0] && eta_switchPlace[eta_users[index].model])
++		{
++			Q_strcat(name, nameSize, va(" %d of %d", eta_switchPlace[eta_users[index].model],
++			                            eta_switchPlaces[eta_users[index].model]));
++		}
++		if (name[0] && eta_crushSwitch[eta_users[index].model])
++		{
++			Q_strcat(name, nameSize, ETA_CRUSH_WARNING);
++		}
+ 		*kind = ETA_MAP_SWITCH;
+ 		return qtrue;
+ 	}
+@@ -6182,6 +6724,10 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 		{
+ 			VectorCopy(cgs.inlineModelMidpoints[i], at);
+ 			Q_strncpyz(name, eta_opensDoor[i] ? va("Button%s", ETA_ForDoor(eta_opensDoor[i])) : "Button", nameSize);
++			if (eta_crushSwitch[i])
++			{
++				Q_strcat(name, nameSize, ETA_CRUSH_WARNING);
++			}
+ 			*kind = ETA_MAP_SWITCH;
+ 			return qtrue;
+ 		}
+@@ -6517,6 +7063,261 @@ static const char *ETA_TrapPlural(const char *kind, int count)
+ 	return count == 1 ? kind : !Q_stricmp(kind, "saw") ? "saws" : !Q_stricmp(kind, "blade") ? "blades" : "traps";
+ }
+ 
++/*
++ * Come up to a switch that is one of an order, or that closes walls on
++ * the player: what it is, once, in full - the short name T and F give
++ * has no room for it.
++ */
++#define ETA_SWITCH_NOTICE_NEAR  192.0f
++#define ETA_SWITCH_NOTICE_AGAIN 30000
++
++static const char *ETA_CompassWord(float dx, float dy)
++{
++	static const char *words[8] = { "east", "north-east", "north", "north-west", "west", "south-west", "south", "south-east" };
++	float              yaw = atan2f(dy, dx) * 180.0f / (float)M_PI;
++	int                way = (int)floorf(( yaw + 22.5f + 360.0f ) / 45.0f) % 8;
++
++	return words[way];
++}
++
++static void ETA_SwitchNoticeFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  model, best = 0;
++	float                bestDistance = ETA_SWITCH_NOTICE_NEAR;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
++	{
++		return;
++	}
++	for (model = 1; model < MAX_MODELS && model < cgs.numInlineModels; model++)
++	{
++		float distance;
++
++		if (!eta_switchPlace[model] && !eta_crushSwitch[model])
++		{
++			continue;
++		}
++		distance = Distance(ps->origin, cgs.inlineModelMidpoints[model]);
++		if (distance > 800.0f)
++		{
++			eta_switchNoticeAt[model] = 0;   /* gone away: said again on coming back */
++		}
++		else if (distance < bestDistance && !eta_switchNoticeAt[model])
++		{
++			best         = model;
++			bestDistance = distance;
++		}
++	}
++	if (!best)
++	{
++		return;
++	}
++	eta_switchNoticeAt[best] = cg.time;
++
++	{
++		char text[MAX_STRING_CHARS] = "";
++
++		if (eta_switchPlace[best])
++		{
++			vec3_t middle = { 0.0f, 0.0f, 0.0f };
++			int    place, count = 0, m;
++
++			for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++			{
++				if (eta_switchPlaces[m] == eta_switchPlaces[best] && eta_switchPlace[m])
++				{
++					VectorAdd(middle, cgs.inlineModelMidpoints[m], middle);
++					count++;
++				}
++			}
++			VectorScale(middle, 1.0f / (float)MAX(count, 1), middle);
++			Com_sprintf(text, sizeof(text), "This button is %d of %d, pressed in order:", eta_switchPlace[best], eta_switchPlaces[best]);
++			for (place = 1; place <= eta_switchPlaces[best]; place++)
++			{
++				for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++				{
++					if (eta_switchPlaces[m] == eta_switchPlaces[best] && eta_switchPlace[m] == place)
++					{
++						const char *way = ETA_CompassWord(cgs.inlineModelMidpoints[m][0] - middle[0],
++						                                  cgs.inlineModelMidpoints[m][1] - middle[1]);
++
++						Q_strcat(text, sizeof(text), va("%s %s %sthe %s one", place == 1 ? "" : ",",
++						                                place == 1 ? "first" : place == eta_switchPlaces[best] ? "last" : "then",
++						                                m == best ? "this one, " : "", way));
++						break;
++					}
++				}
++			}
++			Q_strcat(text, sizeof(text), eta_switchOpensHidden[best] ? ". In that order they open hidden doors."
++			                                                          : ". In that order they set something off.");
++		}
++		if (eta_crushSwitch[best])
++		{
++			Q_strcat(text, sizeof(text), text[0] ? " " : "");
++			Q_strcat(text, sizeof(text), "Walls close on you here when it is pressed: press it, then run straight back at once.");
++		}
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(text);
++	}
++}
++
++/*
++ * A mover closing on the player: a wall or block sliding to where they
++ * stand, set going by a switch or by the level. Said the moment it
++ * starts, with the shortest way out of its path - "Walls closing! Run
++ * behind, 5 meters" - once for each move. Not what the player rides,
++ * and not the traps, said as they are.
++ */
++#define ETA_CRUSH_MAX_RUN 384.0f
++
++static int eta_crushSaidFor[MAX_GENTITIES];
++static int eta_crushUrgentUntil;
++#define ETA_CRUSH_URGENT_MS 2500   /* the warning heard out: nothing else said */
++
++static void ETA_CrushFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t               ends[16][2];
++	int                  endCount = 0, n, k, key = 0, said = -1;
++	qboolean             closing = qfalse;
++	vec3_t               body[2];
++
++	ETA_Speech_HoldForUrgent(cg.time < eta_crushUrgentUntil && cg.time + ETA_CRUSH_URGENT_MS >= eta_crushUrgentUntil
++	                         && ps->pm_type == PM_NORMAL);
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode || cg.time - cgs.levelStartTime < 3000)
++	{
++		return;
++	}
++	VectorSet(body[0], ps->origin[0] - 16.0f, ps->origin[1] - 16.0f, ps->origin[2] - 16.0f);
++	VectorSet(body[1], ps->origin[0] + 16.0f, ps->origin[1] + 16.0f, ps->origin[2] + 32.0f);
++
++	for (n = 0; n < cg.snap->numEntities && endCount < (int)ARRAY_LEN(ends); n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t               end, mins, maxs;
++		qboolean             trap = qfalse, over = qtrue, doorOpens;
++		int                  t;
++
++		if (es->eType != ET_MOVER || es->solid != SOLID_BMODEL
++		    || ( es->pos.trType != TR_LINEAR_STOP && es->pos.trType != TR_ACCELERATE && es->pos.trType != TR_DECCELERATE )
++		    || cg.time > es->pos.trTime + es->pos.trDuration || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
++		    || !cgs.inlineDrawModel[es->modelindex] || es->number == ps->groundEntityNum)
++		{
++			continue;
++		}
++		for (t = 0; t < eta_trapMoverCount && !trap; t++)
++		{
++			trap = (qboolean)( eta_trapMovers[t].model == es->modelindex );
++		}
++		/* A door closing on someone in its way stops and opens again. */
++		if (trap || CG_AccessibilityDoorModel(es->modelindex, &doorOpens))
++		{
++			continue;
++		}
++		BG_EvaluateTrajectory(&es->pos, es->pos.trTime + es->pos.trDuration, end);
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		VectorAdd(end, mins, ends[endCount][0]);
++		VectorAdd(end, maxs, ends[endCount][1]);
++		for (k = 0; k < 3; k++)
++		{
++			over = (qboolean)( over && ends[endCount][1][k] > body[0][k] && ends[endCount][0][k] < body[1][k] );
++		}
++		if (over && eta_crushSaidFor[es->number] != es->pos.trTime)
++		{
++			closing = qtrue;
++			key     = es->pos.trTime;
++			said    = es->number;
++		}
++		endCount++;
++	}
++	if (!closing)
++	{
++		return;
++	}
++
++	/* Every mover closing on them now has the same start: said once. */
++	for (n = 0; n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++
++		if (es->eType == ET_MOVER && es->pos.trTime == key)
++		{
++			eta_crushSaidFor[es->number] = key;
++		}
++	}
++	eta_crushSaidFor[said] = key;
++
++	/* The shortest run, of eight ways round from where they face, to a
++	   place out of every closing mover's path, with nothing in the way
++	   and floor under it. */
++	{
++		static const vec3_t probeMins = { -15.0f, -15.0f, -6.0f }, probeMaxs = { 15.0f, 15.0f, 24.0f };
++		float               bestRun = 1.0e9f, bestTurn = 0.0f;
++		int                 way;
++
++		for (way = 0; way < 8; way++)
++		{
++			float  turn = (float)( way * 45 );
++			vec3_t angles = { 0.0f, 0.0f, 0.0f }, forward, at;
++			float  run;
++
++			angles[YAW] = ps->viewangles[YAW] + turn;
++			AngleVectors(angles, forward, NULL, NULL);
++			for (run = 32.0f; run <= ETA_CRUSH_MAX_RUN && run < bestRun; run += 16.0f)
++			{
++				trace_t  trace;
++				vec3_t   down;
++				qboolean clear = qtrue;
++				int      e;
++
++				VectorMA(ps->origin, run, forward, at);
++				trap_CM_BoxTrace(&trace, ps->origin, at, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++				if (trace.fraction < 1.0f || trace.startsolid)
++				{
++					break;   /* a wall this way */
++				}
++				VectorCopy(at, down);
++				down[2] -= 64.0f;
++				trap_CM_BoxTrace(&trace, at, down, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++				if (trace.fraction >= 1.0f)
++				{
++					break;   /* an edge */
++				}
++				for (e = 0; e < endCount && clear; e++)
++				{
++					clear = (qboolean)!( ends[e][1][0] > at[0] - 18.0f && ends[e][0][0] < at[0] + 18.0f
++					                     && ends[e][1][1] > at[1] - 18.0f && ends[e][0][1] < at[1] + 18.0f
++					                     && ends[e][1][2] > at[2] - 16.0f && ends[e][0][2] < at[2] + 32.0f );
++				}
++				if (clear)
++				{
++					bestRun  = run + 16.0f;   /* and a little more, to be clear of it */
++					bestTurn = turn;
++					break;
++				}
++			}
++		}
++
++		ETA_Speech_HoldForUrgent(qfalse);
++		ETA_Speech_Stop();
++		eta_crushUrgentUntil = cg.time + ETA_CRUSH_URGENT_MS;
++		if (bestRun < 1.0e8f)
++		{
++			int meters = (int)( bestRun * ETA_QU_TO_METERS + 0.5f );
++
++			/* The way first: there is under a second to start. */
++			ETA_Speech_Say(va("Run %s, %d %s! Walls closing", ETA_HudNarrator_RelativeDirection(AngleNormalize180(bestTurn)),
++			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++		}
++		else
++		{
++			ETA_Speech_Say("Get out! Walls closing");
++		}
++		ETA_Speech_HoldForUrgent(qtrue);
++	}
++}
++
+ /*
+  * The wall to keep to, to pass a plate: across the way it lies in -
+  * the narrower of the two - the side whose wall a body walking against
+@@ -6878,6 +7679,8 @@ static void ETA_TrapsFrame(void)
+ 
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
++	ETA_CrushFrame();
++	ETA_SwitchNoticeFrame();
+ 	ETA_TrapsFrame();
+ 	ETA_WorldRead();
+ 	ETA_DoorsSeen();
+@@ -7377,6 +8180,14 @@ static void ETA_SwitchName(const char *kind, int model, char *out, size_t outSiz
+ 	int    meters, i;
+ 
+ 	Q_strncpyz(out, kind, outSize);
++	if (model > 0 && model < MAX_MODELS && eta_switchPlace[model])
++	{
++		Q_strcat(out, outSize, va(" %d of %d", eta_switchPlace[model], eta_switchPlaces[model]));
++	}
++	if (model > 0 && model < MAX_MODELS && eta_crushSwitch[model])
++	{
++		Q_strcat(out, outSize, ETA_CRUSH_WARNING);
++	}
+ 	if (door <= 0 || door >= MAX_MODELS)
+ 	{
+ 		return;

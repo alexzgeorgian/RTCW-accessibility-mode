@@ -302,9 +302,26 @@ static void ETA_Speech_StripMarkup(const char *in, char *out, size_t outSize)
     out[used] = '\0';
 }
 
+/*
+ * A warning that must not be talked over: while held, other lines are
+ * not said. Each line cuts off the one before on the Mac, and a "Walls
+ * closing! Run behind" was cut off by the next thing said.
+ */
+static int gUrgentHold;
+
+void ETA_Speech_HoldForUrgent(int hold)
+{
+    gUrgentHold = hold;
+}
+
 void ETA_Speech_Say(const char *message)
 {
     char clean[ETA_MAX_SPEECH_TEXT_LENGTH + 1];
+
+    if (gUrgentHold)
+    {
+        return;
+    }
 
     if (!ETA_RuntimeGuard_IsOk(ETA_RuntimeGuard_CheckString(message, ETA_MAX_SPEECH_TEXT_LENGTH, "speech_manager.Say")))
     {

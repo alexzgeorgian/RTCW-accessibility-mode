@@ -2676,3 +2676,47 @@ walk thought unlucky - it began half inside a wall and a step - starts
 clear of them. And the walk test now tries a step each way from its
 start first, and says "START STUCK" at once when the player cannot move
 at all, so a bad start is never again taken for bad luck.
+
+### 0149 Walls that close on the player
+
+In the second catacomb level the button at the east end of the
+crossroads sets two walls sliding in from either side, over the place
+the player stands to press it. The tester pressed it and was crushed;
+nothing had said so. Tested: pressed and stood still, the player dies;
+running straight back within about 0.8 seconds of pressing, they live;
+at 1.2 seconds they do not.
+
+What a switch sets going is in the level's own scripts, so it is read
+from them: the switch fires a script trigger; the player's AI script
+(maps/<level>.ai) answers it by setting script movers going; each
+mover's script (maps/<level>.script) sends it to path corners. A mover
+as tall as a body, that comes from somewhere clear of the place the
+switch is pressed from and ends over it, makes the switch a crusher.
+Across all the levels, that is this one button; its own moving part,
+the other two buttons' parts, and a table tipped over in another level
+are not. T and F say it before it is pressed: "Button: a trap, walls
+close on you. Press, then run back".
+
+And the moment any mover - not a door, which opens again on whoever is
+in its way, not what the player rides, not the saws and blade - starts
+a move that ends over the player, the shortest way out of every closing
+mover's path is said, the way first: "Run behind, 5 meters! Walls
+closing". Eight ways round are tried, each to a place clear of the
+movers' ends, with nothing in the way and floor under it. For two and
+a half seconds nothing else is said over it (ETA_Speech_HoldForUrgent):
+on the Mac each line cuts off the one before, and a "Done" that came
+next had cut it off.
+
+The same level's three hidden buttons open two hidden doors upstairs
+only when pressed south, east, west. That order is in the scripts too:
+each button's event sets off one event of a counting entity, which goes
+on only when its count stands at that button's place ("accum 0
+abort_if_not_equal 1", then "accum 0 inc 1"); the pillar's count, which
+every button only adds to, gives each the same place and is no order.
+T and F give each its place, "Button 2 of 3", and coming up to one says
+it all once: "This button is 2 of 3, pressed in order: first the south
+one, then this one, the east one, last the west one. In that order they
+open hidden doors. Walls close on you here when it is pressed: press
+it, then run straight back at once." The ways are from the middle of
+the three; "hidden doors" when what the last sets off is, through
+relays, doors.
