@@ -2744,3 +2744,30 @@ a second: its moves run on one from another); "Bridge out, ahead: cross
 now"; "Bridge pulling back". The door says "Door: a switch opens it,
 not F". And a trap on another floor - the blade below the corridor
 upstairs - is not announced.
+
+### 0151 Pressing the buttons in order, with O leading
+
+The tester pressed the crypt's three buttons out of order, found that a
+pressed button did nothing pressed again, and did not know how to start
+over; "2 of 3" did not say which side each was. Each switch of an order
+now has its side in its name ("Button 2 of 3, east"), from the middle
+of the three, and its own moving part - the mover its event sends a
+little way, read from the scripts - shows whether it is pressed,
+whenever the server sends it, a loaded game included.
+
+After each press: "1 of 3 pressed. Next, the east one, 33 meters. O
+leads there", and O is set to it. Out of order: "Out of order: the
+hidden doors won't open this time. It still counts: 1 of 3 pressed.
+Press the rest, and the pillar still comes down. To try the order
+again, ride the pillar once: the buttons reset when it comes back
+down." The last: "All 3 pressed, in order" (or "but not in order: the
+hidden doors stay shut this time"). Coming to one that is not next:
+"Button 2 of 3, east. Not this one yet: first the south one, 32
+meters. O leads there"; to one pressed already: "...pressed already: it
+counts once. 1 of 3 pressed. Next, ...". When the lift is back where it
+stood, or a part is seen back: "The buttons have reset: press all 3
+again, in order. First the south one, 25 meters. O leads there"; parts
+sliding back after that are not taken for presses. A message due while
+the crushing walls' warning is heard out waits for it to end. Tested
+from the tester's own saved game, in order, out of order, through a
+ride and a reset.
