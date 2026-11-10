@@ -2824,3 +2824,26 @@ a metre wider for staying out of it - O's arrival, "Don't stop here",
 the way out, and how far to run across. Tested from the tester's save:
 O said "Marker reached" half a metre from the button; pressed there,
 the player stood through the blade's swings unhurt.
+
+### 0155 Through the blade without stopping
+
+The tester still died at the crypt's south button. Played from their
+own save with enemies on, following O, the test player stopped in the
+blade's reach each time O turned it to the way ("Facing the way ... 4
+meters"); the safe moment ran out, and "Out! Run behind, 3 meters" sent
+it back into the blade with the button as near ahead. And standing at
+the button, "Stop! The blade's reach starts 1 meter ahead" was said
+over and over - the reach was behind.
+
+Now: O, pressed inside a trap's reach, does not stop to face the way:
+"Keep running straight ahead, 3 meters, out of the blade's reach". The
+way out takes the way faced, then a little either side, and the way
+O leads, over a way back no more than a metre shorter. "Stop!" is said
+only walking toward the reach, with where it is: "Stop! The blade's
+reach is ahead, 4 meters". The safe moment says how: "Blade back up:
+run across now, without stopping, 11 meters". The extra metre for the
+blade's body is for swinging blades only: at the west button "Don't
+stop here: you're in the saws' reach" was said, and the saws do not
+reach there. Played twice from the tester's save, enemies on, doing as
+said - W held through on "without stopping": the button reached and
+pressed, unhurt.
