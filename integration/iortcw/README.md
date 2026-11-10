@@ -2847,3 +2847,24 @@ stop here: you're in the saws' reach" was said, and the saws do not
 reach there. Played twice from the tester's save, enemies on, doing as
 said - W held through on "without stopping": the button reached and
 pressed, unhurt.
+
+### 0156 Cross for me
+
+The tester still could not get past the crypt's blade to the south
+button: judging its safe moment and running dead straight through take
+eyes. They asked for a key that does that much, the game's design kept:
+the blade, its timing and its danger as they are. Slash (free in the
+stock config, where every letter is taken; on the Keys: Getting around
+page as "Cross a trap for me"), near a trap whose reach is known - the
+blade, the saws - says "Crossing. Waiting for the blade: stay still. Any
+move of yours stops it"; waits for the trap to come back to rest from a
+move, so the whole safe moment is the run's; says "Now", turns the
+player along the narrow way through the reach and runs them straight
+across - to what O leads to, if it lies just beyond, a body's width
+short, else past the far side - and stops: "Across. Button 1 of 3,
+south, ahead: F uses it". F is still the player's. A move of their own
+(back, aside, a jump, or forward while waiting) stops it: "Crossing
+stopped"; so does being held up. Tested from the tester's own save,
+without god mode: across, the button pressed with F, and back across,
+unhurt. And a switch of an order pressed already says so when F or T
+names it: "Button 3 of 3, west, pressed already".

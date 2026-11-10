@@ -1,0 +1,393 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 95b4b8e7..23d091e8 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -828,6 +828,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "+accessibilityAimLock" );
+ 	trap_AddCommand( "-accessibilityAimLock" );
+ 	trap_AddCommand( "accessibilityUseNext" );
++	trap_AddCommand( "accessibilityCrossTrap" );
+ 	trap_AddCommand( "accessibilityUsePrev" );
+ 	trap_AddCommand( "accessibilityEnemyNext" );
+ 	trap_AddCommand( "accessibilityEnemyPrev" );
+@@ -904,6 +905,8 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityAimLockDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityAimLock" ) ) {
+ 		CG_AccessibilityAimLockUp_f();
++	} else if ( !Q_stricmp( cmd, "accessibilityCrossTrap" ) ) {
++		CG_AccessibilityCrossTrap();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityUseNext" ) ) {
+ 		CG_AccessibilityUseNext_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityUsePrev" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5c48aa23..d21e4fb2 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3978,6 +3978,248 @@ void CG_AccessibilityFaceTheWay(void)
+ 
+ /* Every frame: a face asked for before the way was known, done once it
+    is - or given up on. */
++/*
++ * "Cross for me" (/ by default). The crypt's swinging blade killed the
++ * tester again and again going for the button past it: judging the safe
++ * moment, and running dead straight through, take eyes. The blade, its
++ * timing and its danger stay as the game made them; this only waits for
++ * the safe moment and runs the player straight across, then stops. F is
++ * still the player's. Any move of their own stops it.
++ */
++static struct
++{
++	int      stage;        /* 0 off, 1 waiting, 2 facing, 3 running */
++	vec3_t   target;       /* where the run ends */
++	char     goalName[48]; /* what O leads to beyond it, if anything */
++	qboolean haveGoal;
++	qboolean sawUnsafe;    /* the trap seen not safe since waiting began */
++	int      stageAt;
++	vec3_t   lastPos;
++	int      lastMoveAt;
++	char     kind[16];
++} eta_cross;
++
++static void ETA_CrossStop(const char *say)
++{
++	if (eta_cross.stage == 3)
++	{
++		trap_SendConsoleCommand("-forward\n");
++	}
++	eta_cross.stage = 0;
++	if (say)
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(say);
++	}
++}
++
++void CG_AccessibilityCrossTrap(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t               mins, maxs, mid, dir, goal;
++	float                margin, gap, across;
++	qboolean             safe, everMoved;
++	const char          *goalName = NULL;
++
++	if (eta_cross.stage)
++	{
++		ETA_CrossStop("Crossing stopped");
++		return;
++	}
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	if (!CG_AccessibilityTrapNear(mins, maxs, &margin, &gap, &safe, &everMoved, eta_cross.kind, sizeof(eta_cross.kind)))
++	{
++		ETA_Speech_Say("No trap to cross here. It works within 12 meters of a blade or the saws");
++		return;
++	}
++
++	/* Across: from here, through the middle of its reach, to its far
++	   side and a little more - or to what O leads to, if that lies
++	   beyond it, close by. */
++	VectorAdd(mins, maxs, mid);
++	VectorScale(mid, 0.5f, mid);
++	VectorSubtract(mid, ps->origin, dir);
++	dir[2] = 0.0f;
++	if (VectorNormalize(dir) < 1.0f)
++	{
++		return;
++	}
++	/* Along the narrow way through it: the longer side of its box. */
++	if (maxs[0] - mins[0] > maxs[1] - mins[1])
++	{
++		dir[1] = 0.0f;
++	}
++	else
++	{
++		dir[0] = 0.0f;
++	}
++	VectorNormalize(dir);
++	{
++		float far = 0.0f;
++		int   k;
++
++		for (k = 0; k < 2; k++)
++		{
++			if (dir[k] > 0.5f)
++			{
++				far = maxs[k] - ps->origin[k];
++			}
++			else if (dir[k] < -0.5f)
++			{
++				far = ps->origin[k] - mins[k];
++			}
++		}
++		across = far + 18.0f + margin + 32.0f;
++	}
++	VectorMA(ps->origin, across, dir, eta_cross.target);
++	eta_cross.haveGoal = qfalse;
++	if (CG_AccessibilityMarkerInfo(goal, &goalName))
++	{
++		vec3_t toGoal;
++		float  along;
++
++		VectorSubtract(goal, ps->origin, toGoal);
++		toGoal[2] = 0.0f;
++		along = DotProduct(toGoal, dir);
++		/* Beyond its reach, and not far past: run on to it, stopping a
++		   body's width short. */
++		if (along > across - 40.0f && along < across + 320.0f
++		    && VectorLength(toGoal) - along < 96.0f)
++		{
++			VectorMA(ps->origin, along - 40.0f, dir, eta_cross.target);
++			eta_cross.haveGoal = qtrue;
++			Q_strncpyz(eta_cross.goalName, goalName ? goalName : "it", sizeof(eta_cross.goalName));
++		}
++	}
++	eta_cross.target[2] = ps->origin[2];
++	eta_cross.sawUnsafe = (qboolean)!safe;
++	eta_cross.stageAt   = cg.time;
++	/* Never moved yet, and at rest: no swing to wait for. Otherwise the
++	   next safe moment, from its start, so the whole of it is the run's. */
++	eta_cross.stage = 1;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("Crossing. Waiting for the %s: stay still. Any move of yours stops it", eta_cross.kind));
++	if (safe && !everMoved)
++	{
++		eta_cross.sawUnsafe = qtrue;
++	}
++}
++
++static void ETA_CrossFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	usercmd_t            cmd;
++	vec3_t               mins, maxs;
++	float                margin, gap;
++	qboolean             safe, everMoved;
++	char                 kind[16];
++
++	if (!eta_cross.stage)
++	{
++		return;
++	}
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		ETA_CrossStop(NULL);
++		return;
++	}
++	/* The player's own move stops it: back, aside, a jump - or, while
++	   waiting, forward too. */
++	trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd);
++	if (cmd.rightmove || cmd.upmove > 0 || cmd.forwardmove < 0 || ( eta_cross.stage == 1 && cmd.forwardmove > 0 ))
++	{
++		ETA_CrossStop("Crossing stopped");
++		return;
++	}
++	if (!CG_AccessibilityTrapNear(mins, maxs, &margin, &gap, &safe, &everMoved, kind, sizeof(kind)))
++	{
++		ETA_CrossStop(NULL);
++		return;
++	}
++
++	if (eta_cross.stage == 1)
++	{
++		if (!safe)
++		{
++			eta_cross.sawUnsafe = qtrue;
++		}
++		else if (eta_cross.sawUnsafe)
++		{
++			etaAimTarget_t aim;
++
++			memset(&aim, 0, sizeof(aim));
++			aim.entityNum = -1;
++			VectorCopy(eta_cross.target, aim.point);
++			aim.point[2] += cg.predictedPlayerState.viewheight - 8.0f;
++			ETA_AimStartSnap(&aim, NULL);
++			eta_cross.stage   = 2;
++			eta_cross.stageAt = cg.time;
++			ETA_Speech_Say("Now");
++		}
++		else if (cg.time - eta_cross.stageAt > 30000)
++		{
++			ETA_CrossStop("Crossing stopped: the trap did not come to rest");
++		}
++		return;
++	}
++
++	if (eta_cross.stage == 2)
++	{
++		vec3_t to;
++		float  off;
++
++		VectorSubtract(eta_cross.target, ps->origin, to);
++		off = fabsf(AngleNormalize180(vectoyaw(to) - ps->viewangles[YAW]));
++		if (off < 6.0f || cg.time - eta_cross.stageAt > 600)
++		{
++			trap_SendConsoleCommand("+forward\n");
++			eta_cross.stage      = 3;
++			eta_cross.stageAt    = cg.time;
++			eta_cross.lastMoveAt = cg.time;
++			VectorCopy(ps->origin, eta_cross.lastPos);
++		}
++		return;
++	}
++
++	/* Running: there, past it, held up, or too long. */
++	{
++		vec3_t to, flat;
++		float  left;
++
++		VectorSubtract(eta_cross.target, ps->origin, to);
++		to[2] = 0.0f;
++		left  = VectorLength(to);
++		VectorSubtract(ps->origin, eta_cross.lastPos, flat);
++		flat[2] = 0.0f;
++		if (VectorLength(flat) > 8.0f)
++		{
++			eta_cross.lastMoveAt = cg.time;
++			VectorCopy(ps->origin, eta_cross.lastPos);
++		}
++		if (left < 24.0f || DotProduct(to, ps->velocity) < 0.0f && cg.time - eta_cross.stageAt > 300)
++		{
++			char said[160];
++
++			if (eta_cross.haveGoal)
++			{
++				Com_sprintf(said, sizeof(said), "Across. %s, ahead: F uses it", eta_cross.goalName);
++			}
++			else
++			{
++				Q_strncpyz(said, "Across", sizeof(said));
++			}
++			ETA_CrossStop(said);
++		}
++		else if (cg.time - eta_cross.lastMoveAt > 700 || cg.time - eta_cross.stageAt > 5000)
++		{
++			ETA_CrossStop("Crossing stopped: something is in the way");
++		}
++	}
++}
++
+ static void ETA_FacePendingFrame(void)
+ {
+ 	if (!eta_facePendingAt)
+@@ -4653,6 +4895,7 @@ void CG_AccessibilityAimFrame(void)
+ 	{
+ 		ETA_HitFrame();
+ 		ETA_FacePendingFrame();
++		ETA_CrossFrame();
+ 		ETA_EnemyCueFrame();
+ 	}
+ 	if (cg.snap)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index feb7fc4c..e3f8cef5 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8226,6 +8226,57 @@ qboolean CG_AccessibilityInTrapReach(const vec3_t origin)
+ 	return qfalse;
+ }
+ 
++/*
++ * For the crossing key: the nearest trap whose reach is known, on the
++ * player's floor and close by - its reach, the margin kept from it, how
++ * far the player's body is from it, whether it is safe now, whether it
++ * has ever moved, and its kind. qfalse if none within 12 metres.
++ */
++qboolean CG_AccessibilityTrapNear(vec3_t mins, vec3_t maxs, float *margin, float *gapOut, qboolean *safe,
++                                  qboolean *everMoved, char *kind, size_t kindSize)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  g, best = -1, i;
++	float                bestGap = 480.0f;
++
++	for (g = 0; g < eta_trapGroupCount; g++)
++	{
++		float gap;
++
++		if (eta_trapGroups[g].zoneDone != 2
++		    || ps->origin[2] < eta_trapGroups[g].zoneMins[2] - 48.0f || ps->origin[2] > eta_trapGroups[g].zoneMaxs[2] + 48.0f)
++		{
++			continue;
++		}
++		gap = ETA_ZoneGap(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs);
++		if (gap < bestGap)
++		{
++			bestGap = gap;
++			best    = g;
++		}
++	}
++	if (best < 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_trapGroups[best].zoneMins, mins);
++	VectorCopy(eta_trapGroups[best].zoneMaxs, maxs);
++	*margin    = ETA_TrapMargin(best);
++	*gapOut    = bestGap;
++	*safe      = (qboolean)( eta_trapGroups[best].state == ETA_TRAP_REST );
++	*everMoved = eta_trapGroups[best].everFast;
++	Q_strncpyz(kind, "trap", kindSize);
++	for (i = 0; i < eta_trapMoverCount; i++)
++	{
++		if (eta_trapMovers[i].group == best)
++		{
++			Q_strncpyz(kind, eta_trapMovers[i].kind, kindSize);
++			break;
++		}
++	}
++	return qtrue;
++}
++
+ static void ETA_TrapsFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -9141,7 +9192,8 @@ static void ETA_SwitchName(const char *kind, int model, char *out, size_t outSiz
+ 	Q_strncpyz(out, kind, outSize);
+ 	if (model > 0 && model < MAX_MODELS && eta_switchPlace[model])
+ 	{
+-		Q_strcat(out, outSize, va(" %d of %d, %s", eta_switchPlace[model], eta_switchPlaces[model], eta_switchSide[model]));
++		Q_strcat(out, outSize, va(" %d of %d, %s%s", eta_switchPlace[model], eta_switchPlaces[model], eta_switchSide[model],
++		                          eta_switchPart[model] && eta_switchPressed[model] ? ", pressed already" : ""));
+ 	}
+ 	if (model > 0 && model < MAX_MODELS && eta_crushSwitch[model])
+ 	{
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 940ddd31..146df380 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2435,6 +2435,8 @@ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
+ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
++qboolean CG_AccessibilityTrapNear( vec3_t mins, vec3_t maxs, float *margin, float *gap, qboolean *safe, qboolean *everMoved, char *kind, size_t kindSize );
++void CG_AccessibilityCrossTrap( void );
+ int CG_AccessibilityPuzzleSwitchAt( const vec3_t point, int *place, int *places, char *state, size_t stateSize );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
+ qboolean CG_AccessibilityThingKnownAt( const vec3_t point );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 7ba5a949..5ed2dac6 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8430,6 +8430,9 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   not use the F keys. J was let go of in the fifteenth
+ 		   generation, so only where it is still empty. */
+ 		{ 'j',          "accessibilityStatus",        21, NULL },
++		/* Across a trap's reach, at its safe moment, straight: slash,
++		   free in the stock config, where every letter is taken. */
++		{ '/',          "accessibilityCrossTrap",     22, NULL },
+ 	};
+ 
+ 	/*
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 4f5aa8a4..8271421f 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4621,6 +4621,7 @@ static bind_t g_bindings[] =
+ 	{"+accessibilityTurnLeft",       K_LEFTARROW,    -1, -1, -1},
+ 	{"+accessibilityTurnRight",      K_RIGHTARROW,   -1, -1, -1},
+ 	{"accessibilityCrouch",          'c',            -1, -1, -1},
++	{"accessibilityCrossTrap",       '/',            -1, -1, -1},
+ 	{"accessibilityThingsNext",      't',            -1, -1, -1},
+ 	{"accessibilityThingsPrev",      'y',            -1, -1, -1},
+ 	{"+accessibilityActivate",       'f',            K_ENTER, -1, -1},

@@ -246,7 +246,8 @@ menuDef {
 	ETA_KEY(158, "Turn left", "+accessibilityTurnLeft")
 	ETA_KEY(176, "Turn right", "+accessibilityTurnRight")
 	ETA_KEY(194, "Crouch, and again to stand", "accessibilityCrouch")
-	ETA_BUTTON(222, "BACK", close eta_acc_keys_around ; open eta_accessibility)
+	ETA_KEY(212, "Cross a trap for me", "accessibilityCrossTrap")
+	ETA_BUTTON(240, "BACK", close eta_acc_keys_around ; open eta_accessibility)
 }
 
 menuDef {
