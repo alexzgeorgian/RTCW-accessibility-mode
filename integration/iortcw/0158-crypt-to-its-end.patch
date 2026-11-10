@@ -1,0 +1,627 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index d21e4fb2..760e7a3c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4417,6 +4417,52 @@ static void ETA_FaceTheWayUnreachable(void)
+ 				return;
+ 			}
+ 		}
++		/* Close, past a door that opens as it is walked into, which the
++		   way finding does not go through: to the door. The crypt's floor
++		   drops the player in front of its way out's door. */
++		{
++			const vec3_t *here = (const vec3_t *)cg.predictedPlayerState.origin;
++			float         best = 400.0f, toOut = Distance(*here, origin);
++			int           m, door = 0;
++			qboolean      opens;
++
++			for (m = 1; toOut < 1000.0f && m < MAX_MODELS && m < cgs.numInlineModels; m++)
++			{
++				float d;
++
++				if (!CG_AccessibilityDoorModel(m, &opens) || !opens)
++				{
++					continue;
++				}
++				d = Distance(*here, cgs.inlineModelMidpoints[m]);
++				if (d < best && Distance(cgs.inlineModelMidpoints[m], origin) < toOut
++				    && fabsf(cgs.inlineModelMidpoints[m][2] - (*here)[2]) < 96.0f)
++				{
++					best = d;
++					door = m;
++				}
++			}
++			if (door)
++			{
++				int meters = (int)( best * ETA_QU_TO_METERS + 0.5f );
++
++				etaAimTarget_t through;
++
++				/* Turned straight to it: the way finding has no way through
++				   it, and a lead to it ends at once, it is so close. */
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("The way out is past a door, %d %s. Turning you to it: F opens it, then walk "
++				                  "straight on through", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++				memset(&through, 0, sizeof(through));
++				through.entityNum = -1;
++				VectorCopy(cgs.inlineModelMidpoints[door], through.point);
++				through.point[2] = (*here)[2] + cg.predictedPlayerState.viewheight - 8.0f;
++				through.meters = best * ETA_QU_TO_METERS;
++				Q_strncpyz(through.name, "The door out", sizeof(through.name));
++				ETA_AimStartSnap(&through, NULL);
++				return;
++			}
++		}
+ 		ETA_Speech_Say("The way out is not open yet");
+ 		/* Nothing new to explore: a locked door come to, and its switch -
+ 		   before the rooms with things not found. */
+@@ -4487,8 +4533,30 @@ static void ETA_FaceTheWayUnreachable(void)
+ 	}
+ 	CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+ 	ETA_HudNarrator_HoldPassive(cg.time);
++	/* Asked again from the same spot: on to the way out instead. The
++	   crypt's floor falls at the end into the room the way out is from,
++	   and O, still on the treasure left above, said "no way" again and
++	   again. */
++	{
++		static vec3_t thingFrom;
++		static int    thingTries;
++
++		if (Distance(thingFrom, cg.predictedPlayerState.origin) > 64.0f)
++		{
++			VectorCopy(cg.predictedPlayerState.origin, thingFrom);
++			thingTries = 0;
++		}
++		if (++thingTries >= 2)
++		{
++			thingTries = 0;
++			ETA_Speech_Say(va("Still no way to %s from here. On to the way out instead", what));
++			CG_AccessibilityMarkerForget();
++			CG_AccessibilityWayOut();
++			return;
++		}
++	}
+ 	ETA_Speech_Say(va("No way to %s from here yet: a locked door is in between, or a part of the level not open "
+-	                  "yet. X says what opens the doors here, and T what is left to do", what));
++	                  "yet. X says what opens the doors here, T what is left to do, and O again leads to the way out", what));
+ 	return;
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 63c6828a..c84725d4 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -787,6 +787,7 @@ static void ETA_ThingsStep(int step)
+ 	int                 count = 0, i, j, meters, hidden = 0, elsewhere = 0, area;
+ 	char                progress[160], name[80], why[128], shown[128], puzzleState[64] = "";
+ 	qboolean            isPuzzle = qfalse;
++	const char          *trapUnder;
+ 	qboolean            fresh;
+ 	eta_thing_t         *thing;
+ 	vec3_t              delta;
+@@ -866,6 +867,28 @@ static void ETA_ThingsStep(int step)
+ 				{
+ 					continue;
+ 				}
++				/* Gone up past them - across the crypt's bridge, the
++				   pillar sunk back and its buttons reset behind - they
++				   are done with, from then on: T led back down to them,
++				   and from the room the floor drops into at the end. */
++				{
++					static int doneFor = -1;
++					static int doneStart;
++
++					if (doneStart != cgs.levelStartTime)
++					{
++						doneStart = cgs.levelStartTime;
++						doneFor   = -1;
++					}
++					if (ps->origin[2] > eta_things.things[i].point[2] + 160.0f && ps->groundEntityNum == ENTITYNUM_WORLD)
++					{
++						doneFor = place;
++					}
++					if (doneFor >= 0)
++					{
++						continue;
++					}
++				}
+ 				puzzle = (qboolean)( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
+ 				                     || ETA_ThingHereInSight(eta_things.things[i].point) );
+ 				/* Or near it, on its floor, while any of it is still to
+@@ -1038,6 +1061,15 @@ static void ETA_ThingsStep(int step)
+ 		Q_strncpyz(why, ", you carry all you can of this, so it stays here until you use some", sizeof(why));
+ 	}
+ 
++	/* Taking it sets off a trap under it: the crypt's treasure. */
++	trapUnder = ( thing->kind == ETA_THING_TREASURE || thing->kind == ETA_THING_ITEM )
++	            ? CG_AccessibilityTrapUnder(thing->point) : NULL;
++	if (trapUnder && !why[0])
++	{
++		Com_sprintf(why, sizeof(why), ", %s %s up under it when it is taken", trapUnder,
++		            !Q_stricmp(trapUnder, "spikes") ? "come" : "comes");
++	}
++
+ 	ETA_Speech_BeginReport();
+ 	progress[0] = '\0';
+ 	if (fresh)
+@@ -1068,10 +1100,11 @@ static void ETA_ThingsStep(int step)
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters",
+ 		                  thing->ride ? "Walk in, and stay inside"
++		                  : trapUnder ? "Walk up to it, and the moment you have it, step straight back"
+ 		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
+ 		                  : isPuzzle && thing->pressed ? "Pressing it again does nothing: it counts once"
+-		                  : isPuzzle && Q_stristr(why, "not yet") ? "Pressed now, it counts, but out of order"
++		                  : isPuzzle && Q_stristr(why, "hidden doors") ? "F presses it: it counts, but the hidden doors stay shut"
+ 		                  : isPuzzle && meters > 2 ? va("Walk %d %s closer, then F uses it", meters - 2, meters - 2 == 1 ? "meter" : "meters")
+ 		                  : isPuzzle ? "F uses it"
+ 		                  : thing->pressed ? "F presses it again"
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index bdbb358c..5c0a298e 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4102,6 +4102,7 @@ static struct
+ 	int  number;        /* within the group, as said; 0 not yet */
+ 	qboolean rested;    /* how it rests known: as first seen still, before it ever moved fast */
+ 	vec3_t   restAngles;
++	vec3_t   restOrigin; /* spikes: where they rest, out of the way */
+ } eta_trapMovers[ETA_MAX_TRAP_MOVERS];
+ static int eta_trapMoverCount;
+ static struct
+@@ -4120,6 +4121,7 @@ static struct
+ /* The map's hurt triggers, by brush model: where a trap kills. */
+ #define ETA_MAX_HURTS 64
+ static int eta_hurtModels[ETA_MAX_HURTS];
++static qboolean eta_hurtStartsOff[ETA_MAX_HURTS];   /* off till something sets it off */
+ static int eta_hurtCount;
+ static int eta_trapGroupCount;
+ static int eta_plateSaidAt[MAX_MODELS];
+@@ -4739,6 +4741,9 @@ static struct
+ 	int      stillSince;               /* riding, and stopped: at the top after a moment */
+ 	float    restTop;                  /* its top where it stands before it ever comes down */
+ 	qboolean haveRest, everReady;
++	int      backMs;                   /* its bridge set off again this long after it stops; 0 not known */
++	qboolean wasMoving;
++	int      stoppedAt;                /* when it last came to a stop */
+ } eta_lifts[ETA_MAX_LIFTS];
+ static int eta_liftCount;
+ #define ETA_MAX_PLAYER_TRIGGERS 64
+@@ -5094,6 +5099,8 @@ typedef struct
+ 	qboolean rises;
+ 	char     alerts[4][48];
+ 	int      alertCount;
++	int      waited;         /* ms waited since its last move */
++	int      backMs;         /* waited at the top before its bridge is set off again; 0 not known */
+ } eta_liftSearch_t;
+ 
+ static void ETA_LiftScriptLine(const char *a, const char *b, const char *c, const char *d, void *context)
+@@ -5103,8 +5110,13 @@ static void ETA_LiftScriptLine(const char *a, const char *b, const char *c, cons
+ 
+ 	(void)c;
+ 	(void)d;
+-	if (!Q_stricmp(a, "gotomarker") && b[0])
++	if (!Q_stricmp(a, "wait") && b[0])
+ 	{
++		search->waited += atoi(b);
++	}
++	else if (!Q_stricmp(a, "gotomarker") && b[0])
++	{
++		search->waited = 0;
+ 		for (i = 0; i < eta_cornerCount; i++)
+ 		{
+ 			if (!Q_stricmp(eta_corners[i].targetname, b))
+@@ -5114,9 +5126,25 @@ static void ETA_LiftScriptLine(const char *a, const char *b, const char *c, cons
+ 			}
+ 		}
+ 	}
+-	else if (!Q_stricmp(a, "alertentity") && b[0] && search->alertCount < (int)ARRAY_LEN(search->alerts))
++	else if (!Q_stricmp(a, "alertentity") && b[0])
+ 	{
+-		Q_strncpyz(search->alerts[search->alertCount++], b, sizeof(search->alerts[0]));
++		/* Set off a second time after its last move: its bridge going
++		   back, that long after it stops at the top. */
++		for (i = 0; i < search->alertCount; i++)
++		{
++			if (!Q_stricmp(search->alerts[i], b))
++			{
++				if (!search->backMs && search->waited > 0)
++				{
++					search->backMs = search->waited;
++				}
++				return;
++			}
++		}
++		if (search->alertCount < (int)ARRAY_LEN(search->alerts))
++		{
++			Q_strncpyz(search->alerts[search->alertCount++], b, sizeof(search->alerts[0]));
++		}
+ 	}
+ }
+ 
+@@ -5418,7 +5446,8 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		if (!Q_stricmp(classname, "trigger_hurt") && model[0] == '*' && eta_hurtCount < ETA_MAX_HURTS)
+ 		{
+-			eta_hurtModels[eta_hurtCount++] = atoi(model + 1);
++			eta_hurtStartsOff[eta_hurtCount] = (qboolean)( atoi(spawnflags) & 1 );
++			eta_hurtModels[eta_hurtCount++]  = atoi(model + 1);
+ 		}
+ 
+ 		if (!Q_stricmp(classname, "script_mover") && model[0] == '*' && eta_trapMoverCount < ETA_MAX_TRAP_MOVERS)
+@@ -5853,6 +5882,7 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 			eta_lifts[eta_liftCount].mover   = eta_scriptMovers[m].model;
+ 			eta_lifts[eta_liftCount].trigger = eta_playerTriggers[i].model;
++			eta_lifts[eta_liftCount].backMs  = search.backMs;
+ 			/* Its bridge: a door what it sets off opens, through relays. */
+ 			for (a = 0; a < search.alertCount && !eta_lifts[eta_liftCount].bridge; a++)
+ 			{
+@@ -7347,6 +7377,11 @@ static void ETA_LiftsFrame(void)
+ 		ready  = (qboolean)( !moving && top >= tmins[2] - 8.0f && top <= tmaxs[2] + 4.0f );
+ 		VectorAdd(tmins, tmaxs, at);
+ 		VectorScale(at, 0.5f, at);
++		if (eta_lifts[l].wasMoving && !moving)
++		{
++			eta_lifts[l].stoppedAt = cg.time;
++		}
++		eta_lifts[l].wasMoving = moving;
+ 
+ 		/* Come down to the floor: what to do, and O leads there. */
+ 		if (ready && !eta_lifts[l].announced && ps->groundEntityNum != lift->number)
+@@ -7430,15 +7465,24 @@ static void ETA_LiftsFrame(void)
+ 			VectorScale(mid, 0.5f, mid);
+ 			if (bmoving && !eta_lifts[l].bridgeMoving)
+ 			{
+-				ETA_Speech_Say(eta_lifts[l].bridgeOut ? "Bridge pulling back"
++				ETA_Speech_Say(eta_lifts[l].bridgeOut && ps->groundEntityNum == lift->number
++				               ? "Bridge pulling back. You're still on the lift: it goes back down"
++				               : eta_lifts[l].bridgeOut ? "Bridge pulling back"
+ 				               : va("Bridge sliding out, %s: wait for it",
+ 				                    ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid))));
+ 			}
+ 			else if (!bmoving && eta_lifts[l].bridgeMoving && out)
+ 			{
++				int left = eta_lifts[l].backMs && !moving && eta_lifts[l].stoppedAt
++				           ? ( eta_lifts[l].stoppedAt + eta_lifts[l].backMs - cg.time + 500 ) / 1000 : 0;
++
++				/* How long it stays: the crypt's for 9 seconds, and then
++				   the pillar sinks back - the tester, not told, rode it
++				   down again and found the buttons reset. */
+ 				ETA_HudNarrator_HoldPassive(cg.time);
+-				ETA_Speech_Say(va("Bridge out, %s: cross now",
+-				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid))));
++				ETA_Speech_Say(va("Bridge out, %s: cross now%s",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
++				                  left > 1 && left < 120 ? va(". It pulls back in %d seconds", left) : ""));
+ 			}
+ 			eta_lifts[l].bridgeMoving = bmoving;
+ 			if (!bmoving)
+@@ -7512,9 +7556,18 @@ static void ETA_OrderReset(qboolean say)
+ 	eta_orderNext   = 1;
+ 	eta_orderBroken = qfalse;
+ 	next            = ETA_OrderNextModel();
+-	if (say && had && next)
++	/* The pillar sinks back after every ride, and its buttons with it:
++	   across already, they are not needed again - the tester, not told
++	   so, took it for something done wrong. */
++	if (say && had && next && cg.predictedPlayerState.origin[2] > cgs.inlineModelMidpoints[next][2] + 160.0f
++	    && cg.predictedPlayerState.groundEntityNum == ENTITYNUM_WORLD)
++	{
++		ETA_Speech_Say("Behind you, the pillar has sunk back, and its buttons have reset: you don't need them again");
++	}
++	else if (say && had && next)
+ 	{
+-		ETA_Speech_Say(va("The buttons have reset: press all %d again, in order. First %s", places, ETA_OrderLead(next)));
++		ETA_Speech_Say(va("The pillar has sunk back, and the buttons have reset: press all %d again, in any order, and it "
++		                  "comes down again. In order, from %s", places, ETA_OrderLead(next)));
+ 	}
+ }
+ 
+@@ -7670,7 +7723,7 @@ int CG_AccessibilityPuzzleSwitchAt(const vec3_t point, int *place, int *places,
+ 		}
+ 		else if (next && next != m && !eta_orderBroken)
+ 		{
+-			Com_sprintf(state, stateSize, ", not yet: the %s one first", eta_switchSide[next]);
++			Com_sprintf(state, stateSize, ", any order brings the pillar; for the hidden doors, the %s one first", eta_switchSide[next]);
+ 		}
+ 		else
+ 		{
+@@ -7749,7 +7802,7 @@ static void ETA_SwitchNoticeFrame(void)
+ 		}
+ 		else if (eta_switchPlace[best] && eta_switchPart[best] && !eta_orderBroken && next && next != best)
+ 		{
+-			Com_sprintf(text, sizeof(text), "Button %d of %d, %s. Not this one yet: first %s.", eta_switchPlace[best],
++			Com_sprintf(text, sizeof(text), "Button %d of %d, %s. Any order brings the pillar down. For the hidden doors too, first %s.", eta_switchPlace[best],
+ 			            eta_switchPlaces[best], eta_switchSide[best], ETA_OrderLead(next));
+ 			if (eta_crushSwitch[best])
+ 			{
+@@ -7847,6 +7900,12 @@ static void ETA_CrushFrame(void)
+ 		{
+ 			trap = (qboolean)( eta_trapMovers[t].model == es->modelindex );
+ 		}
++		/* A lift, and its bridge, carry the player: not walls. The
++		   crypt's pillar, stepped on, was "Walls closing". */
++		for (t = 0; t < eta_liftCount && !trap; t++)
++		{
++			trap = (qboolean)( eta_lifts[t].mover == es->modelindex || eta_lifts[t].bridge == es->modelindex );
++		}
+ 		/* A door closing on someone in its way stops and opens again. */
+ 		if (trap || CG_AccessibilityDoorModel(es->modelindex, &doorOpens))
+ 		{
+@@ -7884,6 +7943,17 @@ static void ETA_CrushFrame(void)
+ 		}
+ 	}
+ 	eta_crushSaidFor[said] = key;
++	/* Walls held up by someone in their way try again and again, each a
++	   new start: said once for them all. */
++	{
++		static int lastSaid;
++
++		if (cg.time >= lastSaid && cg.time - lastSaid < 3000)
++		{
++			return;
++		}
++		lastSaid = cg.time;
++	}
+ 
+ 	/* The shortest run, of eight ways round from where they face, to a
+ 	   place out of every closing mover's path, with nothing in the way
+@@ -7941,11 +8011,40 @@ static void ETA_CrushFrame(void)
+ 		eta_crushUrgentUntil = cg.time + ETA_CRUSH_URGENT_MS;
+ 		if (bestRun < 1.0e8f)
+ 		{
+-			int meters = (int)( bestRun * ETA_QU_TO_METERS + 0.5f );
++			int    meters = (int)( bestRun * ETA_QU_TO_METERS + 0.5f ), past = 0;
++			vec3_t angles = { 0.0f, 0.0f, 0.0f }, forward, at, down;
++			float  run;
++
++			/* A drop not far past where it is safe: the crypt's walls end
++			   two and a half metres short of a spike pit with slippery
++			   edges, and running back on, the tester's way, falls in. */
++			angles[YAW] = ps->viewangles[YAW] + bestTurn;
++			AngleVectors(angles, forward, NULL, NULL);
++			for (run = bestRun + 16.0f; run <= bestRun + 192.0f; run += 16.0f)
++			{
++				trace_t trace;
++
++				VectorMA(ps->origin, run, forward, at);
++				trap_CM_BoxTrace(&trace, ps->origin, at, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++				if (trace.fraction < 1.0f || trace.startsolid)
++				{
++					break;   /* a wall before any drop */
++				}
++				VectorCopy(at, down);
++				down[2] -= 96.0f;
++				trap_CM_BoxTrace(&trace, at, down, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++				if (trace.fraction >= 1.0f)
++				{
++					past = (int)( ( run - bestRun ) * ETA_QU_TO_METERS + 0.5f );
++					past = past < 1 ? 1 : past;
++					break;
++				}
++			}
+ 
+ 			/* The way first: there is under a second to start. */
+-			ETA_Speech_Say(va("Run %s, %d %s! Walls closing", ETA_HudNarrator_RelativeDirection(AngleNormalize180(bestTurn)),
+-			                  meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters"));
++			ETA_Speech_Say(va("Run %s, %d %s%s! Walls closing", ETA_HudNarrator_RelativeDirection(AngleNormalize180(bestTurn)),
++			                  meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters",
++			                  past ? va(", and stop: a drop %d %s past that", past, past == 1 ? "meter" : "meters") : ""));
+ 		}
+ 		else
+ 		{
+@@ -8246,6 +8345,43 @@ static void ETA_TrapCycleSay(int g, qboolean quiet, const char *text)
+ 	ETA_Speech_Say(text);
+ }
+ 
++/*
++ * A thing lying where a hurt switched off is switched on - the crypt's
++ * treasure: taking it sets off spikes under it, 15 a tenth of a second.
++ * T said "Walk onto it". What it is, for T: "spikes", "a trap", or NULL.
++ */
++const char *CG_AccessibilityTrapUnder(const vec3_t point)
++{
++	int i, t;
++
++	ETA_WorldRead();
++	for (i = 0; i < eta_hurtCount; i++)
++	{
++		vec3_t mins, maxs;
++
++		if (!eta_hurtStartsOff[i] || eta_hurtModels[i] <= 0 || eta_hurtModels[i] >= MAX_MODELS
++		    || !cgs.inlineDrawModel[eta_hurtModels[i]])
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[eta_hurtModels[i]], mins, maxs);
++		if (point[0] < mins[0] - 16.0f || point[0] > maxs[0] + 16.0f || point[1] < mins[1] - 16.0f || point[1] > maxs[1] + 16.0f
++		    || point[2] < mins[2] - 48.0f || point[2] > maxs[2] + 48.0f)
++		{
++			continue;
++		}
++		for (t = 0; t < eta_trapMoverCount; t++)
++		{
++			if (!Q_stricmp(eta_trapMovers[t].kind, "spikes") && Distance(eta_trapMovers[t].at, point) < 160.0f)
++			{
++				return "spikes";
++			}
++		}
++		return "a trap";
++	}
++	return NULL;
++}
++
+ qboolean CG_AccessibilityInTrapReach(const vec3_t origin)
+ {
+ 	int g;
+@@ -8353,6 +8489,7 @@ static void ETA_TrapsFrame(void)
+ 				    && !eta_trapGroups[eta_trapMovers[i].group].everFast)
+ 				{
+ 					VectorCopy(cent->lerpAngles, eta_trapMovers[i].restAngles);
++					VectorCopy(cent->lerpOrigin, eta_trapMovers[i].restOrigin);
+ 				}
+ 				if (eta_trapMovers[i].rested || ( eta_trapMovers[i].group >= 0 && eta_trapGroups[eta_trapMovers[i].group].everFast ))
+ 				{
+@@ -8361,6 +8498,13 @@ static void ETA_TrapsFrame(void)
+ 					{
+ 						away[i] = (qboolean)( away[i] || fabsf(AngleNormalize180(cent->lerpAngles[k] - eta_trapMovers[i].restAngles[k])) > ETA_TRAP_AWAY_TURN );
+ 					}
++					/* Spikes slide up out of the floor and stay: up is in the
++					   way. The crypt's treasure's were "stopped: run across
++					   now" - onto them. */
++					if (!Q_stricmp(eta_trapMovers[i].kind, "spikes") && Distance(cent->lerpOrigin, eta_trapMovers[i].restOrigin) > 16.0f)
++					{
++						away[i] = qtrue;
++					}
+ 				}
+ 				break;
+ 			}
+@@ -8500,8 +8644,9 @@ static void ETA_TrapsFrame(void)
+ 			}
+ 			/* It may start as the player comes on: said each time it
+ 			   starts and stops from here on. */
+-			Q_strcat(text, sizeof(text), count > 1 ? " If they move, stop: I say when they are back at rest, safe to cross"
+-			                                       : " If it moves, stop: I say when it is back at rest, safe to cross");
++			Q_strcat(text, sizeof(text), !Q_stricmp(kind, "spikes") ? " If they come up, keep off them"
++			                             : count > 1 ? " If they move, stop: I say when they are back at rest, safe to cross"
++			                                         : " If it moves, stop: I say when it is back at rest, safe to cross");
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			ETA_Speech_Say(text);
+ 			continue;
+@@ -8551,7 +8696,8 @@ static void ETA_TrapsFrame(void)
+ 					eta_trapGroups[g].state = ETA_TRAP_FAST;
+ 					ETA_TrapCycleSay(g, quiet, va("%s %s%s", Name, !Q_stricmp(kind, "blade") ? "swinging" : "moving",
+ 					                  gap > margin && gap < 400.0f ? count > 1 ? ": wait here, cross when they are back at rest"
+-					                  : ": wait here, cross when it is back up" : ""));
++					                  : !Q_stricmp(kind, "blade") ? ": wait here, cross when it is back up"
++					                  : ": wait here, cross when it is back at rest" : ""));
+ 				}
+ 			}
+ 			else if (!eta_trapGroups[g].stillSince)
+@@ -8563,7 +8709,8 @@ static void ETA_TrapsFrame(void)
+ 				if (anyAway && eta_trapGroups[g].state == ETA_TRAP_FAST)
+ 				{
+ 					eta_trapGroups[g].state = ETA_TRAP_AWAY;
+-					ETA_TrapCycleSay(g, quiet, va("%s stopped in the way: wait", Name));
++					ETA_TrapCycleSay(g, quiet, !Q_stricmp(kind, "spikes") ? va("%s up, and they stay up: keep off them", Name)
++					                                                      : va("%s stopped in the way: wait", Name));
+ 				}
+ 				else if (!anyAway && eta_trapGroups[g].state != ETA_TRAP_REST)
+ 				{
+@@ -8747,7 +8894,8 @@ static void ETA_TrapsFrame(void)
+ 
+ static void ETA_WarriorFrame(void)
+ {
+-	static qboolean warned[MAX_GENTITIES];
++	static qboolean warned[MAX_GENTITIES], placed[MAX_GENTITIES];
++	static vec3_t   firstAt[MAX_GENTITIES];
+ 	static int      lastTime, lastStart;
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                  i, best = -1;
+@@ -8756,6 +8904,7 @@ static void ETA_WarriorFrame(void)
+ 	if (cg.time < lastTime || cgs.levelStartTime != lastStart)
+ 	{
+ 		memset(warned, 0, sizeof(warned));   /* a new map, or a game loaded */
++		memset(placed, 0, sizeof(placed));
+ 	}
+ 	lastTime  = cg.time;
+ 	lastStart = cgs.levelStartTime;
+@@ -8774,6 +8923,27 @@ static void ETA_WarriorFrame(void)
+ 			continue;
+ 		}
+ 		distance = Distance(cg_entities[es->number].lerpOrigin, ps->origin);
++		/* Free to come at the player: in sight, or on the move. The
++		   crypt's two bosses wait sealed behind a wall till the treasure
++		   is taken, and were warned of through it. */
++		if (!placed[es->number])
++		{
++			placed[es->number] = qtrue;
++			VectorCopy(cg_entities[es->number].lerpOrigin, firstAt[es->number]);
++		}
++		if (Distance(cg_entities[es->number].lerpOrigin, firstAt[es->number]) < 48.0f)
++		{
++			vec3_t eye, head;
++
++			VectorCopy(ps->origin, eye);
++			eye[2] += ps->viewheight;
++			VectorCopy(cg_entities[es->number].lerpOrigin, head);
++			head[2] += 36.0f;
++			if (!ETA_ClearLine(eye, head))
++			{
++				continue;
++			}
++		}
+ 		if (distance < bestDistance && fabsf(cg_entities[es->number].lerpOrigin[2] - ps->origin[2]) < 160.0f)
+ 		{
+ 			bestDistance = distance;
+@@ -8791,8 +8961,57 @@ static void ETA_WarriorFrame(void)
+ 	}
+ }
+ 
++/*
++ * The floor under the player moving: the crypt's, once its two bosses
++ * are dead, tilts, cracks and falls into the room below, the way out.
++ * Nothing said it; the tester would have been dropped without a word.
++ */
++static void ETA_FloorFrame(void)
++{
++	static int saidFor = -1, saidKind, lastStart;
++	const playerState_t *ps = &cg.predictedPlayerState;
++	const entityState_t *es;
++	qboolean             opens;
++	int                  kind, t;
++
++	if (lastStart != cgs.levelStartTime)
++	{
++		lastStart = cgs.levelStartTime;
++		saidFor   = -1;
++		saidKind  = 0;
++	}
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode || ps->groundEntityNum <= 0
++	    || ps->groundEntityNum >= ENTITYNUM_WORLD)
++	{
++		return;
++	}
++	es = &cg_entities[ps->groundEntityNum].currentState;
++	if (es->eType != ET_MOVER || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
++	    || CG_AccessibilityDoorModel(es->modelindex, &opens))
++	{
++		return;
++	}
++	for (t = 0; t < eta_liftCount; t++)
++	{
++		if (eta_lifts[t].mover == es->modelindex || eta_lifts[t].bridge == es->modelindex)
++		{
++			return;   /* carried: said as a lift */
++		}
++	}
++	kind = es->pos.trType != TR_STATIONARY && cg.time < es->pos.trTime + es->pos.trDuration && es->pos.trDelta[2] < -1.0f ? 2
++	       : es->apos.trType != TR_STATIONARY && cg.time < es->apos.trTime + es->apos.trDuration ? 1 : 0;
++	if (kind && ( saidFor != es->number || kind > saidKind ))
++	{
++		saidFor  = es->number;
++		saidKind = kind;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(kind == 2 ? "The floor is falling, and you with it" : "The floor under you is cracking and tilting: it is giving way");
++	}
++}
++
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
++	ETA_FloorFrame();
+ 	ETA_CrushFrame();
+ 	ETA_SwitchNoticeFrame();
+ 	ETA_LiftsFrame();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 7e35876b..e10552bf 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2434,6 +2434,7 @@ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
+ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
++const char *CG_AccessibilityTrapUnder( const vec3_t point );
+ void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
+ qboolean CG_AccessibilityTrapNear( vec3_t mins, vec3_t maxs, float *margin, float *gap, qboolean *safe, qboolean *everMoved, char *kind, size_t kindSize );

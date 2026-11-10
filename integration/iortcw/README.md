@@ -2887,3 +2887,41 @@ the first time one is within 25 metres on the player's floor, seen or
 not: "Zombie warrior with a blade, ahead left, 14 meters. U locks on to
 it". Tested from the tester's save: all three buttons heard in the
 corridor, the blade's line after them.
+
+### 0158 The crypt to its end
+
+The rest of the crypt walked from the tester's save, and what was found
+on the way. The script brings the pillar down after any three presses,
+in any order; the order - south, east, west - only opens the hidden
+doors. The buttons' lines said otherwise: "press all 3 again, in order",
+"not yet: the south one first". They now say any order brings the
+pillar, and the order is for the hidden doors. After every ride the
+bridge pulls back and the pillar sinks, resetting the buttons - the
+tester found them reset and did not know why. The bridge now says how
+long it stays, read from the level's script: "Bridge out, ahead: cross
+now. It pulls back in 9 seconds"; still on the lift as it goes, "You're
+still on the lift: it goes back down"; across, "Behind you, the pillar
+has sunk back, and its buttons have reset: you don't need them again",
+and T no longer lists them once you have stood above them. The pillar
+was taken for closing walls as it rose - "Walls closing" talked over
+"Going up": lifts and their bridges are not walls now. At the east
+button, running back on from the walls slides into a spike pit with
+slippery edges: the warning says where to stop, from the floor ahead:
+"Run behind, 4 meters, and stop: a drop 3 meters past that! Walls
+closing"; and walls held up and retrying say it once. The treasure
+lies where spikes come up the moment it is taken: T says "Treasure,
+spikes come up under it when it is taken... Walk up to it, and the
+moment you have it, step straight back" - so taken, unhurt. Spikes that
+come up and stay were "stopped: run across now"; now "Spikes up, and
+they stay up: keep off them". A zombie warrior is warned of once it is
+free - in sight, or on the move - not sealed behind a wall. And the
+floor moving under the player is said: "The floor under you is cracking
+and tilting: it is giving way", "The floor is falling, and you with
+it" - the crypt's end, into the room the way out is from.
+The floor drops the player in the room before the way out, behind a
+door the way finding does not go through, and O said "The way out is
+not open yet": now "The way out is past a door, 2 meters. Turning you to
+it: F opens it, then walk straight on through" - and through it, the
+level's end. And O on a thing it cannot reach, asked again from the same
+spot, goes on to the way out instead of "no way" again and again: after
+the fall, it was still on the treasure left above.
