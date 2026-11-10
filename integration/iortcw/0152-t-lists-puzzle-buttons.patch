@@ -1,0 +1,186 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 043a0bc0..d4c40211 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -785,7 +785,8 @@ static void ETA_ThingsStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                 count = 0, i, j, meters, hidden = 0, elsewhere = 0, area;
+-	char                progress[160], name[80], why[128], shown[128];
++	char                progress[160], name[80], why[128], shown[128], puzzleState[64] = "";
++	qboolean            isPuzzle = qfalse;
+ 	qboolean            fresh;
+ 	eta_thing_t         *thing;
+ 	vec3_t              delta;
+@@ -806,8 +807,18 @@ static void ETA_ThingsStep(int step)
+ 
+ 	if (fresh)
+ 	{
++		qboolean puzzle = qfalse;
++
+ 		for (i = 0; i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
++			int  place, places;
++			char state[64];
++
++			if (eta_things.things[i].kind == ETA_THING_SWITCH
++			    && CG_AccessibilityPuzzleSwitchAt(eta_things.things[i].point, &place, &places, state, sizeof(state)))
++			{
++				continue;   /* a puzzle's: all of it below, if any of it is here */
++			}
+ 			if (!eta_things.things[i].known && !eta_things.things[i].ride
+ 			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+ 			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
+@@ -838,7 +849,34 @@ static void ETA_ThingsStep(int step)
+ 			}
+ 		}
+ 
+-		/* Nearest first, a floor counting double. */
++		/* A puzzle - switches pressed in an order - all together, in its
++		   order, wherever each is, when any of it is in this area or in
++		   sight: the tester heard one of three, and not which the
++		   others were. */
++		for (i = 0; i < eta_things.count && !puzzle; i++)
++		{
++			int  place, places;
++			char state[64];
++
++			puzzle = (qboolean)( eta_things.things[i].kind == ETA_THING_SWITCH
++			                     && CG_AccessibilityPuzzleSwitchAt(eta_things.things[i].point, &place, &places, state, sizeof(state))
++			                     && ( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
++			                          || ETA_ThingHereInSight(eta_things.things[i].point) ) );
++		}
++		for (i = 0; puzzle && i < eta_things.count && count < ETA_THINGS_MAX; i++)
++		{
++			int  place, places;
++			char state[64];
++
++			if (eta_things.things[i].kind == ETA_THING_SWITCH
++			    && CG_AccessibilityPuzzleSwitchAt(eta_things.things[i].point, &place, &places, state, sizeof(state)))
++			{
++				eta_things.list[count++] = i;
++			}
++		}
++
++		/* Nearest first, a floor counting double; a puzzle's switches
++		   first of all, in its order. */
+ 		for (i = 0; i < count; i++)
+ 		{
+ 			for (j = i + 1; j < count; j++)
+@@ -846,14 +884,25 @@ static void ETA_ThingsStep(int step)
+ 				const float *a = eta_things.things[eta_things.list[i]].point, *b = eta_things.things[eta_things.list[j]].point;
+ 				float       fa = Distance(ps->origin, a) + fabsf(a[2] - ps->origin[2]);
+ 				float       fb = Distance(ps->origin, b) + fabsf(b[2] - ps->origin[2]);
++				int         pa, pb, n;
++				char        st[64];
++
++				if (CG_AccessibilityPuzzleSwitchAt(a, &pa, &n, st, sizeof(st)))
++				{
++					fa = -1.0e7f + (float)pa;
++				}
++				if (CG_AccessibilityPuzzleSwitchAt(b, &pb, &n, st, sizeof(st)))
++				{
++					fb = -1.0e7f + (float)pb;
++				}
+ 
+ 				/* One O found no way to from here: after those it can
+ 				   lead to. */
+ 				fa += ETA_ThingNoWay(&eta_things.things[eta_things.list[i]], area) ? 1.0e6f : 0.0f;
+ 				fb += ETA_ThingNoWay(&eta_things.things[eta_things.list[j]], area) ? 1.0e6f : 0.0f;
+ 				/* A switch pressed already: after those still to do. */
+-				fa += eta_things.things[eta_things.list[i]].pressed ? 1.0e5f : 0.0f;
+-				fb += eta_things.things[eta_things.list[j]].pressed ? 1.0e5f : 0.0f;
++				fa += eta_things.things[eta_things.list[i]].pressed && fa > -1.0e6f ? 1.0e5f : 0.0f;
++				fb += eta_things.things[eta_things.list[j]].pressed && fb > -1.0e6f ? 1.0e5f : 0.0f;
+ 
+ 				if (fb < fa)
+ 				{
+@@ -925,6 +974,19 @@ static void ETA_ThingsStep(int step)
+ 	/* A spot that unlocks a door, switched off yet: said why. */
+ 	Q_strncpyz(why, thing->kind == ETA_THING_SWITCH ? CG_AccessibilityUnlockWhy(CG_AccessibilityUnlockSpotAt(thing->point))
+ 	           : "", sizeof(why));
++	/* A puzzle's switch: how it stands in its order. Its own pressed is
++	   the order's, which knows of resets. */
++	{
++		int place, places;
++
++		if (thing->kind == ETA_THING_SWITCH
++		    && CG_AccessibilityPuzzleSwitchAt(thing->point, &place, &places, puzzleState, sizeof(puzzleState)))
++		{
++			thing->pressed = (qboolean)( Q_stristr(puzzleState, "pressed already") != NULL );
++			isPuzzle       = qtrue;
++			Q_strncpyz(why, puzzleState, sizeof(why));
++		}
++	}
+ 
+ 	if (!why[0] && thing->pressed)
+ 	{
+@@ -983,6 +1045,9 @@ static void ETA_ThingsStep(int step)
+ 		                  thing->ride ? "Walk in, and stay inside"
+ 		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
++		                  : isPuzzle && thing->pressed ? "Pressing it again does nothing: it counts once"
++		                  : isPuzzle && Q_stristr(why, "not yet") ? "Pressed now, it counts, but out of order"
++		                  : isPuzzle ? "F uses it"
+ 		                  : thing->pressed ? "F presses it again"
+ 		                  : why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
+ 		                  ? "F does nothing with it yet"
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 910d26ea..00b7c138 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7629,6 +7629,42 @@ static void ETA_OrderFrame(void)
+ 	}
+ }
+ 
++/*
++ * For T: whether a point is a switch of an order - its place, of how
++ * many, and how it stands - so T lists all of the order together, in
++ * order, wherever each is. 0 when it is not.
++ */
++int CG_AccessibilityPuzzleSwitchAt(const vec3_t point, int *place, int *places, char *state, size_t stateSize)
++{
++	int m, next;
++
++	ETA_WorldRead();
++	next = ETA_OrderNextModel();
++	for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++	{
++		if (!eta_switchPlace[m] || !eta_switchPart[m] || Distance(cgs.inlineModelMidpoints[m], point) > 48.0f)
++		{
++			continue;
++		}
++		*place  = eta_switchPlace[m];
++		*places = eta_switchPlaces[m];
++		if (eta_switchPressed[m])
++		{
++			Q_strncpyz(state, ", pressed already", stateSize);
++		}
++		else if (next && next != m && !eta_orderBroken)
++		{
++			Com_sprintf(state, stateSize, ", not yet: the %s one first", eta_switchSide[next]);
++		}
++		else
++		{
++			Q_strncpyz(state, next == m ? ", next to press" : "", stateSize);
++		}
++		return m;
++	}
++	return 0;
++}
++
+ /*
+  * Come up to a switch that is one of an order, or that closes walls on
+  * the player: what it is, once, in full - the short name T and F give
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index dec0a43d..11006bd4 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2433,6 +2433,7 @@ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
++int CG_AccessibilityPuzzleSwitchAt( const vec3_t point, int *place, int *places, char *state, size_t stateSize );
+ qboolean CG_AccessibilityThingPressedAt( const vec3_t point );
+ qboolean CG_AccessibilityThingKnownAt( const vec3_t point );
+ qboolean CG_AccessibilityThingsBreakableNear( float within, vec3_t out, char *name, size_t size );

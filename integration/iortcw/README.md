@@ -2771,3 +2771,16 @@ sliding back after that are not taken for presses. A message due while
 the crushing walls' warning is heard out waits for it to end. Tested
 from the tester's own saved game, in order, out of order, through a
 ride and a reset.
+
+### 0152 T lists a puzzle's buttons together
+
+T lists what is left in the area the player is in, so in the crypt's
+east room it gave one button of the three: "1 of 1, Button 2 of 3". The
+tester asked for the puzzle's buttons together. When any switch of an
+order is in the area or in sight, T now lists every switch of that
+order, first and in its order, wherever each one is - only the buttons: the
+tester did not want it called a puzzle. Each says how it stands, from the
+order's own record, which knows of resets: "next to press", "not yet:
+the south one first", or "pressed already" - and close by, "Pressing it
+again does nothing: it counts once", or for one out of turn, "Pressed
+now, it counts, but out of order". Away from the puzzle, T is as before.
