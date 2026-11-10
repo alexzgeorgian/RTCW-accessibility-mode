@@ -2784,3 +2784,30 @@ order's own record, which knows of resets: "next to press", "not yet:
 the south one first", or "pressed already" - and close by, "Pressing it
 again does nothing: it counts once", or for one out of turn, "Pressed
 now, it counts, but out of order". Away from the puzzle, T is as before.
+
+### 0153 Where a trap kills: stop before it, out of it, and how far across
+
+The tester was killed by the crypt's blade going for the button past
+it. The blade kills along six metres of its corridor, at a blow, while
+it swings; the mod said when it swung, not where that began. A trap's
+reach is now the map's hurt triggers near its movers, in one box. While
+the trap is not at rest: walking toward that box, within four metres,
+"Stop! The blade's reach starts 4 meters ahead"; inside it, at once and
+heard out like the walls' warning, the shortest way out, of eight ways
+round, with nothing in the way: "Out! Run behind, 2 meters". Near it,
+the swing is said with what to do, "Blade swinging: wait here, cross
+when it is back up", and the safe moment with how far to run, "Blade
+back up: run across now, 11 meters". Tested from the tester's own
+saved game, without god mode, doing what is said: stopped at the first
+word, crossed on "back up", pressed the button, and came back across
+the same way, unhurt.
+
+And O, leading to the south button, said "Marker reached" three metres
+from it - its usual arrival - which is just inside the blade's reach:
+the tester stopped there, pressed, and the next swing killed them. O
+no longer arrives while the player stands where a trap kills; it leads
+on, and arrived at the button two and a half metres from the wall,
+clear of the reach. Stopped inside the reach while the trap is at rest
+- its first blow comes in a fraction of a second when it next starts,
+too soon for "Out!" - is said too: "Don't stop here: you're in the
+blade's reach. Ahead, 2 meters, out of it".
