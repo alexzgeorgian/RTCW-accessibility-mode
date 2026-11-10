@@ -2868,3 +2868,22 @@ stopped"; so does being held up. Tested from the tester's own save,
 without god mode: across, the button pressed with F, and back across,
 unhurt. And a switch of an order pressed already says so when F or T
 names it: "Button 3 of 3, west, pressed already".
+
+### 0157 Buttons heard out; zombie warriors warned of
+
+In the crypt's blade corridor the tester heard no buttons on T. They
+were on the list, but the first line began "No things left in this
+area", and the blade's "swinging" and "back up", every few seconds, cut
+the rest off on the Mac before a button was named. Now "No things left"
+is not said when the list goes on; and while T's answer is heard, a
+trap's coming and going waits - unless the player is in its reach or
+walking into it - and is said once the answer is over, as it stands
+then; what the cross key goes by is not held back. The puzzle's buttons
+are listed too anywhere near them on their floor, once come across,
+while any is still to press: past the crossroads' north door T said
+"Everything found has been taken or used". And a zombie warrior - the
+crypt's come out at the crossroads, and swing blades - is said once,
+the first time one is within 25 metres on the player's floor, seen or
+not: "Zombie warrior with a blade, ahead left, 14 meters. U locks on to
+it". Tested from the tester's save: all three buttons heard in the
+corridor, the blade's line after them.

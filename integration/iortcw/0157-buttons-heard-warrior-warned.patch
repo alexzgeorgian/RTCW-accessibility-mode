@@ -1,0 +1,278 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 545b215f..63c6828a 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -853,15 +853,30 @@ static void ETA_ThingsStep(int step)
+ 		   order, wherever each is, when any of it is in this area or in
+ 		   sight: the tester heard one of three, and not which the
+ 		   others were. */
+-		for (i = 0; i < eta_things.count && !puzzle; i++)
+ 		{
+-			int  place, places;
+-			char state[64];
++			qboolean known = qfalse, unpressed = qfalse, near = qfalse;
++
++			for (i = 0; i < eta_things.count && !puzzle; i++)
++			{
++				int  place, places;
++				char state[64];
+ 
+-			puzzle = (qboolean)( eta_things.things[i].kind == ETA_THING_SWITCH
+-			                     && CG_AccessibilityPuzzleSwitchAt(eta_things.things[i].point, &place, &places, state, sizeof(state))
+-			                     && ( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
+-			                          || ETA_ThingHereInSight(eta_things.things[i].point) ) );
++				if (eta_things.things[i].kind != ETA_THING_SWITCH
++				    || !CG_AccessibilityPuzzleSwitchAt(eta_things.things[i].point, &place, &places, state, sizeof(state)))
++				{
++					continue;
++				}
++				puzzle = (qboolean)( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
++				                     || ETA_ThingHereInSight(eta_things.things[i].point) );
++				/* Or near it, on its floor, while any of it is still to
++				   press and some of it has been come across: in a
++				   corridor of its own, its buttons were not on T. */
++				known     = (qboolean)( known || eta_things.things[i].known );
++				unpressed = (qboolean)( unpressed || !Q_stristr(state, "pressed already") );
++				near      = (qboolean)( near || ( fabsf(eta_things.things[i].point[2] - ps->origin[2]) < 160.0f
++				                                  && Distance(eta_things.things[i].point, ps->origin) < 1600.0f ) );
++			}
++			puzzle = (qboolean)( puzzle || ( known && unpressed && near ) );
+ 		}
+ 		for (i = 0; puzzle && i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
+@@ -1024,10 +1039,20 @@ static void ETA_ThingsStep(int step)
+ 	}
+ 
+ 	ETA_Speech_BeginReport();
++	progress[0] = '\0';
+ 	if (fresh)
+ 	{
+ 		ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
+-		ETA_Speech_Say(progress);
++		/* "No things left" and then a button: heard as nothing here, the
++		   rest cut off. The list says what there is. */
++		if (Q_stricmpn(progress, "No things left", 14))
++		{
++			ETA_Speech_Say(progress);
++		}
++		else
++		{
++			progress[0] = '\0';
++		}
+ 	}
+ 
+ 	/* Close enough to reach: only what to do with it. */
+@@ -1065,6 +1090,9 @@ static void ETA_ThingsStep(int step)
+ 		                  meters, meters == 1 ? "meter" : "meters"));
+ 	}
+ 	ETA_Speech_EndReport();
++	/* Heard out: a trap's coming and going waits for it. */
++	CG_AccessibilityAnswerSaid((int)strlen(progress) + (int)strlen(shown) + (int)strlen(why) + 40);
++	ETA_HudNarrator_HoldPassive(cg.time);
+ 
+ 	Q_strncpyz(name, thing->name, sizeof(name));
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index e3f8cef5..bdbb358c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4115,6 +4115,7 @@ static struct
+ 	qboolean inZoneSaid;
+ 	qboolean restZoneSaid;   /* "don't stop here", said for this stay in it */
+ 	int      stopSaidAt;
++	char     waiting[128];   /* its coming or going, kept while a key's answer is heard */
+ } eta_trapGroups[ETA_MAX_TRAP_MOVERS];
+ /* The map's hurt triggers, by brush model: where a trap kills. */
+ #define ETA_MAX_HURTS 64
+@@ -8210,6 +8211,41 @@ static float ETA_ZoneAcross(const vec3_t origin, const vec3_t mins, const vec3_t
+ 
+ /* Whether a point is where a trap kills - inside the reach of one whose
+    reach is known, on its floor: for O, which does not stop there. */
++/*
++ * A key's answer being heard out: T's line on a puzzle button runs five
++ * seconds and more, and a trap's "swinging" or "back up" every few
++ * seconds cut it off on the Mac before the button was named - the
++ * tester heard no buttons on T in the blade's corridor. While it lasts,
++ * a trap's coming and going waits, unless the player is in its reach or
++ * walking into it; it is said once the answer is over, as it stands then.
++ */
++static int eta_answerUntil;
++
++void CG_AccessibilityAnswerSaid(int length)
++{
++	int ms = 1500 + length * 45;
++
++	eta_answerUntil = cg.time + ( ms > 9000 ? 9000 : ms );
++}
++
++static qboolean ETA_AnswerHeard(void)
++{
++	return (qboolean)( cg.time < eta_answerUntil && cg.time + 9000 >= eta_answerUntil );
++}
++
++/* A trap's coming or going: said, or kept till the answer is over - the
++   latest only, so what is said then is how it stands then. */
++static void ETA_TrapCycleSay(int g, qboolean quiet, const char *text)
++{
++	if (quiet)
++	{
++		Q_strncpyz(eta_trapGroups[g].waiting, text, sizeof(eta_trapGroups[g].waiting));
++		return;
++	}
++	eta_trapGroups[g].waiting[0] = '\0';
++	ETA_Speech_Say(text);
++}
++
+ qboolean CG_AccessibilityInTrapReach(const vec3_t origin)
+ {
+ 	int g;
+@@ -8382,7 +8418,8 @@ static void ETA_TrapsFrame(void)
+ 
+ 		if (nearest > ETA_TRAP_FORGET)
+ 		{
+-			eta_trapGroups[g].announced = qfalse;
++			eta_trapGroups[g].announced  = qfalse;
++			eta_trapGroups[g].waiting[0] = '\0';
+ 			continue;
+ 		}
+ 
+@@ -8481,6 +8518,7 @@ static void ETA_TrapsFrame(void)
+ 			Q_strncpyz(Name, name, sizeof(Name));
+ 			Name[0] = (char)toupper(Name[0]);
+ 			float gap = 1.0e9f, margin = ETA_TrapMargin(g);
++			qboolean quiet = qfalse;   /* a key's answer heard first: its coming and going kept */
+ 
+ 			if (!eta_trapGroups[g].zoneDone)
+ 			{
+@@ -8492,13 +8530,26 @@ static void ETA_TrapsFrame(void)
+ 				gap = ETA_ZoneGap(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs);
+ 			}
+ 
++			/* A key's answer first, while out of the way of it. */
++			{
++				float    speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++				qboolean wait  = (qboolean)( ETA_AnswerHeard() && gap > margin && ( gap > 160.0f + margin || speed < 60.0f ) );
++
++				quiet = wait;
++				if (!wait && eta_trapGroups[g].waiting[0])
++				{
++					ETA_Speech_Say(eta_trapGroups[g].waiting);
++					eta_trapGroups[g].waiting[0] = '\0';
++				}
++			}
++
+ 			if (anyFast)
+ 			{
+ 				eta_trapGroups[g].stillSince = 0;
+ 				if (eta_trapGroups[g].state != ETA_TRAP_FAST)
+ 				{
+ 					eta_trapGroups[g].state = ETA_TRAP_FAST;
+-					ETA_Speech_Say(va("%s %s%s", Name, !Q_stricmp(kind, "blade") ? "swinging" : "moving",
++					ETA_TrapCycleSay(g, quiet, va("%s %s%s", Name, !Q_stricmp(kind, "blade") ? "swinging" : "moving",
+ 					                  gap > margin && gap < 400.0f ? count > 1 ? ": wait here, cross when they are back at rest"
+ 					                  : ": wait here, cross when it is back up" : ""));
+ 				}
+@@ -8512,7 +8563,7 @@ static void ETA_TrapsFrame(void)
+ 				if (anyAway && eta_trapGroups[g].state == ETA_TRAP_FAST)
+ 				{
+ 					eta_trapGroups[g].state = ETA_TRAP_AWAY;
+-					ETA_Speech_Say(va("%s stopped in the way: wait", Name));
++					ETA_TrapCycleSay(g, quiet, va("%s stopped in the way: wait", Name));
+ 				}
+ 				else if (!anyAway && eta_trapGroups[g].state != ETA_TRAP_REST)
+ 				{
+@@ -8522,12 +8573,12 @@ static void ETA_TrapsFrame(void)
+ 						int across = (int)( ETA_ZoneAcross(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs, margin)
+ 						                    * ETA_QU_TO_METERS + 0.5f );
+ 
+-						ETA_Speech_Say(va("%s %s: run across now, without stopping, %d meters", Name,
++						ETA_TrapCycleSay(g, quiet, va("%s %s: run across now, without stopping, %d meters", Name,
+ 						                  !Q_stricmp(kind, "blade") ? "back up" : "stopped", across));
+ 					}
+ 					else
+ 					{
+-						ETA_Speech_Say(va("%s %s, safe to cross", Name, !Q_stricmp(kind, "blade") ? "back up" : "stopped"));
++						ETA_TrapCycleSay(g, quiet, va("%s %s, safe to cross", Name, !Q_stricmp(kind, "blade") ? "back up" : "stopped"));
+ 					}
+ 				}
+ 			}
+@@ -8685,11 +8736,67 @@ static void ETA_TrapsFrame(void)
+ 	}
+ }
+ 
++/*
++ * A zombie warrior come near: it swings a blade, and comes on fast. The
++ * crypt's two are let out at the crossroads once the zombies there are
++ * dead, and reached the tester at the blade's corridor out of sight,
++ * named only by the blow. Said once each, the first time one is within
++ * reach of a few seconds' run on the player's floor - seen or not.
++ */
++#define ETA_WARRIOR_NEAR 25.0f   /* meters */
++
++static void ETA_WarriorFrame(void)
++{
++	static qboolean warned[MAX_GENTITIES];
++	static int      lastTime, lastStart;
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  i, best = -1;
++	float                bestDistance = ETA_WARRIOR_NEAR / ETA_QU_TO_METERS;
++
++	if (cg.time < lastTime || cgs.levelStartTime != lastStart)
++	{
++		memset(warned, 0, sizeof(warned));   /* a new map, or a game loaded */
++	}
++	lastTime  = cg.time;
++	lastStart = cgs.levelStartTime;
++	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
++	{
++		return;
++	}
++	for (i = 0; i < cg.snap->numEntities; i++)
++	{
++		const entityState_t *es = &cg.snap->entities[i];
++		float                distance;
++
++		if (es->eType != ET_PLAYER || es->aiChar != AICHAR_WARZOMBIE || (es->eFlags & EF_DEAD)
++		    || es->number < 0 || es->number >= MAX_GENTITIES || warned[es->number] || !ETA_SeenAsEnemy(es))
++		{
++			continue;
++		}
++		distance = Distance(cg_entities[es->number].lerpOrigin, ps->origin);
++		if (distance < bestDistance && fabsf(cg_entities[es->number].lerpOrigin[2] - ps->origin[2]) < 160.0f)
++		{
++			bestDistance = distance;
++			best         = es->number;
++		}
++	}
++	if (best >= 0)
++	{
++		int meters = (int)( bestDistance * ETA_QU_TO_METERS + 0.5f );
++
++		warned[best] = qtrue;
++		ETA_Speech_Say(va("Zombie warrior with a blade, %s, %d %s. U locks on to it",
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cg_entities[best].lerpOrigin)),
++		                  meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters"));
++	}
++}
++
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
+ 	ETA_CrushFrame();
+ 	ETA_SwitchNoticeFrame();
+ 	ETA_LiftsFrame();
++	ETA_WarriorFrame();
+ 	ETA_OrderFrame();
+ 	ETA_TrapsFrame();
+ 	ETA_WorldRead();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 146df380..7e35876b 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2434,6 +2434,7 @@ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
+ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
++void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
+ qboolean CG_AccessibilityTrapNear( vec3_t mins, vec3_t maxs, float *margin, float *gap, qboolean *safe, qboolean *everMoved, char *kind, size_t kindSize );
+ void CG_AccessibilityCrossTrap( void );
