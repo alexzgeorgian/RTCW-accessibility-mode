@@ -2925,3 +2925,23 @@ it: F opens it, then walk straight on through" - and through it, the
 level's end. And O on a thing it cannot reach, asked again from the same
 spot, goes on to the way out instead of "no way" again and again: after
 the fall, it was still on the treasure left above.
+
+### 0159 The blade's safe moment
+
+The tester still died going for the crypt's south button, the cross key
+getting them there "by luck". The level's script says why: the blade,
+drawn back up, waits 0.5, 1.5, 2.25 or 5 seconds at random before it
+swings - the half by the button first - and across from the top of the
+corridor is two seconds and more. "Back up: run across now" was a
+gamble, lost one time in two. Now the slow draw back is watched, and
+the go is 0.8 seconds after it ends: not swung by then, the wait is a
+long one. The cross key walks the player up to the edge of the reach
+first ("Walking you up to the edge of the blade's reach, 5 meters, then
+waiting there for the safe moment"), faces across, and at the go runs at
+a sprint. By hand, from the edge: "Now: run across, without stopping,
+10 meters"; farther: "Blade back up. Too far to get across in time from
+here: walk 4 meters closer, to the edge of its reach, and wait there. Or
+slash crosses for you". Tested from the tester's save without god mode:
+six crossings and two round trips, button pressed, all alive. A
+button's own part pressed in is no longer "Walls closing"; and "Stop!"
+is not said while the cross key moves the player.

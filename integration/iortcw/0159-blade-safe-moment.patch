@@ -1,0 +1,337 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 760e7a3c..0a329c7d 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3988,7 +3988,8 @@ void CG_AccessibilityFaceTheWay(void)
+  */
+ static struct
+ {
+-	int      stage;        /* 0 off, 1 waiting, 2 facing, 3 running */
++	int      stage;        /* 0 off, 1 waiting, 2 facing, 3 running, 4 walking up to its edge */
++	vec3_t   ready;        /* the edge of its reach, where the wait is */
+ 	vec3_t   target;       /* where the run ends */
+ 	char     goalName[48]; /* what O leads to beyond it, if anything */
+ 	qboolean haveGoal;
+@@ -4001,9 +4002,9 @@ static struct
+ 
+ static void ETA_CrossStop(const char *say)
+ {
+-	if (eta_cross.stage == 3)
++	if (eta_cross.stage == 3 || eta_cross.stage == 4)
+ 	{
+-		trap_SendConsoleCommand("-forward\n");
++		trap_SendConsoleCommand("-forward\n-sprint\n");
+ 	}
+ 	eta_cross.stage = 0;
+ 	if (say)
+@@ -4013,6 +4014,12 @@ static void ETA_CrossStop(const char *say)
+ 	}
+ }
+ 
++/* The cross key moving the player itself: "Stop!" is not for that. */
++qboolean CG_AccessibilityCrossing(void)
++{
++	return (qboolean)( eta_cross.stage != 0 );
++}
++
+ void CG_AccessibilityCrossTrap(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -4097,6 +4104,27 @@ void CG_AccessibilityCrossTrap(void)
+ 	eta_cross.target[2] = ps->origin[2];
+ 	eta_cross.sawUnsafe = (qboolean)!safe;
+ 	eta_cross.stageAt   = cg.time;
++	/* A blade: from the edge of its reach, or there is not time to get
++	   across. Walked up to it first - safe there whatever it does. */
++	if (!Q_stricmp(eta_cross.kind, "blade") && gap > margin + 16.0f)
++	{
++		etaAimTarget_t aim;
++
++		VectorMA(ps->origin, gap - margin - 4.0f, dir, eta_cross.ready);
++		eta_cross.ready[2] = ps->origin[2];
++		memset(&aim, 0, sizeof(aim));
++		aim.entityNum = -1;
++		VectorCopy(eta_cross.target, aim.point);
++		aim.point[2] += ps->viewheight - 8.0f;
++		ETA_AimStartSnap(&aim, NULL);
++		eta_cross.stage = 4;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("Crossing. Walking you up to the edge of the %s's reach, %d %s, then waiting there for the "
++		                  "safe moment. Any move of yours stops it", eta_cross.kind,
++		                  (int)( ( gap - margin ) * ETA_QU_TO_METERS + 0.5f ) < 1 ? 1 : (int)( ( gap - margin ) * ETA_QU_TO_METERS + 0.5f ),
++		                  (int)( ( gap - margin ) * ETA_QU_TO_METERS + 0.5f ) <= 1 ? "meter" : "meters"));
++		return;
++	}
+ 	/* Never moved yet, and at rest: no swing to wait for. Otherwise the
+ 	   next safe moment, from its start, so the whole of it is the run's. */
+ 	eta_cross.stage = 1;
+@@ -4129,7 +4157,7 @@ static void ETA_CrossFrame(void)
+ 	/* The player's own move stops it: back, aside, a jump - or, while
+ 	   waiting, forward too. */
+ 	trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd);
+-	if (cmd.rightmove || cmd.upmove > 0 || cmd.forwardmove < 0 || ( eta_cross.stage == 1 && cmd.forwardmove > 0 ))
++	if (cmd.rightmove || cmd.upmove > 0 || cmd.forwardmove < 0 || ( eta_cross.stage == 1 && cmd.forwardmove > 0 && cg.time - eta_cross.stageAt > 300 ))
+ 	{
+ 		ETA_CrossStop("Crossing stopped");
+ 		return;
+@@ -4140,8 +4168,57 @@ static void ETA_CrossFrame(void)
+ 		return;
+ 	}
+ 
++	/* Walking up to the edge of its reach. */
++	if (eta_cross.stage == 4)
++	{
++		if (cg.time - eta_cross.stageAt > 250 && !( cmd.forwardmove > 0 ))
++		{
++			trap_SendConsoleCommand("+forward\n");
++		}
++		/* Stopped a little short: a body slides on a step or so. */
++		if (gap <= margin + 44.0f
++		    || ( ( eta_cross.ready[0] - ps->origin[0] ) * ( eta_cross.target[0] - eta_cross.ready[0] )
++		         + ( eta_cross.ready[1] - ps->origin[1] ) * ( eta_cross.target[1] - eta_cross.ready[1] ) < 0.0f ))
++		{
++			trap_SendConsoleCommand("-forward\n");
++			eta_cross.stage     = 1;
++			eta_cross.stageAt   = cg.time;
++			eta_cross.sawUnsafe = (qboolean)!safe;
++			ETA_Speech_Say(va("At the edge of its reach. Waiting for the %s: stay still", kind));
++		}
++		else if (cg.time - eta_cross.stageAt > 8000)
++		{
++			ETA_CrossStop("Crossing stopped: something is in the way");
++		}
++		return;
++	}
++
+ 	if (eta_cross.stage == 1)
+ 	{
++		int go = !Q_stricmp(kind, "blade") ? CG_AccessibilityTrapGo() : 0;
++
++		/* A blade's go known: then and only then, still at rest. */
++		if (go != 0)
++		{
++			if (go > 0 && safe && cg.time >= go && cg.time - go < 300)
++			{
++				etaAimTarget_t aim;
++
++				memset(&aim, 0, sizeof(aim));
++				aim.entityNum = -1;
++				VectorCopy(eta_cross.target, aim.point);
++				aim.point[2] += cg.predictedPlayerState.viewheight - 8.0f;
++				ETA_AimStartSnap(&aim, NULL);
++				eta_cross.stage   = 2;
++				eta_cross.stageAt = cg.time;
++				ETA_Speech_Say("Now");
++			}
++			else if (cg.time - eta_cross.stageAt > 40000)
++			{
++				ETA_CrossStop("Crossing stopped: the trap did not come to rest");
++			}
++			return;
++		}
+ 		if (!safe)
+ 		{
+ 			eta_cross.sawUnsafe = qtrue;
+@@ -4175,7 +4252,7 @@ static void ETA_CrossFrame(void)
+ 		off = fabsf(AngleNormalize180(vectoyaw(to) - ps->viewangles[YAW]));
+ 		if (off < 6.0f || cg.time - eta_cross.stageAt > 600)
+ 		{
+-			trap_SendConsoleCommand("+forward\n");
++			trap_SendConsoleCommand("+forward\n+sprint\n");
+ 			eta_cross.stage      = 3;
+ 			eta_cross.stageAt    = cg.time;
+ 			eta_cross.lastMoveAt = cg.time;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 5c0a298e..9776c764 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4117,6 +4117,9 @@ static struct
+ 	qboolean restZoneSaid;   /* "don't stop here", said for this stay in it */
+ 	int      stopSaidAt;
+ 	char     waiting[128];   /* its coming or going, kept while a key's answer is heard */
++	int      retractEnd;     /* a blade: when its slow draw back up ends; 0 not seen */
++	qboolean swungEarly;     /* swung again before its go, after that draw back */
++	qboolean goPending;      /* "run across now" kept for its go */
+ } eta_trapGroups[ETA_MAX_TRAP_MOVERS];
+ /* The map's hurt triggers, by brush model: where a trap kills. */
+ #define ETA_MAX_HURTS 64
+@@ -7913,6 +7916,12 @@ static void ETA_CrushFrame(void)
+ 		}
+ 		BG_EvaluateTrajectory(&es->pos, es->pos.trTime + es->pos.trDuration, end);
+ 		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		/* A button's own part pressed in is no wall: the crypt's south
++		   one, pressed, was "Run right! Walls closing". */
++		if (maxs[2] - mins[2] < 48.0f && maxs[0] - mins[0] < 48.0f && maxs[1] - mins[1] < 48.0f)
++		{
++			continue;
++		}
+ 		VectorAdd(end, mins, ends[endCount][0]);
+ 		VectorAdd(end, maxs, ends[endCount][1]);
+ 		for (k = 0; k < 3; k++)
+@@ -8382,6 +8391,87 @@ const char *CG_AccessibilityTrapUnder(const vec3_t point)
+ 	return NULL;
+ }
+ 
++/*
++ * A blade's go. The crypt's draws back up slowly, seven seconds, and then
++ * waits 0.5, 1.5, 2.25 or 5 seconds at random before it swings, the half
++ * nearest the button first. Across at a run takes a second and more even
++ * from the edge of its reach, so "back up: run across now" was a gamble
++ * the tester lost again and again, and the cross key won by luck. Its go
++ * is 0.8 seconds after it is up: not swung by then, the wait is a long
++ * one, and there is time. ETA_GO_NONE when it is not known; ETA_GO_EARLY
++ * when it swung before it, the next time to be waited for.
++ */
++#define ETA_BLADE_GO_AFTER 800   /* its first move is a no-op of 150 ms: a swing at 0.5 s is seen by then */
++#define ETA_BLADE_DRAWBACK 3000   /* a turn this long: drawn back, not a blow */
++
++static int ETA_BladeGo(int g)
++{
++	int i, j;
++
++	if (g < 0 || g >= eta_trapGroupCount || !cg.snap)
++	{
++		return 0;
++	}
++	for (i = 0; i < eta_trapMoverCount; i++)
++	{
++		if (eta_trapMovers[i].group != g || Q_stricmp(eta_trapMovers[i].kind, "blade"))
++		{
++			continue;
++		}
++		for (j = 0; j < cg.snap->numEntities; j++)
++		{
++			const entityState_t *es = &cg.snap->entities[j];
++
++			if (es->eType != ET_MOVER || es->modelindex != eta_trapMovers[i].model)
++			{
++				continue;
++			}
++			if (es->apos.trType != TR_STATIONARY && es->apos.trDuration >= ETA_BLADE_DRAWBACK)
++			{
++				eta_trapGroups[g].retractEnd = es->apos.trTime + es->apos.trDuration;
++				eta_trapGroups[g].swungEarly = qfalse;
++			}
++			else if (eta_trapGroups[g].retractEnd && es->apos.trTime > eta_trapGroups[g].retractEnd + 30
++			         && es->apos.trTime < eta_trapGroups[g].retractEnd + ETA_BLADE_GO_AFTER + 1000)
++			{
++				eta_trapGroups[g].swungEarly = qtrue;
++			}
++			break;
++		}
++	}
++	if (!eta_trapGroups[g].retractEnd)
++	{
++		return 0;
++	}
++	return eta_trapGroups[g].swungEarly ? -1 : eta_trapGroups[g].retractEnd + ETA_BLADE_GO_AFTER;
++}
++
++/* For the cross key: the nearest trap's go, as ETA_BladeGo. */
++int CG_AccessibilityTrapGo(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  g, best = -1;
++	float                bestGap = 480.0f;
++
++	for (g = 0; g < eta_trapGroupCount; g++)
++	{
++		float gap;
++
++		if (eta_trapGroups[g].zoneDone != 2
++		    || ps->origin[2] < eta_trapGroups[g].zoneMins[2] - 48.0f || ps->origin[2] > eta_trapGroups[g].zoneMaxs[2] + 48.0f)
++		{
++			continue;
++		}
++		gap = ETA_ZoneGap(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs);
++		if (gap < bestGap)
++		{
++			bestGap = gap;
++			best    = g;
++		}
++	}
++	return best < 0 ? 0 : ETA_BladeGo(best);
++}
++
+ qboolean CG_AccessibilityInTrapReach(const vec3_t origin)
+ {
+ 	int g;
+@@ -8681,6 +8771,28 @@ static void ETA_TrapsFrame(void)
+ 				qboolean wait  = (qboolean)( ETA_AnswerHeard() && gap > margin && ( gap > 160.0f + margin || speed < 60.0f ) );
+ 
+ 				quiet = wait;
++				if (eta_trapGroups[g].goPending)
++				{
++					int go = ETA_BladeGo(g);
++
++					if (go <= 0 || anyFast)
++					{
++						eta_trapGroups[g].goPending = qfalse;   /* swung early: the next time */
++					}
++					else if (cg.time >= go)
++					{
++						int across = (int)( ETA_ZoneAcross(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs, margin)
++						                    * ETA_QU_TO_METERS + 0.5f );
++
++						eta_trapGroups[g].goPending = qfalse;
++						eta_trapGroups[g].waiting[0] = '\0';
++						if (!CG_AccessibilityCrossing())   /* the cross key says its own "Now" */
++						{
++							ETA_Speech_Stop();
++							ETA_Speech_Say(va("Now: run across, without stopping, %d meters", across));
++						}
++					}
++				}
+ 				if (!wait && eta_trapGroups[g].waiting[0])
+ 				{
+ 					ETA_Speech_Say(eta_trapGroups[g].waiting);
+@@ -8720,8 +8832,25 @@ static void ETA_TrapsFrame(void)
+ 						int across = (int)( ETA_ZoneAcross(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs, margin)
+ 						                    * ETA_QU_TO_METERS + 0.5f );
+ 
+-						ETA_TrapCycleSay(g, quiet, va("%s %s: run across now, without stopping, %d meters", Name,
+-						                  !Q_stricmp(kind, "blade") ? "back up" : "stopped", across));
++						int go = !Q_stricmp(kind, "blade") ? ETA_BladeGo(g) : 0;
++
++						if (go > 0 && gap > margin + 64.0f)
++						{
++							int closer = (int)( ( gap - margin - 8.0f ) * ETA_QU_TO_METERS + 0.5f );
++
++							ETA_TrapCycleSay(g, quiet, va("Blade back up. Too far to get across in time from here: walk %d %s "
++							                              "closer, to the edge of its reach, and wait there. Or slash crosses for you",
++							                              closer < 1 ? 1 : closer, closer <= 1 ? "meter" : "meters"));
++						}
++						else if (go > 0)
++						{
++							eta_trapGroups[g].goPending = qtrue;   /* said at its go, if it has not swung */
++						}
++						else
++						{
++							ETA_TrapCycleSay(g, quiet, va("%s %s: run across now, without stopping, %d meters", Name,
++							                              !Q_stricmp(kind, "blade") ? "back up" : "stopped", across));
++						}
+ 					}
+ 					else
+ 					{
+@@ -8772,7 +8901,7 @@ static void ETA_TrapsFrame(void)
+ 						near[k] = ps->origin[k] < eta_trapGroups[g].zoneMins[k] ? eta_trapGroups[g].zoneMins[k]
+ 						          : ps->origin[k] > eta_trapGroups[g].zoneMaxs[k] ? eta_trapGroups[g].zoneMaxs[k] : ps->origin[k];
+ 					}
+-					if (speed > 60.0f
++					if (speed > 60.0f && !CG_AccessibilityCrossing()
+ 					    && ps->velocity[0] * ( near[0] - ps->origin[0] ) + ps->velocity[1] * ( near[1] - ps->origin[1] ) > 0.3f * speed * MAX(1.0f, gap)
+ 					    && ( cg.time - eta_trapGroups[g].stopSaidAt > 4000 || cg.time < eta_trapGroups[g].stopSaidAt ))
+ 					{
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index e10552bf..6bc7f7ba 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2434,6 +2434,8 @@ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
+ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
++int CG_AccessibilityTrapGo( void );
++qboolean CG_AccessibilityCrossing( void );
+ const char *CG_AccessibilityTrapUnder( const vec3_t point );
+ void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
