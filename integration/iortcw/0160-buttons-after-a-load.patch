@@ -1,0 +1,144 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index c84725d4..24c3daac 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1104,7 +1104,7 @@ static void ETA_ThingsStep(int step)
+ 		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
+ 		                  : isPuzzle && thing->pressed ? "Pressing it again does nothing: it counts once"
+-		                  : isPuzzle && Q_stristr(why, "hidden doors") ? "F presses it: it counts, but the hidden doors stay shut"
++		                  : isPuzzle && Q_stristr(why, "in order,") ? "F presses it: it counts, but the hidden doors stay shut"
+ 		                  : isPuzzle && meters > 2 ? va("Walk %d %s closer, then F uses it", meters - 2, meters - 2 == 1 ? "meter" : "meters")
+ 		                  : isPuzzle ? "F uses it"
+ 		                  : thing->pressed ? "F presses it again"
+@@ -1297,19 +1297,27 @@ void CG_AccessibilityThingsFrame(void)
+ 		    && ( eta_things.things[eta_things.target].done
+ 		         || ( eta_things.things[eta_things.target].pressed && !eta_things.targetPressed ) ))
+ 		{
+-			char progress[160];
+-			int  counts[ETA_THING_KINDS], left, area = CG_AccessibilityAreaHere(), all;
++			char progress[160], state[64];
++			int  counts[ETA_THING_KINDS], left, area = CG_AccessibilityAreaHere(), all, place, places;
++			qboolean puzzle = (qboolean)( CG_AccessibilityPuzzleSwitchAt(eta_things.things[eta_things.target].point,
++			                                                              &place, &places, state, sizeof(state)) != 0 );
+ 
+ 			eta_things.target = -1;
+ 			CG_AccessibilityLedClear();
+-			ETA_ThingsCount(-1, counts, &all);
+-			ETA_ThingsCount(area, counts, &left);
+-			ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
+-			ETA_Speech_BeginReport();
+-			ETA_Speech_Say(left ? va("Done. %s. T chooses the next", progress)
+-			               : all ? "Done. Nothing else in this area. X finds the doors out"
+-			               : "Done. Nothing else found to take or use");
+-			ETA_Speech_EndReport();
++			/* A puzzle's button: its own press is said by the order, "1 of
++			   3 pressed"; and one only learnt to be pressed, after a game
++			   was loaded, was "Done. Nothing else found". */
++			if (!puzzle)
++			{
++				ETA_ThingsCount(-1, counts, &all);
++				ETA_ThingsCount(area, counts, &left);
++				ETA_ThingsProgress(area, area >= 0 ? " in this area" : "", progress, sizeof(progress));
++				ETA_Speech_BeginReport();
++				ETA_Speech_Say(left ? va("Done. %s. T chooses the next", progress)
++				               : all ? "Done. Nothing else in this area. X finds the doors out"
++				               : "Done. Nothing else found to take or use");
++				ETA_Speech_EndReport();
++			}
+ 		}
+ 
+ 		/* The fight: begun when an enemy comes into sight after a calm,
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 9776c764..e24dccf8 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4726,6 +4726,7 @@ static int      eta_crushUrgentUntil;  /* a crush warning is being heard out til
+ static char     eta_orderPending[MAX_STRING_CHARS];   /* said once it has been */
+ static int      eta_orderNext;       /* 1-based place pressed next in order */
+ static qboolean eta_orderBroken;     /* pressed out of order since the last reset */
++static qboolean eta_orderLoaded;     /* a game loaded: switches not seen since are not known */
+ /*
+  * Lifts. The same level's last puzzle: when the three buttons are
+  * pressed, the stone pillar in the middle of the crossroads sinks level
+@@ -7574,11 +7575,65 @@ static void ETA_OrderReset(qboolean say)
+ 	}
+ }
+ 
++/*
++ * A game loaded - a save, or the last one after dying: what was seen of
++ * the switches, the lifts and the traps before it is of another time.
++ * Kept, a button pressed after the save was taken for pressed, then seen
++ * not, and "the buttons have reset: press all 3 again" was said - the
++ * tester, back from dying, took the puzzle to be lost. Forgotten, without
++ * a word, and each learnt again as it is seen.
++ */
++static void ETA_LoadedForget(void)
++{
++	static int lastStart;
++	int        m, l, g;
++
++	if (lastStart == cgs.levelStartTime)
++	{
++		return;
++	}
++	if (!lastStart)
++	{
++		lastStart = cgs.levelStartTime;
++		return;
++	}
++	lastStart = cgs.levelStartTime;
++	for (m = 0; m < MAX_MODELS; m++)
++	{
++		eta_switchSeen[m]     = qfalse;
++		eta_switchPressed[m]  = qfalse;
++		eta_switchSettling[m] = qfalse;
++	}
++	eta_orderNext       = 1;
++	eta_orderBroken     = qfalse;
++	eta_orderPending[0] = '\0';
++	eta_orderLoaded     = qtrue;
++	for (l = 0; l < eta_liftCount; l++)
++	{
++		eta_lifts[l].announced    = qfalse;
++		eta_lifts[l].riding       = qfalse;
++		eta_lifts[l].everReady    = qfalse;
++		eta_lifts[l].stillSince   = 0;
++		eta_lifts[l].bridgeMoving = qfalse;
++		eta_lifts[l].bridgeOut    = qfalse;
++		eta_lifts[l].wasMoving    = qfalse;
++		eta_lifts[l].stoppedAt    = 0;
++	}
++	for (g = 0; g < eta_trapGroupCount; g++)
++	{
++		eta_trapGroups[g].retractEnd = 0;
++		eta_trapGroups[g].swungEarly = qfalse;
++		eta_trapGroups[g].goPending  = qfalse;
++		eta_trapGroups[g].waiting[0] = '\0';
++	}
++}
++
+ static void ETA_OrderFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                  m, n;
+ 
++	ETA_LoadedForget();
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
+ 	{
+ 		return;
+@@ -7724,9 +7779,13 @@ int CG_AccessibilityPuzzleSwitchAt(const vec3_t point, int *place, int *places,
+ 		{
+ 			Q_strncpyz(state, ", pressed already", stateSize);
+ 		}
++		else if (eta_orderLoaded && !eta_switchSeen[m])
++		{
++			Q_strncpyz(state, ", not checked since the game was loaded", stateSize);
++		}
+ 		else if (next && next != m && !eta_orderBroken)
+ 		{
+-			Com_sprintf(state, stateSize, ", any order brings the pillar; for the hidden doors, the %s one first", eta_switchSide[next]);
++			Com_sprintf(state, stateSize, ", any order; in order, the %s one first", eta_switchSide[next]);
+ 		}
+ 		else
+ 		{

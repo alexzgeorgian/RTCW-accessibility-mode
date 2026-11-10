@@ -2945,3 +2945,18 @@ slash crosses for you". Tested from the tester's save without god mode:
 six crossings and two round trips, button pressed, all alive. A
 button's own part pressed in is no longer "Walls closing"; and "Stop!"
 is not said while the cross key moves the player.
+
+### 0160 Buttons after a load
+
+Back from dying, the tester was told the crypt's puzzle had to be done
+from the beginning - after a save as much as before one. The game keeps
+which buttons are pressed in its saves; the mode knows only what it has
+seen of them, and kept what it saw before the load: a button pressed
+after the save was taken for pressed, then seen not, and "the buttons
+have reset: press all 3 again" was said. Now a load forgets what was
+seen of the buttons, the lifts and the traps, without a word, and each
+is learnt again as it is seen: until then T says "not checked since the
+game was loaded", and seen, "pressed already" or not, as the game has
+it. A button learnt to be pressed is no longer "Done. Nothing else
+found", and the button's state is short enough not to be cut off: "any
+order; in order, the south one first".
