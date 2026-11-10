@@ -2811,3 +2811,16 @@ clear of the reach. Stopped inside the reach while the trap is at rest
 - its first blow comes in a fraction of a second when it next starts,
 too soon for "Out!" - is said too: "Don't stop here: you're in the
 blade's reach. Ahead, 2 meters, out of it".
+
+### 0154 Clear of the blade at the button, and T's "F uses it" only in reach
+
+The tester was still killed at the crypt's south button. T said "F uses
+it" at four metres - F reaches two and a half - and four metres from
+that button is inside the blade's reach; and the blade's own body,
+swinging, kills what it touches (a blocked script mover kills,
+script_mover_blocked), a little past its hurt triggers. T now says "Walk
+2 meters closer, then F uses it" until F reaches; and the reach is taken
+a metre wider for staying out of it - O's arrival, "Don't stop here",
+the way out, and how far to run across. Tested from the tester's save:
+O said "Marker reached" half a metre from the button; pressed there,
+the player stood through the blade's swings unhurt.

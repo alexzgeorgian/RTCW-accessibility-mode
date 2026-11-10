@@ -1,0 +1,124 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index d4c40211..545b215f 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1047,10 +1047,13 @@ static void ETA_ThingsStep(int step)
+ 		                  ? "F uses it"
+ 		                  : isPuzzle && thing->pressed ? "Pressing it again does nothing: it counts once"
+ 		                  : isPuzzle && Q_stristr(why, "not yet") ? "Pressed now, it counts, but out of order"
++		                  : isPuzzle && meters > 2 ? va("Walk %d %s closer, then F uses it", meters - 2, meters - 2 == 1 ? "meter" : "meters")
+ 		                  : isPuzzle ? "F uses it"
+ 		                  : thing->pressed ? "F presses it again"
+ 		                  : why[0] && thing->kind == ETA_THING_SWITCH && Q_stricmpn(thing->name, "Spot ", 5)
+ 		                  ? "F does nothing with it yet"
++		                  : thing->kind == ETA_THING_SWITCH && meters > 2 && Q_stricmpn(thing->name, "Spot ", 5)
++		                  ? va("Walk %d %s closer, then F uses it", meters - 2, meters - 2 == 1 ? "meter" : "meters")
+ 		                  : why[0] ? "Walking onto it does nothing yet"
+ 		                  : Q_stristr(thing->name, "inside something to break") ? "Break what it is in first"
+ 		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind]));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index bb479d4d..f8a4db23 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8062,6 +8062,11 @@ static void ETA_TrapZone(int g, const vec3_t *centers)
+ 	}
+ }
+ 
++/* The blade's own body, swinging, kills what it touches (a script mover
++   blocked kills, script_mover_blocked), and swings a little past its
++   hurt triggers: within this of the reach is in it, for staying out. */
++#define ETA_TRAP_REACH_MARGIN 40.0f
++
+ /* How far the player's body is from a zone, across the floor: 0 in it. */
+ static float ETA_ZoneGap(const vec3_t origin, const vec3_t mins, const vec3_t maxs)
+ {
+@@ -8097,9 +8102,9 @@ static qboolean ETA_ZoneExit(const vec3_t mins, const vec3_t maxs, float *turnOu
+ 			{
+ 				break;
+ 			}
+-			if (ETA_ZoneGap(at, mins, maxs) > 0.0f)
++			if (ETA_ZoneGap(at, mins, maxs) > ETA_TRAP_REACH_MARGIN)
+ 			{
+-				best     = run + 16.0f;
++				best     = run;
+ 				*turnOut = (float)( way * 45 );
+ 				break;
+ 			}
+@@ -8131,7 +8136,7 @@ static float ETA_ZoneAcross(const vec3_t origin, const vec3_t mins, const vec3_t
+ 	{
+ 		across = MAX(across, maxs[0] - origin[0]);
+ 	}
+-	return across + 36.0f;
++	return across + 36.0f + ETA_TRAP_REACH_MARGIN;
+ }
+ 
+ /* Whether a point is where a trap kills - inside the reach of one whose
+@@ -8144,7 +8149,7 @@ qboolean CG_AccessibilityInTrapReach(const vec3_t origin)
+ 	{
+ 		if (eta_trapGroups[g].zoneDone == 2
+ 		    && origin[2] > eta_trapGroups[g].zoneMins[2] - 48.0f && origin[2] < eta_trapGroups[g].zoneMaxs[2] + 48.0f
+-		    && ETA_ZoneGap(origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs) <= 0.0f)
++		    && ETA_ZoneGap(origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs) <= ETA_TRAP_REACH_MARGIN)
+ 		{
+ 			return qtrue;
+ 		}
+@@ -8374,7 +8379,7 @@ static void ETA_TrapsFrame(void)
+ 				{
+ 					eta_trapGroups[g].state = ETA_TRAP_FAST;
+ 					ETA_Speech_Say(va("%s %s%s", Name, !Q_stricmp(kind, "blade") ? "swinging" : "moving",
+-					                  gap > 0.0f && gap < 400.0f ? count > 1 ? ": wait here, cross when they are back at rest"
++					                  gap > ETA_TRAP_REACH_MARGIN && gap < 400.0f ? count > 1 ? ": wait here, cross when they are back at rest"
+ 					                  : ": wait here, cross when it is back up" : ""));
+ 				}
+ 			}
+@@ -8392,7 +8397,7 @@ static void ETA_TrapsFrame(void)
+ 				else if (!anyAway && eta_trapGroups[g].state != ETA_TRAP_REST)
+ 				{
+ 					eta_trapGroups[g].state = ETA_TRAP_REST;
+-					if (gap > 0.0f && gap < 400.0f)
++					if (gap > ETA_TRAP_REACH_MARGIN && gap < 400.0f)
+ 					{
+ 						int across = (int)( ETA_ZoneAcross(ps->origin, eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs)
+ 						                    * ETA_QU_TO_METERS + 0.5f );
+@@ -8413,7 +8418,7 @@ static void ETA_TrapsFrame(void)
+ 			{
+ 				const char *reach = count > 1 ? va("The %s' reach", name) : va("The %s's reach", name);
+ 
+-				if (gap <= 0.0f && !eta_trapGroups[g].inZoneSaid)
++				if (gap <= ETA_TRAP_REACH_MARGIN && !eta_trapGroups[g].inZoneSaid)
+ 				{
+ 					float turn, run;
+ 
+@@ -8434,12 +8439,12 @@ static void ETA_TrapsFrame(void)
+ 					}
+ 					ETA_Speech_HoldForUrgent(qtrue);
+ 				}
+-				else if (gap > 0.0f && gap < 160.0f
++				else if (gap > ETA_TRAP_REACH_MARGIN && gap < 160.0f + ETA_TRAP_REACH_MARGIN
+ 				         && ps->velocity[0] * ( ( eta_trapGroups[g].zoneMins[0] + eta_trapGroups[g].zoneMaxs[0] ) * 0.5f - ps->origin[0] )
+ 				            + ps->velocity[1] * ( ( eta_trapGroups[g].zoneMins[1] + eta_trapGroups[g].zoneMaxs[1] ) * 0.5f - ps->origin[1] ) > 0.0f
+ 				         && ( cg.time - eta_trapGroups[g].stopSaidAt > 4000 || cg.time < eta_trapGroups[g].stopSaidAt ))
+ 				{
+-					int meters = (int)( gap * ETA_QU_TO_METERS + 0.5f );
++					int meters = (int)( ( gap - ETA_TRAP_REACH_MARGIN ) * ETA_QU_TO_METERS + 0.5f );
+ 
+ 					eta_trapGroups[g].stopSaidAt = cg.time;
+ 					ETA_Speech_Stop();
+@@ -8448,7 +8453,7 @@ static void ETA_TrapsFrame(void)
+ 			}
+ 			/* At rest, but stopped where it kills: the first blow comes in a
+ 			   fraction of a second when it next starts, too soon for "Out!". */
+-			if (gap <= 0.0f && eta_trapGroups[g].state == ETA_TRAP_REST && !eta_trapGroups[g].restZoneSaid
++			if (gap <= ETA_TRAP_REACH_MARGIN && eta_trapGroups[g].state == ETA_TRAP_REST && !eta_trapGroups[g].restZoneSaid
+ 			    && sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]) < 40.0f)
+ 			{
+ 				float turn, run;
+@@ -8465,7 +8470,7 @@ static void ETA_TrapsFrame(void)
+ 					                  meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters"));
+ 				}
+ 			}
+-			if (gap > 0.0f)
++			if (gap > ETA_TRAP_REACH_MARGIN)
+ 			{
+ 				eta_trapGroups[g].inZoneSaid   = qfalse;
+ 				eta_trapGroups[g].restZoneSaid = qfalse;
