@@ -1,0 +1,139 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index da19be07..9770fb5e 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4728,6 +4728,16 @@ static int      eta_orderNext;       /* 1-based place pressed next in order */
+ static qboolean eta_orderBroken;     /* pressed out of order since the last reset */
+ static qboolean eta_orderLoaded;     /* a game loaded: switches not seen since are not known */
+ static int      eta_orderAwaitLift;  /* a press that may have been the last: the lift waited for till then */
++/*
++ * A save loaded again, seen by what it undoes. The game, killed by the
++ * crypt's saws, loads the last save at once: the level's clock and start
++ * stay, health is as saved, and nothing tells the mode. But its buttons
++ * and its pillar go back only after the pillar has been ridden up; going
++ * back without that, they went back by a load. The tester, killed on the
++ * way to the pillar, was told "the pillar has sunk back, and the buttons
++ * have reset", and took the level to be broken.
++ */
++static qboolean eta_reloadSeen;
+ /*
+  * Lifts. The same level's last puzzle: when the three buttons are
+  * pressed, the stone pillar in the middle of the crossroads sinks level
+@@ -4749,6 +4759,7 @@ static struct
+ 	int      backMs;                   /* its bridge set off again this long after it stops; 0 not known */
+ 	qboolean wasMoving;
+ 	int      stoppedAt;                /* when it last came to a stop */
++	qboolean roseAfterReady;           /* ridden up since it came down: its going back resets, not a load */
+ } eta_lifts[ETA_MAX_LIFTS];
+ static int eta_liftCount;
+ #define ETA_MAX_PLAYER_TRIGGERS 64
+@@ -7429,9 +7440,19 @@ static void ETA_LiftsFrame(void)
+ 				}
+ 			}
+ 		}
++		else if (moving && eta_lifts[l].everReady && lift->pos.trDelta[2] > 0.0f)
++		{
++			eta_lifts[l].roseAfterReady = qtrue;
++		}
+ 		else if (!moving && eta_lifts[l].everReady && eta_lifts[l].haveRest && fabsf(top - eta_lifts[l].restTop) < 8.0f)
+ 		{
+ 			eta_lifts[l].everReady = qfalse;
++			if (!eta_lifts[l].roseAfterReady)
++			{
++				eta_reloadSeen = qtrue;   /* back up unridden: a save loaded */
++				continue;
++			}
++			eta_lifts[l].roseAfterReady = qfalse;
+ 			ETA_OrderReset(qtrue);
+ 		}
+ 
+@@ -7650,7 +7671,7 @@ static void ETA_LoadedForget(void)
+ 	static int lastStart;
+ 	int        m, l, g;
+ 
+-	if (lastStart == cgs.levelStartTime)
++	if (lastStart == cgs.levelStartTime && !eta_reloadSeen)
+ 	{
+ 		return;
+ 	}
+@@ -7665,6 +7686,16 @@ static void ETA_LoadedForget(void)
+ 	eta_orderBroken     = qfalse;
+ 	eta_orderPending[0] = '\0';
+ 	eta_orderAwaitLift  = 0;
++	if (eta_reloadSeen)
++	{
++		eta_reloadSeen  = qfalse;
++		eta_orderLoaded = qtrue;   /* the save loaded again: known as one */
++		/* Killed, the game loads the last save at once, and says nothing:
++		   the tester found the pillar back up, and did not know why. */
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("The last save is loaded again: what you did since it is undone");
++		goto loaded;
++	}
+ 	/* Entered by loading a save - from the menu too, the tester's way -
+ 	   or begun afresh: then nothing is pressed, and that is known. */
+ 	{
+@@ -7675,6 +7706,7 @@ static void ETA_LoadedForget(void)
+ 		trap_Cvar_VariableStringBuffer("savegame_filename", name, sizeof(name));
+ 		eta_orderLoaded = (qboolean)( name[0] || CG_AccessibilitySaveLoading() != 0 );
+ 	}
++loaded:
+ 	for (l = 0; l < eta_liftCount; l++)
+ 	{
+ 		eta_lifts[l].announced    = qfalse;
+@@ -7685,6 +7717,7 @@ static void ETA_LoadedForget(void)
+ 		eta_lifts[l].bridgeOut    = qfalse;
+ 		eta_lifts[l].wasMoving    = qfalse;
+ 		eta_lifts[l].stoppedAt    = 0;
++		eta_lifts[l].roseAfterReady = qfalse;
+ 	}
+ 	for (g = 0; g < eta_trapGroupCount; g++)
+ 	{
+@@ -7789,6 +7822,17 @@ static void ETA_OrderFrame(void)
+ 		}
+ 		if (!pressed)
+ 		{
++			int l;
++
++			/* Gone back with the pillar not ridden: a save loaded. */
++			for (l = 0; l < eta_liftCount && !eta_lifts[l].roseAfterReady; l++)
++			{
++			}
++			if (l == eta_liftCount)
++			{
++				eta_reloadSeen = qtrue;
++				return;
++			}
+ 			ETA_OrderReset(qtrue);
+ 			return;
+ 		}
+@@ -8898,7 +8942,7 @@ static void ETA_TrapsFrame(void)
+ 					if (eta_plateModel[model] && !eta_opensDoor[model]
+ 					    && Distance(cgs.inlineModelMidpoints[model], centers[members[0]]) < ETA_TRAP_GROUP)
+ 					{
+-						Q_strcat(text, sizeof(text), va(" Plates on the floor set %s off: each is said as you come to it, and the wall to keep to.", count > 1 ? "them" : "it"));
++						Q_strcat(text, sizeof(text), va(" Plates on the floor set %s off: slash walks you round them, touching none.", count > 1 ? "them" : "it"));
+ 						break;
+ 					}
+ 				}
+@@ -9194,7 +9238,7 @@ static void ETA_TrapsFrame(void)
+ 
+ 				toWall[wall == 'n' || wall == 's' ? 1 : 0] = wall == 'n' || wall == 'e' ? 1.0f : -1.0f;
+ 				left = AngleNormalize180(vectoyaw(toWall) - ps->viewangles[YAW]);
+-				ETA_Speech_Say(va("Pressure plate %s: %s. Keep to the %s wall%s",
++				ETA_Speech_Say(va("Pressure plate %s: %s. Keep to the %s wall%s. Or slash walks you round",
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
+ 				                  eta_opensDoor[plate] ? "it opens a door" : "it sets off a trap",
+ 				                  wall == 'n' ? "north" : wall == 's' ? "south" : wall == 'e' ? "east" : "west",
+@@ -9341,8 +9385,11 @@ static void ETA_FloorFrame(void)
+ 	}
+ }
+ 
++static void ETA_LoadedForget(void);
++
+ void CG_AccessibilityWorldFrame(qboolean held)
+ {
++	ETA_LoadedForget();   /* before the lifts, which would take a load for a reset */
+ 	ETA_FloorFrame();
+ 	ETA_CrushFrame();
+ 	ETA_SwitchNoticeFrame();

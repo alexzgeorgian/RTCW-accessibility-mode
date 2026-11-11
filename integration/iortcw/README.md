@@ -3038,3 +3038,20 @@ to it; only if it has not come down six seconds on is the next button
 named. With all of them pressed, T lists them no more, and with nothing
 left, says the lift: "Nothing left to take or use here. The lift is
 down, behind left, 25 meters: stand on it to go up. O leads there".
+
+### 0167 A save loaded again
+
+The tester pressed the crypt's west button, the pillar came down - and
+on the way back to it, through the saws, a plate was stepped on and the
+saws killed them. The game loads the last save at once, and says
+nothing: the pillar was up again, the west button out, and the mode -
+not told of the load: the level's clock and start stay, and health is
+as saved - said "the pillar has sunk back, and the buttons have reset".
+The tester took the level, or the mode, to be broken. The buttons and
+the pillar go back by themselves only after the pillar has been ridden
+up; going back without that, the mode now takes it for a save loaded
+again: "The last save is loaded again: what you did since it is
+undone", and what was seen is forgotten and learnt again. Ridden and the
+bridge missed, the reset is said as before. And the saws now say what
+gets past them: "Plates on the floor set them off: slash walks you round
+them, touching none", and at a plate, "Or slash walks you round".
