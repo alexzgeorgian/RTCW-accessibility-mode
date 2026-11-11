@@ -3105,3 +3105,16 @@ found to something near, turns the player straight toward it and says
 how far and how high - "8 meters above you" says it is another floor -
 and that X lists the ways out and T what is left; to something far, the
 same, without the turn.
+
+### 0172 Stand still on the lift
+
+The tester rode the crypt's pillar up, did not know how long to wait,
+walked about on its small top and fell off it - and the bridge came out
+above, out of reach. Rising, every metre was "Ledge ahead, 1 metre
+down... 7 metres down", heard as a call to move. Now, stepping on:
+"Going up. Stand still on it: the bridge is out in about 14 seconds" -
+the time read from the bridge's own move, said once; at the top: "At
+the top. Stand still: the bridge is out in 5 seconds". The ledge lines
+are quiet on a lift, and its edge is a stop W again does not take the
+player over: "Edge of the lift: stay on it, and wait for the bridge".
+Tested walking about at the top: stopped at the edge, then across.

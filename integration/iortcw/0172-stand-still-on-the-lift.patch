@@ -1,0 +1,128 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 2735aafe..d57f61a0 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3577,7 +3577,10 @@ static void ETA_EdgeGuardFrame(void)
+ 	   jump, held, still goes over. */
+ 	deadly = (qboolean)( trace.fraction >= 1.0f
+ 	                     || drop >= ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_KILLS, (float)ps->gravity) );
+-	if (!deadly && eta_edge.stoppedAt && cg.time >= eta_edge.stoppedAt && cg.time - eta_edge.stoppedAt < ETA_EDGE_AGAIN_MS
++	/* On a lift - the crypt's pillar, its top a few steps across: W again
++	   does not take the player over; off it is the floor seven metres
++	   below, the bridge out of reach. */
++	if (!deadly && !CG_AccessibilityOnLift() && eta_edge.stoppedAt && cg.time >= eta_edge.stoppedAt && cg.time - eta_edge.stoppedAt < ETA_EDGE_AGAIN_MS
+ 	    && Distance(ps->origin, eta_edge.stoppedFrom) < ETA_EDGE_AGAIN_NEAR)
+ 	{
+ 		return;
+@@ -3593,7 +3596,8 @@ static void ETA_EdgeGuardFrame(void)
+ 
+ 		eta_edge.saidAt = cg.time;
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say(deadly ? ( trace.fraction >= 1.0f ? "Edge. A fall here would kill you. Stopped"
++		ETA_Speech_Say(CG_AccessibilityOnLift() ? "Edge of the lift: stay on it, and wait for the bridge"
++		               : deadly ? ( trace.fraction >= 1.0f ? "Edge. A fall here would kill you. Stopped"
+ 		                          : va("Edge. Drop %d meters, a fall that would kill you. Stopped", meters) )
+ 		               : va("Edge. Drop %d %s. W again goes over", meters < 1 ? 1 : meters,
+ 		                    meters == 1 ? "meter" : "meters"));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index bfedd3a6..e0502f86 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -627,6 +627,8 @@ static int ETA_WaterLevel(void)
+  * puddle on the floor of a deep shaft, and "you can jump, there is water
+  * down there" is the one thing here that must never be said on a guess.
+  */
++static qboolean ETA_OnLift(void);
++
+ static void ETA_NarrateDropAhead(void)
+ {
+ 	static char   lastDescription[64];
+@@ -650,6 +652,14 @@ static void ETA_NarrateDropAhead(void)
+ 
+ 	ps = &cg.predictedPlayerState;
+ 
++	/* Riding a lift up, every metre was "Ledge ahead": heard as a call to
++	   move, on top of the crypt's pillar, where moving is falling off. */
++	if (ETA_OnLift())
++	{
++		lastDescription[0] = '\0';
++		return;
++	}
++
+ 	/* Only from solid ground. In the air there is nothing to warn about
+ 	   that has not already happened, and the drop would be measured from
+ 	   wherever the player had fallen to by now. */
+@@ -4763,6 +4773,32 @@ static struct
+ 	qboolean onBridge, offSaid;        /* standing on its bridge; "off the bridge!" said */
+ } eta_lifts[ETA_MAX_LIFTS];
+ static int eta_liftCount;
++
++/* Standing on a lift - the crypt's pillar. */
++static qboolean ETA_OnLift(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  l;
++
++	if (ps->groundEntityNum <= 0 || ps->groundEntityNum >= ENTITYNUM_WORLD)
++	{
++		return qfalse;
++	}
++	for (l = 0; l < eta_liftCount; l++)
++	{
++		if (cg_entities[ps->groundEntityNum].currentState.eType == ET_MOVER
++		    && cg_entities[ps->groundEntityNum].currentState.modelindex == eta_lifts[l].mover)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++qboolean CG_AccessibilityOnLift(void)
++{
++	return ETA_OnLift();
++}
+ #define ETA_MAX_PLAYER_TRIGGERS 64
+ static struct
+ {
+@@ -7462,8 +7498,15 @@ static void ETA_LiftsFrame(void)
+ 		   only once it has stood still a second. */
+ 		if (ps->groundEntityNum == lift->number && moving && lift->pos.trDelta[2] > 0.0f && !eta_lifts[l].riding)
+ 		{
++			int secs = bridge && bridge->pos.trType != TR_STATIONARY && cg.time < bridge->pos.trTime + bridge->pos.trDuration
++			           ? ( bridge->pos.trTime + bridge->pos.trDuration - cg.time + 999 ) / 1000 : 0;
++
+ 			eta_lifts[l].riding = qtrue;
+-			ETA_Speech_Say(eta_lifts[l].bridge ? "Going up. A bridge comes out as you rise: wait for it" : "Going up");
++			/* How long, and to stand still: the tester walked about on the
++			   pillar's small top, not knowing how long, and fell off it. */
++			ETA_Speech_Say(eta_lifts[l].bridge && secs > 1
++			               ? va("Going up. Stand still on it: the bridge is out in about %d seconds", secs)
++			               : eta_lifts[l].bridge ? "Going up. A bridge comes out as you rise: stand still, and wait for it" : "Going up");
+ 		}
+ 		if (eta_lifts[l].riding && moving)
+ 		{
+@@ -7478,7 +7521,10 @@ static void ETA_LiftsFrame(void)
+ 			eta_lifts[l].riding = qfalse;
+ 			if (ps->groundEntityNum == lift->number)
+ 			{
+-				ETA_Speech_Say("At the top");
++				int secs = bridge && bridge->pos.trType != TR_STATIONARY && cg.time < bridge->pos.trTime + bridge->pos.trDuration
++				           ? ( bridge->pos.trTime + bridge->pos.trDuration - cg.time + 999 ) / 1000 : 0;
++
++				ETA_Speech_Say(secs > 1 ? va("At the top. Stand still: the bridge is out in %d seconds", secs) : "At the top");
+ 			}
+ 		}
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 10b5ef17..7fd9ccc0 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2437,6 +2437,7 @@ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
+ int CG_AccessibilityTrapGo( void );
+ qboolean CG_AccessibilityCrossing( void );
+ qboolean CG_AccessibilityLiftWaiting( vec3_t at );
++qboolean CG_AccessibilityOnLift( void );
+ const char *CG_AccessibilityTrapUnder( const vec3_t point );
+ void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
