@@ -1,0 +1,83 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index bb5720b8..35cf0922 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7522,21 +7522,46 @@ static int ETA_OrderCount(int *places)
+ }
+ 
+ /* The lowest in the order not pressed: 0 when all are. */
++/* Not seen since a game was loaded: pressed or not, not known. */
++static qboolean ETA_SwitchUnknown(int m)
++{
++	return (qboolean)( eta_orderLoaded && !eta_switchSeen[m] );
++}
++
++/* The next to press: of those known not to be pressed first - after a
++   load, one not seen since may be pressed already; the tester was sent
++   to the south one, and found it pressed. */
+ static int ETA_OrderNextModel(void)
+ {
+-	int m, best = 0;
++	int m, best = 0, pass;
+ 
+-	for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++	for (pass = 0; pass < 2 && !best; pass++)
+ 	{
+-		if (eta_switchPlace[m] && eta_switchPart[m] && !eta_switchPressed[m]
+-		    && ( !best || eta_switchPlace[m] < eta_switchPlace[best] ))
++		for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
+ 		{
+-			best = m;
++			if (eta_switchPlace[m] && eta_switchPart[m] && !eta_switchPressed[m]
++			    && ETA_SwitchUnknown(m) == (qboolean)( pass == 1 )
++			    && ( !best || eta_switchPlace[m] < eta_switchPlace[best] ))
++			{
++				best = m;
++			}
+ 		}
+ 	}
+ 	return best;
+ }
+ 
++/* How many not seen since a load. */
++static int ETA_OrderUnknown(void)
++{
++	int m, count = 0;
++
++	for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++	{
++		count += ( eta_switchPlace[m] && eta_switchPart[m] && ETA_SwitchUnknown(m) ) ? 1 : 0;
++	}
++	return count;
++}
++
+ /* "the west one, 40 meters. O leads there", and O set to it. */
+ static const char *ETA_OrderLead(int model)
+ {
+@@ -7544,7 +7569,8 @@ static const char *ETA_OrderLead(int model)
+ 
+ 	CG_AccessibilityChoose(cgs.inlineModelMidpoints[model],
+ 	                       va("Button %d of %d, %s", eta_switchPlace[model], eta_switchPlaces[model], eta_switchSide[model]));
+-	return va("the %s one, %d %s. O leads there", eta_switchSide[model], meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters");
++	return va("the %s one, %d %s%s. O leads there", eta_switchSide[model], meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters",
++	          ETA_SwitchUnknown(model) ? ", not checked since the game was loaded: it may be pressed already" : "");
+ }
+ 
+ /* All back to unpressed: said, when a ride brought them back. */
+@@ -7713,7 +7739,15 @@ static void ETA_OrderFrame(void)
+ 			{
+ 				eta_orderNext++;
+ 			}
+-			if (!inOrder && !eta_orderBroken)
++			if (ETA_OrderUnknown())
++			{
++				/* Some not seen since a load: the count is of those seen. */
++				int unknown = ETA_OrderUnknown();
++
++				Com_sprintf(text, sizeof(text), "%d of %d pressed, of those checked since the game was loaded; %d not "
++				            "checked yet.", count, places, unknown);
++			}
++			else if (!inOrder && !eta_orderBroken)
+ 			{
+ 				eta_orderBroken = qtrue;
+ 				Com_sprintf(text, sizeof(text), "Out of order: the hidden doors won't open this time. It still counts: "

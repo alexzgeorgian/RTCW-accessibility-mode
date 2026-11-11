@@ -2975,3 +2975,14 @@ turn to face the next: "Now. Walking you round the plates: 5 turns", and
 and back from the tester's save without god mode, the saws never
 started. While it walks, the plate tips and "Don't stop here" are not
 said. And a plate stepped on is no longer "The floor is falling".
+
+### 0162 The next button, after a load
+
+After a load, a button not seen since may be pressed already: the
+tester was sent on to the crypt's south button, and found it pressed.
+The next to press is now one known not to be pressed, if there is one;
+only then one not checked, said so: "the south one, 30 meters, not
+checked since the game was loaded: it may be pressed already". A press
+counts those checked: "1 of 3 pressed, of those checked since the game
+was loaded; 1 not checked yet. Next, the west one" - and is not taken
+for out of order while some are not known.
