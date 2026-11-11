@@ -102,6 +102,14 @@ jobs:
         timeout-minutes: 15
         run: |
           apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          # Fetch Ubuntu's packages over HTTPS: plain HTTP from the runners
+          # to the Ubuntu mirrors has stalled for whole days while HTTPS
+          # still answered.
+          ubuntu_https() {
+            sudo sed -i -E 's#http://([a-z.]*archive|security)\.ubuntu\.com/#https://\1.ubuntu.com/#g' \
+              /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          }
+          ubuntu_https
           for attempt in 1 2 3; do
             if sudo timeout 240 apt-get $apt_opts update \
                && sudo timeout 240 apt-get $apt_opts install -y --no-install-recommends \
@@ -112,11 +120,12 @@ jobs:
             # The runner's own Ubuntu mirror sometimes stops answering for
             # a while: try the main Ubuntu archive instead.
             if [ -f /etc/apt/apt-mirrors.txt ]; then
-              printf 'http://archive.ubuntu.com/ubuntu/\tpriority:1\nhttp://security.ubuntu.com/ubuntu/\tpriority:2\n' \
+              printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' \
                 | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             fi
-            sudo sed -i 's#http://azure\.archive\.ubuntu\.com/ubuntu#http://archive.ubuntu.com/ubuntu#g' \
+            sudo sed -i 's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
               /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+            ubuntu_https
             sleep 10
           done
           exit 1
