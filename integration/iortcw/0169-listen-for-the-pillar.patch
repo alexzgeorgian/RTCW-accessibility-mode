@@ -1,0 +1,17 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b860d1a2..13a790e3 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7872,9 +7872,9 @@ static void ETA_OrderFrame(void)
+ 				   the pillar down - and "Next, the south one" took O off the
+ 				   pillar, and sounded as if all was to do again. The pillar
+ 				   tells: nothing chosen until it has had time to come down. */
+-				Com_sprintf(text, sizeof(text), "%d of %d pressed, of those checked since the game was loaded. If the %s "
+-				            "one was pressed before the save, the pillar comes down now: listen for it", count, places,
+-				            eta_switchSide[next]);
++				/* Short, and nothing of saves: the tester heard the longer
++				   line as a game being loaded again. */
++				Q_strncpyz(text, "Pressed. Listen for the pillar coming down", sizeof(text));
+ 				eta_orderAwaitLift = cg.time + 6000;
+ 				next               = 0;   /* no "Next", and O left as it is */
+ 			}

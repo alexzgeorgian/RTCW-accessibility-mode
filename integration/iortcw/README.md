@@ -3071,3 +3071,14 @@ down. And the bridge is on O: "Bridge out, ahead: cross now. It pulls
 back in 9 seconds. O turns you to it" - O then faces its far end:
 "Facing the bridge: walk straight on, 5 meters, to its far end", and
 "Marker reached" across it.
+
+### 0169 Listen for the pillar
+
+After the west button, the tester heard "2 of 3 pressed, of those
+checked since the game was loaded. If the south one was pressed before
+the save, the pillar comes down now: listen for it" - and took it, with
+its loading and its save, for a game loaded again. A press that may be
+the last now says only "Pressed. Listen for the pillar coming down";
+the pillar says itself, or, not down six seconds on, the button still
+to press is named. Tested loading the save as the tester does, from the
+start: no word of a load.
