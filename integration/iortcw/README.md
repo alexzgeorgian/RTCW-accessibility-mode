@@ -3082,3 +3082,16 @@ the last now says only "Pressed. Listen for the pillar coming down";
 the pillar says itself, or, not down six seconds on, the button still
 to press is named. Tested loading the save as the tester does, from the
 start: no word of a load.
+
+### 0170 Off the bridge
+
+The tester crossed the crypt's bridge and was back among the buttons:
+O's "Marker reached, the far end of the bridge" came three metres short
+of where it was set - on the bridge itself - and, stopped there, the
+bridge pulled back into the wall from under them, and they fell to the
+floor below, the pillar reset. The far end O turns to is now set well
+past the bridge, so "reached" comes on the ledge; stepping off it is
+said - "Across: you're off the bridge. T finds what is next" - and the
+bridge pulling back with the player still on it is urgent: "Off the
+bridge! Walk on, 2 meters". Tested walking across, and stopping
+halfway: both on the ledge.

@@ -1,0 +1,69 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 13a790e3..bfedd3a6 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4760,6 +4760,7 @@ static struct
+ 	qboolean wasMoving;
+ 	int      stoppedAt;                /* when it last came to a stop */
+ 	qboolean roseAfterReady;           /* ridden up since it came down: its going back resets, not a load */
++	qboolean onBridge, offSaid;        /* standing on its bridge; "off the bridge!" said */
+ } eta_lifts[ETA_MAX_LIFTS];
+ static int eta_liftCount;
+ #define ETA_MAX_PLAYER_TRIGGERS 64
+@@ -7530,8 +7531,11 @@ static void ETA_LiftsFrame(void)
+ 					/* Along its length only. */
+ 					if (bmaxs[k2] - bmins[k2] >= bmaxs[!k2] - bmins[!k2])
+ 					{
++						/* Past its end by more than O's 3 metres of arriving:
++						   "reached" came on the bridge itself, and it pulled
++						   back from under the player. */
+ 						far[k2] = fabsf(bmaxs[k2] - cg_entities[lift->number].lerpOrigin[k2])
+-						          > fabsf(bmins[k2] - cg_entities[lift->number].lerpOrigin[k2]) ? bmaxs[k2] + 32.0f : bmins[k2] - 32.0f;
++						          > fabsf(bmins[k2] - cg_entities[lift->number].lerpOrigin[k2]) ? bmaxs[k2] + 176.0f : bmins[k2] - 176.0f;
+ 					}
+ 				}
+ 				far[2] = ps->origin[2];
+@@ -7541,6 +7545,43 @@ static void ETA_LiftsFrame(void)
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
+ 				                  left > 1 && left < 120 ? va(". It pulls back in %d seconds", left) : ""));
+ 			}
++			/* On it: off it is said; pulling back with the player on it,
++			   urgent - it goes into the wall, and the player falls back to
++			   the floor below, among the buttons, the pillar reset. */
++			{
++				qboolean on = (qboolean)( ps->groundEntityNum == bridge->number );
++
++				if (on && bmoving && eta_lifts[l].bridgeOut && !eta_lifts[l].offSaid)
++				{
++					float  toEnd = 0.0f;
++					int    k2, meters;
++
++					for (k2 = 0; k2 < 2; k2++)
++					{
++						if (bmaxs[k2] - bmins[k2] >= bmaxs[!k2] - bmins[!k2])
++						{
++							toEnd = fabsf(bmaxs[k2] - cg_entities[lift->number].lerpOrigin[k2])
++							        > fabsf(bmins[k2] - cg_entities[lift->number].lerpOrigin[k2])
++							        ? bmaxs[k2] - ps->origin[k2] : ps->origin[k2] - bmins[k2];
++						}
++					}
++					meters = (int)( ( toEnd + 24.0f ) * ETA_QU_TO_METERS + 0.5f );
++					eta_lifts[l].offSaid = qtrue;
++					ETA_Speech_Stop();
++					ETA_Speech_Say(va("Off the bridge! Walk on, %d %s", meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters"));
++				}
++				if (eta_lifts[l].onBridge && !on && ps->groundEntityNum == ENTITYNUM_WORLD
++				    && Distance(ps->origin, cg_entities[lift->number].lerpOrigin) > 160.0f)
++				{
++					ETA_HudNarrator_HoldPassive(cg.time);
++					ETA_Speech_Say("Across: you're off the bridge. T finds what is next");
++				}
++				eta_lifts[l].onBridge = on;
++				if (!on)
++				{
++					eta_lifts[l].offSaid = qfalse;
++				}
++			}
+ 			eta_lifts[l].bridgeMoving = bmoving;
+ 			if (!bmoving)
+ 			{
