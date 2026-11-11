@@ -1,0 +1,37 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 34fe8d72..2735aafe 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3957,7 +3957,7 @@ static void ETA_WayCueFrame(void)
+  * the walls is known: then it waits - "Finding the way" - and turns as
+  * soon as the way is found.
+  */
+-#define ETA_FACE_WAIT_MS 8000
++#define ETA_FACE_WAIT_MS 4000   /* the tester: "a moment" is not time enough to stand still for */
+ 
+ static int eta_facePendingAt;
+ 
+@@ -4676,7 +4676,22 @@ static void ETA_FacePendingFrame(void)
+ 			ETA_FaceTheWayUnreachable();
+ 			return;
+ 		}
+-		ETA_Speech_Say("No way found from here yet. O tries again");
++		/* Near: turned straight to it, with how far and how high - "7
++		   meters above you" says it is another floor. Far: what to do. */
++		if (CG_AccessibilityMarkerInfo(origin, &name) && Distance(cg.predictedPlayerState.origin, origin) < 1000.0f)
++		{
++			etaAimTarget_t aim;
++
++			memset(&aim, 0, sizeof(aim));
++			aim.entityNum = -1;
++			VectorCopy(origin, aim.point);
++			ETA_AimStartSnap(&aim, NULL);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_AimSayThen(va("No way found to %s. Turned straight toward it", name ? name : "it"), origin,
++			               "X lists the ways out of here, T what is left to do");
++			return;
++		}
++		ETA_Speech_Say("No way found from here yet. X lists the ways out of here, and T what is left to do");
+ 		return;
+ 	}
+ 	if (CG_AccessibilityMarkerWayKnown())

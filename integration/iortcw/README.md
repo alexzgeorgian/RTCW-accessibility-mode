@@ -3095,3 +3095,13 @@ said - "Across: you're off the bridge. T finds what is next" - and the
 bridge pulling back with the player still on it is urgent: "Off the
 bridge! Walk on, 2 meters". Tested walking across, and stopping
 halfway: both on the ledge.
+
+### 0171 No way found
+
+"Finding the way. A moment" - and the tester: the moment is not time
+enough. O waited eight seconds for the way, and then said only "No way
+found from here yet. O tries again". It now waits four; and with no way
+found to something near, turns the player straight toward it and says
+how far and how high - "8 meters above you" says it is another floor -
+and that X lists the ways out and T what is left; to something far, the
+same, without the turn.
