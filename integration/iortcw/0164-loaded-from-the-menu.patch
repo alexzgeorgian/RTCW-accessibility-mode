@@ -1,0 +1,101 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c5c5b9ef..6c2d385c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4251,6 +4251,33 @@ void CG_AccessibilityCrossTrap(void)
+ 		dir[0] = 0.0f;
+ 	}
+ 	VectorNormalize(dir);
++	/* Which way along it: to what O leads to, if that is along it; else,
++	   in its reach already, the way faced. From the crypt's saws' far
++	   end, by the button, it went back across them, away from it. */
++	{
++		vec3_t      toGoal, forward;
++		const char *name = NULL;
++		float       along = 0.0f;
++
++		if (CG_AccessibilityMarkerInfo(goal, &name))
++		{
++			VectorSubtract(goal, ps->origin, toGoal);
++			toGoal[2] = 0.0f;
++			along     = DotProduct(toGoal, dir);
++			if (fabsf(along) > 48.0f && along < 0.0f)
++			{
++				VectorScale(dir, -1.0f, dir);
++			}
++		}
++		if (fabsf(along) <= 48.0f && gap <= margin)
++		{
++			AngleVectors(ps->viewangles, forward, NULL, NULL);
++			if (DotProduct(forward, dir) < 0.0f)
++			{
++				VectorScale(dir, -1.0f, dir);
++			}
++		}
++	}
+ 	{
+ 		float far = 0.0f;
+ 		int   k;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 1455034d..d98676df 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7340,6 +7340,8 @@ static const char *ETA_TrapPlural(const char *kind, int count)
+ static void ETA_OrderReset(qboolean say);
+ 
+ /* The lifts, each frame: come down to the floor, riding, the bridge. */
++static qboolean ETA_SwitchUnknown(int m);
++
+ static void ETA_LiftsFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -7412,7 +7414,19 @@ static void ETA_LiftsFrame(void)
+ 		}
+ 		if (ready)
+ 		{
++			int m;
++
+ 			eta_lifts[l].everReady = qtrue;
++			/* Down for the order's switches: all of them are pressed,
++			   seen or not. */
++			for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++			{
++				if (eta_switchPlace[m] && eta_switchPart[m] && !eta_switchPressed[m] && ETA_SwitchUnknown(m))
++				{
++					eta_switchPressed[m] = qtrue;
++					eta_switchSeen[m]    = qtrue;
++				}
++			}
+ 		}
+ 		else if (!moving && eta_lifts[l].everReady && eta_lifts[l].haveRest && fabsf(top - eta_lifts[l].restTop) < 8.0f)
+ 		{
+@@ -7618,11 +7632,6 @@ static void ETA_LoadedForget(void)
+ 	{
+ 		return;
+ 	}
+-	if (!lastStart)
+-	{
+-		lastStart = cgs.levelStartTime;
+-		return;
+-	}
+ 	lastStart = cgs.levelStartTime;
+ 	for (m = 0; m < MAX_MODELS; m++)
+ 	{
+@@ -7633,7 +7642,16 @@ static void ETA_LoadedForget(void)
+ 	eta_orderNext       = 1;
+ 	eta_orderBroken     = qfalse;
+ 	eta_orderPending[0] = '\0';
+-	eta_orderLoaded     = qtrue;
++	/* Entered by loading a save - from the menu too, the tester's way -
++	   or begun afresh: then nothing is pressed, and that is known. */
++	{
++		char name[MAX_QPATH];
++
++		/* The save's name stays set while a loaded game is played on,
++		   and is cleared when a level is begun afresh. */
++		trap_Cvar_VariableStringBuffer("savegame_filename", name, sizeof(name));
++		eta_orderLoaded = (qboolean)( name[0] || CG_AccessibilitySaveLoading() != 0 );
++	}
+ 	for (l = 0; l < eta_liftCount; l++)
+ 	{
+ 		eta_lifts[l].announced    = qfalse;

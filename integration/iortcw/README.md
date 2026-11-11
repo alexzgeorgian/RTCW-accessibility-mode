@@ -2998,3 +2998,18 @@ standing in the margin, it is. And "Now: run across" is said only facing
 the blade: at the button, facing the button, it came every swing.
 Three crossings from the tester's save without god mode: across, the
 button pressed, nothing but what was needed said.
+
+### 0164 A save loaded from the menu
+
+From the tester's save, by the west button, the south one was "next to
+press", and pressing the west one, "2 of 3 pressed. Next, the south
+one" - as the pillar came down: the game had all three pressed. The
+south button's part is out of what the server sends from there, and a
+save loaded from the menu was taken for a level begun afresh, where
+nothing is pressed. Now a loaded game is known by the save's name the
+game keeps while one is played on: the south one is "not checked since
+the game was loaded", the west one "next to press", and the press
+counts those checked. The pillar coming down marks all three pressed.
+And slash at the saws' far end went back across them, away from the
+button: it now goes the way O leads, or, in the trap's reach already,
+the way faced - from the tester's save, round no plate, to the button.
