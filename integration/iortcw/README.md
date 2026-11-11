@@ -2986,3 +2986,15 @@ checked since the game was loaded: it may be pressed already". A press
 counts those checked: "1 of 3 pressed, of those checked since the game
 was loaded; 1 not checked yet. Next, the west one" - and is not taken
 for out of order while some are not known.
+
+### 0163 Quiet at the button past the blade
+
+Arriving at the crypt's south button off the cross key, the tester heard
+"Out! Run ahead, 1 meter" - the blade starting its swing while they were
+still in the metre kept round its reach, already running out of it -
+and, standing there, was never hurt. "Out!" is no longer said to someone
+in that margin already leaving it at a run; in the reach itself, or
+standing in the margin, it is. And "Now: run across" is said only facing
+the blade: at the button, facing the button, it came every swing.
+Three crossings from the tester's save without god mode: across, the
+button pressed, nothing but what was needed said.

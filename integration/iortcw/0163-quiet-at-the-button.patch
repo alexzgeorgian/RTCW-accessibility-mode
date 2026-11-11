@@ -1,0 +1,48 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 35cf0922..1455034d 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8879,7 +8879,13 @@ static void ETA_TrapsFrame(void)
+ 
+ 						eta_trapGroups[g].goPending = qfalse;
+ 						eta_trapGroups[g].waiting[0] = '\0';
+-						if (!CG_AccessibilityCrossing())   /* the cross key says its own "Now" */
++						vec3_t mid;
++
++						VectorAdd(eta_trapGroups[g].zoneMins, eta_trapGroups[g].zoneMaxs, mid);
++						VectorScale(mid, 0.5f, mid);
++						/* Only facing it: at the button past it, facing the
++						   button, "run across now" came every swing. */
++						if (!CG_AccessibilityCrossing() && fabsf(CG_AccessibilityLeftOfView(mid)) < 60.0f)
+ 						{
+ 							ETA_Speech_Stop();
+ 							ETA_Speech_Say(va("Now: run across, without stopping, %d meters", across));
+@@ -8958,7 +8964,27 @@ static void ETA_TrapsFrame(void)
+ 			{
+ 				const char *reach = count > 1 ? va("The %s' reach", name) : va("The %s's reach", name);
+ 
+-				if (gap <= margin && !eta_trapGroups[g].inZoneSaid)
++				/* In its margin and already on the way out of it, leaving at a
++				   run: no "Out!" - arriving at the crypt's south button off
++				   the cross key, "Out! Run ahead, 1 meter" came, and the
++				   tester, standing there, was never hurt. */
++				qboolean leaving = qfalse;
++
++				if (gap > 0.0f && gap <= margin)
++				{
++					vec3_t near;
++					float  speed = sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]);
++					int    k;
++
++					for (k = 0; k < 3; k++)
++					{
++						near[k] = ps->origin[k] < eta_trapGroups[g].zoneMins[k] ? eta_trapGroups[g].zoneMins[k]
++						          : ps->origin[k] > eta_trapGroups[g].zoneMaxs[k] ? eta_trapGroups[g].zoneMaxs[k] : ps->origin[k];
++					}
++					leaving = (qboolean)( speed > 100.0f
++					                      && ps->velocity[0] * ( ps->origin[0] - near[0] ) + ps->velocity[1] * ( ps->origin[1] - near[1] ) > 0.5f * speed * gap );
++				}
++				if (gap <= margin && !eta_trapGroups[g].inZoneSaid && !leaving)
+ 				{
+ 					float turn, run;
+ 
