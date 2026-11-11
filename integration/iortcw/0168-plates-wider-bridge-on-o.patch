@@ -1,0 +1,133 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c15f90ee..34fe8d72 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3980,6 +3980,31 @@ void CG_AccessibilityFaceTheWay(void)
+ 		return;
+ 	}
+ 
++	/* A lift's bridge, out: straight to its far end - the way finding
++	   has no way over it, and said "turn left toward the marker". The
++	   tester, on the crypt's pillar, missed the bridge not knowing which
++	   way it lay. */
++	{
++		vec3_t      at;
++		const char *name = NULL;
++
++		if (CG_AccessibilityMarkerInfo(at, &name) && name && !Q_stricmp(name, "the far end of the bridge"))
++		{
++			etaAimTarget_t aim;
++			int            meters = (int)( Distance(cg.predictedPlayerState.origin, at) * ETA_QU_TO_METERS + 0.5f );
++
++			memset(&aim, 0, sizeof(aim));
++			aim.entityNum = -1;
++			VectorCopy(at, aim.point);
++			aim.point[2] = cg.predictedPlayerState.origin[2] + cg.predictedPlayerState.viewheight - 8.0f;
++			ETA_AimStartSnap(&aim, NULL);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(va("Facing the bridge: walk straight on, %d %s, to its far end", meters < 1 ? 1 : meters,
++			                  meters == 1 ? "meter" : "meters"));
++			return;
++		}
++	}
++
+ 	if (!CG_AccessibilityMarkerWayKnown())
+ 	{
+ 		eta_facePendingAt = cg.time;
+@@ -4045,12 +4070,12 @@ static void ETA_CrossStop(const char *say)
+ #define ETA_CROSS_CELL   8.0f
+ #define ETA_CROSS_GRID   128
+ 
+-static int ETA_CrossPlanPath(const vec3_t from, const vec3_t to, vec3_t *out, int max)
++static int ETA_CrossPlanPath(const vec3_t from, const vec3_t to, vec3_t *out, int max, float keep)
+ {
+ 	static short     prev[ETA_CROSS_GRID * ETA_CROSS_GRID];
+ 	static int       queue[ETA_CROSS_GRID * ETA_CROSS_GRID];
+ 	static qboolean  blocked[ETA_CROSS_GRID * ETA_CROSS_GRID];
+-	static const vec3_t probeMins = { -16.0f, -16.0f, -6.0f }, probeMaxs = { 16.0f, 16.0f, 24.0f };
++	static const vec3_t probeMins = { -18.0f, -18.0f, -6.0f }, probeMaxs = { 18.0f, 18.0f, 24.0f };
+ 	vec3_t           pmins[16], pmaxs[16], lo;
+ 	int              plates = 0, i, w, h, x, y, start, goal, head = 0, tail = 0, cells[ETA_CROSS_GRID * 2], n = 0, k;
+ 
+@@ -4092,8 +4117,11 @@ static int ETA_CrossPlanPath(const vec3_t from, const vec3_t to, vec3_t *out, in
+ 			blocked[y * w + x] = qfalse;
+ 			for (p = 0; p < plates && !blocked[y * w + x]; p++)
+ 			{
+-				blocked[y * w + x] = (qboolean)( at[0] > pmins[p][0] - 22.0f && at[0] < pmaxs[p][0] + 22.0f
+-				                                 && at[1] > pmins[p][1] - 22.0f && at[1] < pmaxs[p][1] + 22.0f );
++				/* A body is 36 wide, and a plate goes down a touch before
++				   it is reached: 26 round it. At 22, crossing back the
++				   crypt's saws, the first plate went down. */
++				blocked[y * w + x] = (qboolean)( at[0] > pmins[p][0] - keep && at[0] < pmaxs[p][0] + keep
++				                                 && at[1] > pmins[p][1] - keep && at[1] < pmaxs[p][1] + keep );
+ 			}
+ 			if (blocked[y * w + x])
+ 			{
+@@ -4339,7 +4367,16 @@ void CG_AccessibilityCrossTrap(void)
+ 	/* Plates that set it off: round them, at a walk. */
+ 	if (Q_stricmp(eta_cross.kind, "blade"))
+ 	{
+-		eta_cross.pathCount = ETA_CrossPlanPath(ps->origin, eta_cross.target, eta_cross.path, ARRAY_LEN(eta_cross.path));
++		/* As far from the plates as the way allows: by the crypt's middle
++		   plate there is a strip a hand wide between it and the wall. */
++		static const float keeps[] = { 30.0f, 26.0f, 24.0f, 22.0f };
++		int                kk;
++
++		eta_cross.pathCount = -1;
++		for (kk = 0; kk < (int)ARRAY_LEN(keeps) && eta_cross.pathCount < 0; kk++)
++		{
++			eta_cross.pathCount = ETA_CrossPlanPath(ps->origin, eta_cross.target, eta_cross.path, ARRAY_LEN(eta_cross.path), keeps[kk]);
++		}
+ 		if (eta_cross.pathCount < 0)
+ 		{
+ 			/* Straight across would step on one. */
+@@ -4520,6 +4557,18 @@ static void ETA_CrossFrame(void)
+ 
+ 		VectorSubtract(eta_cross.path[eta_cross.pathAt], ps->origin, to);
+ 		to[2] = 0.0f;
++		/* Held on the corner all the way, not aimed once and let drift:
++		   there is a hand's width between the plates and the walls. */
++		{
++			vec3_t steer;
++
++			VectorCopy(eta_cross.path[eta_cross.pathAt], steer);
++			steer[2] = ps->origin[2] + ps->viewheight - 8.0f;
++			if (VectorLength(to) > 24.0f)
++			{
++				ETA_AimSteer(steer, 1.0f);
++			}
++		}
+ 		VectorSubtract(ps->origin, eta_cross.lastPos, flat);
+ 		flat[2] = 0.0f;
+ 		if (VectorLength(flat) > 8.0f)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 9770fb5e..b860d1a2 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7519,8 +7519,25 @@ static void ETA_LiftsFrame(void)
+ 				/* How long it stays: the crypt's for 9 seconds, and then
+ 				   the pillar sinks back - the tester, not told, rode it
+ 				   down again and found the buttons reset. */
++				vec3_t far;
++				int    k2;
++
++				/* Its far end, for O: pressed, it turns the player to it - the
++				   tester missed the bridge, not knowing which way it lay. */
++				VectorCopy(mid, far);
++				for (k2 = 0; k2 < 2; k2++)
++				{
++					/* Along its length only. */
++					if (bmaxs[k2] - bmins[k2] >= bmaxs[!k2] - bmins[!k2])
++					{
++						far[k2] = fabsf(bmaxs[k2] - cg_entities[lift->number].lerpOrigin[k2])
++						          > fabsf(bmins[k2] - cg_entities[lift->number].lerpOrigin[k2]) ? bmaxs[k2] + 32.0f : bmins[k2] - 32.0f;
++					}
++				}
++				far[2] = ps->origin[2];
++				CG_AccessibilityChoose(far, "the far end of the bridge");
+ 				ETA_HudNarrator_HoldPassive(cg.time);
+-				ETA_Speech_Say(va("Bridge out, %s: cross now%s",
++				ETA_Speech_Say(va("Bridge out, %s: cross now%s. O turns you to it",
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
+ 				                  left > 1 && left < 120 ? va(". It pulls back in %d seconds", left) : ""));
+ 			}

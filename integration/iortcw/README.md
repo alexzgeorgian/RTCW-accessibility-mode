@@ -3055,3 +3055,19 @@ undone", and what was seen is forgotten and learnt again. Ridden and the
 bridge missed, the reset is said as before. And the saws now say what
 gets past them: "Plates on the floor set them off: slash walks you round
 them, touching none", and at a plate, "Or slash walks you round".
+
+### 0168 Wider round the plates; the bridge on O
+
+Crossing the crypt's saws back from the west button with slash, the
+first plate went down - "Across, no plate touched" said all the same -
+and the saws ran: likely how the tester was killed, and the save loaded
+again. A body is 36 wide here, not 32, and a plate goes down a touch
+before it is reached; the way round kept 22 off, aimed once at each
+turn and let drift. Now it keeps as far off as the way allows - 30, 26,
+24, then 22 by the middle plate, where a hand's width lies between it
+and the wall - with the body's true width against the walls, and is
+steered on each turn all the way. Both ways, twice each, no plate went
+down. And the bridge is on O: "Bridge out, ahead: cross now. It pulls
+back in 9 seconds. O turns you to it" - O then faces its far end:
+"Facing the bridge: walk straight on, 5 meters, to its far end", and
+"Marker reached" across it.
