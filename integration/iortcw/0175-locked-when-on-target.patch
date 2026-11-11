@@ -1,0 +1,260 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 959e0595..a8396470 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -257,6 +257,9 @@ typedef struct
+ 	int           refreshAt;
+ 	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
+ 	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
++	qboolean      sayPending;      /* "Locked" waits till the sights are on, and the shot goes true */
++	int           sayFrom;
++	qboolean      steadySay;       /* "Locked" said with how long the aim takes to steady: "Steady" to come */
+ } eta_aim_t;
+ 
+ static eta_aim_t eta_aim;
+@@ -353,10 +356,12 @@ static void ETA_AimStop(void)
+ {
+ 	ETA_AimKeys(0, 0);
+ 	ETA_TurnBoost(qfalse);
+-	eta_aim.mode      = ETA_AIM_NONE;
+-	eta_aim.automatic = qfalse;
+-	eta_aim.toggled   = qfalse;
+-	eta_use.pending   = qfalse;
++	eta_aim.mode       = ETA_AIM_NONE;
++	eta_aim.automatic  = qfalse;
++	eta_aim.toggled    = qfalse;
++	eta_aim.sayPending = qfalse;
++	eta_aim.steadySay  = qfalse;
++	eta_use.pending    = qfalse;
+ }
+ 
+ /**
+@@ -920,6 +925,190 @@ static void ETA_AimSay(const char *what, const vec3_t point)
+ 	ETA_AimSayThen(what, point, NULL);
+ }
+ 
++/**
++ * @brief "Locked" only once a shot would hit.
++ *
++ * The tester heard "Locked" and fired at a zombie far off with the
++ * Mauser, scope or none, and missed again and again: it was said as the
++ * enemy was taken, before the turn to them had begun - the shot went
++ * where the player still faced, a few degrees off, which is a miss at
++ * twenty metres and a hit at three. And the game spreads shots while the
++ * aim is unsteady - after a turn of the player's own or the lock by
++ * itself, after a shot, and for a long while after the scope is raised -
++ * which a sighted player sees as the crosshair opening and closing. So
++ * "Locked" now waits for the sights to be on the enemy and for the aim
++ * to be steady enough to hit them at their distance; a scope that takes
++ * longer is said with how long, and "Steady" when it is.
++ */
++#define ETA_AIM_HIT_UNITS    12.0f  /* a shot this far from the middle of the body still hits */
++#define ETA_AIM_ON_UNITS     8.0f   /* the sights this close to it: on */
++#define ETA_AIM_SAY_LATEST   2000   /* said by now whatever, rather than nothing */
++#define ETA_AIM_SAY_WAIT     1200   /* longer to steady than this: said so */
++#define ETA_AIM_SETTLED      0.04f  /* the aim as steady as it gets */
++
++/* The game's figures for the weapon in hand, as g_weapon.c and
++   bg_pmove.c have them with g_userAim on: how wide its shots spread at
++   the worst, over 8192 units (none for a scope, which sways instead),
++   the least it is ever off, and how slowly it steadies. */
++static qboolean ETA_WeaponAim(int weapon, float *spread, float *least, float *slowness, qboolean *scoped)
++{
++	*spread = 0.0f; *least = 0.15f; *slowness = 0.5f; *scoped = qfalse;
++	switch (weapon)
++	{
++	case WP_LUGER:       *spread = 600.0f;  *least = 0.4f; break;
++	case WP_SILENCER:    *spread = 900.0f;  *least = 0.4f; break;
++	case WP_COLT:        *spread = 700.0f;  *least = 0.4f; *slowness = 0.4f; break;
++	case WP_AKIMBO:      *spread = 700.0f;  *least = 0.4f; break;
++	case WP_VENOM:       *spread = 1000.0f; *slowness = 0.9f; break;
++	case WP_MP40:        *spread = 1000.0f; break;
++	case WP_FG42:        *spread = 800.0f;  *slowness = 0.9f; break;
++	case WP_THOMPSON:    *spread = 1200.0f; *slowness = 0.4f; break;
++	case WP_STEN:        *spread = 1200.0f; *slowness = 0.6f; break;
++	case WP_MAUSER:      *spread = 400.0f;  break;
++	case WP_GARAND:      *spread = 500.0f;  break;
++	case WP_SNIPERRIFLE: *scoped = qtrue; *slowness = 10.0f; break;
++	case WP_SNOOPERSCOPE:*scoped = qtrue; *slowness = 8.0f; break;
++	case WP_FG42SCOPE:   *scoped = qtrue; *slowness = 0.7f; break;
++	default:
++		return qfalse;
++	}
++	return qtrue;
++}
++
++/* How far off a shot may go at this many units, with the aim this
++   unsteady (0 steady, 1 the worst). */
++static float ETA_ShotOffAt(int weapon, float unsteady, float units)
++{
++	float spread, least, slowness;
++	qboolean scoped;
++
++	if (!ETA_WeaponAim(weapon, &spread, &least, &slowness, &scoped))
++	{
++		return 0.0f;
++	}
++	if (scoped)
++	{
++		/* The sway, at its widest: ZOOM_YAW_AMPLITUDE, CalcMuzzlePoints. */
++		return units * tanf(DEG2RAD(ZOOM_YAW_AMPLITUDE * (unsteady + ZOOM_YAW_MIN_AMPLITUDE)));
++	}
++	return units * spread * MIN(1.0f, unsteady + least) / 8192.0f;
++}
++
++/* How long, holding still, before a shot from here hits an enemy this
++   many units off: 0 now. A weapon that never shoots so true there is
++   waited for till it is as steady as it gets. */
++static int ETA_AimSteadyMs(float units)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float    spread, least, slowness, now, need, perSecond;
++	qboolean scoped;
++
++	/* The server's figure: the client does not predict it, and its own
++	   copy stays at 0. */
++	if (!cg.snap)
++	{
++		return 0;
++	}
++	now = (float)cg.snap->ps.aimSpreadScale / 255.0f;
++
++	if (!ETA_WeaponAim(ps->weapon, &spread, &least, &slowness, &scoped)
++	    || ETA_ShotOffAt(ps->weapon, now, units) <= ETA_AIM_HIT_UNITS || now <= ETA_AIM_SETTLED)
++	{
++		return 0;
++	}
++
++	/* As unsteady as it may be and still hit there. */
++	if (scoped)
++	{
++		need = RAD2DEG(atanf(ETA_AIM_HIT_UNITS / units)) / ZOOM_YAW_AMPLITUDE - ZOOM_YAW_MIN_AMPLITUDE;
++	}
++	else
++	{
++		need = ETA_AIM_HIT_UNITS * 8192.0f / (units * spread) - least;
++	}
++	if (need < ETA_AIM_SETTLED)
++	{
++		need = ETA_AIM_SETTLED;
++	}
++
++	/* bg_pmove.c, PM_AdjustAimSpreadScale: 200 a second, over the
++	   weapon's slowness, and twice as fast crouched on the ground. */
++	perSecond = 200.0f / 255.0f / slowness;
++	if ((ps->eFlags & EF_CROUCHING) && ps->groundEntityNum != ENTITYNUM_NONE)
++	{
++		perSecond *= 2.0f;
++	}
++	return (int)( (now - need) / perSecond * 1000.0f + 0.5f );
++}
++
++/* The lock has someone: "Locked" once a shot would hit them. */
++static void ETA_AimLockedLater(void)
++{
++	eta_aim.sayPending = qtrue;
++	eta_aim.sayFrom    = cg.time;
++	eta_aim.steadySay  = qfalse;
++}
++
++/* Each frame the lock is on someone in sight. */
++static void ETA_AimLockedFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              eye, to, forward;
++	float               units, along, off;
++	int                 waitMs;
++	qboolean            late = (qboolean)( cg.time - eta_aim.sayFrom >= ETA_AIM_SAY_LATEST || cg.time < eta_aim.sayFrom );
++
++	if (!eta_aim.sayPending && !eta_aim.steadySay)
++	{
++		return;
++	}
++
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++	VectorSubtract(eta_aim.point, eye, to);
++	units = VectorNormalize(to);
++	AngleVectors(ps->viewangles, forward, NULL, NULL);
++	along = DotProduct(forward, to);
++	off   = along > 0.0f ? units * sqrtf(MAX(0.0f, 1.0f - along * along)) : units;
++
++	/* Said with how long to steady: "Steady" once it is. */
++	if (eta_aim.steadySay)
++	{
++		if (off <= ETA_AIM_ON_UNITS && ETA_AimSteadyMs(units) == 0)
++		{
++			eta_aim.steadySay = qfalse;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("Steady");
++		}
++		return;
++	}
++
++	if (off > ETA_AIM_ON_UNITS && !late)
++	{
++		return;
++	}
++
++	waitMs = off > ETA_AIM_ON_UNITS ? 0 : ETA_AimSteadyMs(units);
++	if (waitMs > 0 && waitMs <= ETA_AIM_SAY_WAIT && !late)
++	{
++		return;
++	}
++
++	eta_aim.sayPending = qfalse;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	if (waitMs > ETA_AIM_SAY_WAIT)
++	{
++		int secs = (waitMs + 999) / 1000;
++
++		eta_aim.steadySay = qtrue;
++		ETA_AimSayThen(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point,
++		               va("Hold still: your aim steadies in %d second%s%s", secs, secs == 1 ? "" : "s",
++		                  (ps->eFlags & EF_CROUCHING) ? "" : ", or half that crouched"));
++		return;
++	}
++	ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
++}
++
+ /**
+  * @brief Choosing an enemy, with a key, for the lock to take.
+  *
+@@ -2203,7 +2392,7 @@ void CG_AccessibilityAimLockDown_f(void)
+ 		if (eta_aim.automatic)
+ 		{
+ 			eta_aim.automatic = qfalse;
+-			ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
++			ETA_AimLockedLater();
+ 		}
+ 		return;
+ 	}
+@@ -2220,7 +2409,7 @@ void CG_AccessibilityAimLockDown_f(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
+-		ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
++		ETA_AimLockedLater();
+ 	}
+ 	else
+ 	{
+@@ -5667,6 +5856,10 @@ void CG_AccessibilityAimFrame(void)
+ 	{
+ 		eta_aim.lostSince = 0;
+ 		ETA_AimSteer(eta_aim.point, 1.0f);
++		if (!eta_aim.automatic)
++		{
++			ETA_AimLockedFrame();
++		}
+ 		return;
+ 	}
+ 
+@@ -5716,7 +5909,7 @@ void CG_AccessibilityAimFrame(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
+-		ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
++		ETA_AimLockedLater();
+ 		return;
+ 	}
+ 

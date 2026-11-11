@@ -3143,3 +3143,18 @@ ever. And on a lift with a bridge, O is the bridge, whatever was chosen
 before: before it is out, "On the lift: stand still. The bridge is out
 in 4 seconds"; out, "Facing the bridge: walk straight on, 8 meters, to
 its far end". Tested with a waypoint chosen beforehand: across.
+
+### 0175 Locked when on target
+
+The tester fired the Mauser the moment they heard "Locked", scope or
+none, and missed far zombies again and again. "Locked" was said as the
+enemy was taken, before the turn to them: tested, the sights were then
+44 degrees off - a miss at any range but point blank. Now "Locked" waits
+till the sights are on the enemy and the game's spread lets the shot hit
+at their distance (the server's own figure: the client keeps none);
+tested, said 0.14 seconds later, 6 cm off, and the shot fired on it
+killed the soldier. A scope just raised starts at its least steady and
+takes up to 13 seconds to settle; past about 20 metres that is said:
+"Locked, Zombie, ahead, 25 meters. Hold still: your aim steadies in 9
+seconds, or half that crouched", and "Steady" when it is. Said by 2
+seconds whatever, so the key is never silent.
