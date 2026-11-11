@@ -3131,3 +3131,15 @@ waiting, T says it: "The lift is down, behind left, 25 meters: stand on
 it to go up. O leads there". And a switch in the area the player is in,
 on their floor, is on T before it has been seen - past the bridge,
 "Button for a door, ahead right, 9 meters. O leads there".
+
+### 0174 The lift on X; O on the lift is the bridge
+
+The tester asked for the lift on X once it is down, and on the pillar
+heard O say there was no way further - O still on something chosen
+before, which the pillar's top has no way to. X near the lift down now
+says it first: "The lift is down, ahead, 2 meters: stand on it to go
+up. O leads there. X again lists the ways out"; X again, the ways as
+ever. And on a lift with a bridge, O is the bridge, whatever was chosen
+before: before it is out, "On the lift: stand still. The bridge is out
+in 4 seconds"; out, "Facing the bridge: walk straight on, 8 meters, to
+its far end". Tested with a waypoint chosen beforehand: across.
