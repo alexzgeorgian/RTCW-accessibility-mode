@@ -1,0 +1,176 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 24c3daac..7fd01e10 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -788,6 +788,7 @@ static void ETA_ThingsStep(int step)
+ 	char                progress[160], name[80], why[128], shown[128], puzzleState[64] = "";
+ 	qboolean            isPuzzle = qfalse;
+ 	const char          *trapUnder;
++	vec3_t              liftAt;
+ 	qboolean            fresh;
+ 	eta_thing_t         *thing;
+ 	vec3_t              delta;
+@@ -857,7 +858,9 @@ static void ETA_ThingsStep(int step)
+ 		{
+ 			qboolean known = qfalse, unpressed = qfalse, near = qfalse;
+ 
+-			for (i = 0; i < eta_things.count && !puzzle; i++)
++			qboolean here = qfalse;
++
++			for (i = 0; i < eta_things.count; i++)
+ 			{
+ 				int  place, places;
+ 				char state[64];
+@@ -889,8 +892,8 @@ static void ETA_ThingsStep(int step)
+ 						continue;
+ 					}
+ 				}
+-				puzzle = (qboolean)( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
+-				                     || ETA_ThingHereInSight(eta_things.things[i].point) );
++				here = (qboolean)( here || CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
++				                   || ETA_ThingHereInSight(eta_things.things[i].point) );
+ 				/* Or near it, on its floor, while any of it is still to
+ 				   press and some of it has been come across: in a
+ 				   corridor of its own, its buttons were not on T. */
+@@ -899,7 +902,9 @@ static void ETA_ThingsStep(int step)
+ 				near      = (qboolean)( near || ( fabsf(eta_things.things[i].point[2] - ps->origin[2]) < 160.0f
+ 				                                  && Distance(eta_things.things[i].point, ps->origin) < 1600.0f ) );
+ 			}
+-			puzzle = (qboolean)( puzzle || ( known && unpressed && near ) );
++			/* All pressed - the pillar down - nothing of it left to do:
++			   off T, the lift first. */
++			puzzle = (qboolean)( unpressed && ( here || ( known && near ) ) );
+ 		}
+ 		for (i = 0; puzzle && i < eta_things.count && count < ETA_THINGS_MAX; i++)
+ 		{
+@@ -965,6 +970,17 @@ static void ETA_ThingsStep(int step)
+ 				ETA_Speech_Say(va("Nothing left in this area. %d %s in other areas. X finds the doors out", elsewhere,
+ 				                  elsewhere == 1 ? "thing" : "things"));
+ 			}
++			else if (CG_AccessibilityLiftWaiting(liftAt))
++			{
++				int meters = (int)( Distance(ps->origin, liftAt) * ETA_QU_TO_METERS + 0.5f );
++
++				/* The crypt's pillar down: the way on, not "everything
++				   taken". */
++				CG_AccessibilityChoose(liftAt, "the lift");
++				ETA_Speech_Say(va("Nothing left to take or use here. The lift is down, %s, %d %s: stand on it to go up. O leads there",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(liftAt)), meters < 1 ? 1 : meters,
++				                  meters == 1 ? "meter" : "meters"));
++			}
+ 			else
+ 			{
+ 				ETA_Speech_Say(hidden ? va("Everything else has been taken or used. %d secret %s still to find", hidden,
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index d98676df..da19be07 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4727,6 +4727,7 @@ static char     eta_orderPending[MAX_STRING_CHARS];   /* said once it has been *
+ static int      eta_orderNext;       /* 1-based place pressed next in order */
+ static qboolean eta_orderBroken;     /* pressed out of order since the last reset */
+ static qboolean eta_orderLoaded;     /* a game loaded: switches not seen since are not known */
++static int      eta_orderAwaitLift;  /* a press that may have been the last: the lift waited for till then */
+ /*
+  * Lifts. The same level's last puzzle: when the three buttons are
+  * pressed, the stone pillar in the middle of the crossroads sinks level
+@@ -7511,6 +7512,27 @@ static void ETA_LiftsFrame(void)
+ 	}
+ }
+ 
++/* For T: a lift down and waiting to be stood on, where; qfalse none. */
++qboolean CG_AccessibilityLiftWaiting(vec3_t at)
++{
++	int l;
++
++	for (l = 0; l < eta_liftCount; l++)
++	{
++		vec3_t tmins, tmaxs;
++
++		if (!eta_lifts[l].announced || !eta_lifts[l].trigger || !cgs.inlineDrawModel[eta_lifts[l].trigger])
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[eta_lifts[l].trigger], tmins, tmaxs);
++		VectorAdd(tmins, tmaxs, at);
++		VectorScale(at, 0.5f, at);
++		return qtrue;
++	}
++	return qfalse;
++}
++
+ /*
+  * The order as it is pressed. Each switch's part shows whether it is
+  * pressed, while the server sends it; what was seen is kept. The tester
+@@ -7642,6 +7664,7 @@ static void ETA_LoadedForget(void)
+ 	eta_orderNext       = 1;
+ 	eta_orderBroken     = qfalse;
+ 	eta_orderPending[0] = '\0';
++	eta_orderAwaitLift  = 0;
+ 	/* Entered by loading a save - from the menu too, the tester's way -
+ 	   or begun afresh: then nothing is pressed, and that is known. */
+ 	{
+@@ -7682,6 +7705,30 @@ static void ETA_OrderFrame(void)
+ 	{
+ 		return;
+ 	}
++	/* The pillar waited for: down, all is pressed; not, the rest to do. */
++	if (eta_orderAwaitLift)
++	{
++		int l, next;
++
++		for (l = 0; l < eta_liftCount && !eta_lifts[l].everReady; l++)
++		{
++		}
++		if (l < eta_liftCount || cg.time + 10000 < eta_orderAwaitLift)
++		{
++			eta_orderAwaitLift = 0;   /* came down: said as a lift, and O leads to it */
++		}
++		else if (cg.time >= eta_orderAwaitLift)
++		{
++			eta_orderAwaitLift = 0;
++			next               = ETA_OrderNextModel();
++			if (next)
++			{
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("The pillar did not come down: the %s one is still to press. Next, %s", eta_switchSide[next],
++				                  ETA_OrderLead(next)));
++			}
++		}
++	}
+ 	/* Kept back while the walls' warning is heard out. */
+ 	if (eta_orderPending[0] && ( cg.time >= eta_crushUrgentUntil || cg.time + 10000 < eta_crushUrgentUntil ))
+ 	{
+@@ -7757,7 +7804,20 @@ static void ETA_OrderFrame(void)
+ 			{
+ 				eta_orderNext++;
+ 			}
+-			if (ETA_OrderUnknown())
++			if (ETA_OrderUnknown() && count + ETA_OrderUnknown() >= places && next)
++			{
++				/* Maybe the last: those not checked may be pressed already.
++				   The tester's south and east were, the west one brought
++				   the pillar down - and "Next, the south one" took O off the
++				   pillar, and sounded as if all was to do again. The pillar
++				   tells: nothing chosen until it has had time to come down. */
++				Com_sprintf(text, sizeof(text), "%d of %d pressed, of those checked since the game was loaded. If the %s "
++				            "one was pressed before the save, the pillar comes down now: listen for it", count, places,
++				            eta_switchSide[next]);
++				eta_orderAwaitLift = cg.time + 6000;
++				next               = 0;   /* no "Next", and O left as it is */
++			}
++			else if (ETA_OrderUnknown())
+ 			{
+ 				/* Some not seen since a load: the count is of those seen. */
+ 				int unknown = ETA_OrderUnknown();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 6bc7f7ba..10b5ef17 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2436,6 +2436,7 @@ qboolean CG_AccessibilityDoorBySwitch( int model );
+ qboolean CG_AccessibilityInTrapReach( const vec3_t origin );
+ int CG_AccessibilityTrapGo( void );
+ qboolean CG_AccessibilityCrossing( void );
++qboolean CG_AccessibilityLiftWaiting( vec3_t at );
+ const char *CG_AccessibilityTrapUnder( const vec3_t point );
+ void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );

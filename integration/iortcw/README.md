@@ -3023,3 +3023,18 @@ reach, F now says so and what to do: "Too far to reach from here: walk
 1 meter closer, and I say when F reaches it"; walking on, "Button 3 of
 3, west, in reach, F to use". From the tester's save, so: the button
 pressed, and the pillar down.
+
+### 0166 The pillar tells
+
+From the tester's save the south and east buttons were pressed, and the
+west one brought the pillar down - but the mode, not having seen the
+south one since the save was loaded, said "Next, the south one... O
+leads there": O was taken off the pillar, and the tester took it that
+the puzzle was to do again. A press that may be the last now says so and
+leaves O alone: "2 of 3 pressed, of those checked since the game was
+loaded. If the south one was pressed before the save, the pillar comes
+down now: listen for it". The pillar coming down is said, and O leads
+to it; only if it has not come down six seconds on is the next button
+named. With all of them pressed, T lists them no more, and with nothing
+left, says the lift: "Nothing left to take or use here. The lift is
+down, behind left, 25 meters: stand on it to go up. O leads there".
