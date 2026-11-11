@@ -3118,3 +3118,16 @@ the top. Stand still: the bridge is out in 5 seconds". The ledge lines
 are quiet on a lift, and its edge is a stop W again does not take the
 player over: "Edge of the lift: stay on it, and wait for the bridge".
 Tested walking about at the top: stopped at the edge, then across.
+
+### 0173 The lift on F1, X and T
+
+On the crypt's pillar the tester pressed F1 and was not told they were
+on it; X and T did not name the pillar; past the bridge, T did not list
+the north switch until it had been seen. Now F1 says the lift first, and
+X on it says only the lift: "On the lift, going up: stand still. The
+bridge is out in about 11 seconds"; "On the lift, at the top. The bridge
+is out, ahead right: O turns you to it, then walk across". Down and
+waiting, T says it: "The lift is down, behind left, 25 meters: stand on
+it to go up. O leads there". And a switch in the area the player is in,
+on their floor, is on T before it has been seen - past the bridge,
+"Button for a door, ahead right, 9 meters. O leads there".

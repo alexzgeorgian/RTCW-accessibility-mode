@@ -1,0 +1,176 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 23d091e8..8560d8ee 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -675,6 +675,16 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		CG_AccessibilityPlaceText( text, sizeof( text ) );
+ 	}
+ 
++	/* On a lift, the crypt's pillar: said first. */
++	if ( CG_AccessibilityOnLift() ) {
++		char lift[192], rest[1024];
++
++		if ( CG_AccessibilityLiftStatus( lift, sizeof( lift ) ) ) {
++			Q_strncpyz( rest, text, sizeof( rest ) );
++			Com_sprintf( text, sizeof( text ), "%s. %s", lift, rest );
++		}
++	}
++
+ 	/* In the tram: said first. */
+ 	{
+ 		char ride[96];
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index d9b43088..f39ae98b 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1700,6 +1700,17 @@ void CG_AccessibilityAreaExits(void)
+ 	{
+ 		return;
+ 	}
++	/* On a lift - the crypt's pillar: what it does, not the room's ways. */
++	if (CG_AccessibilityOnLift())
++	{
++		char lift[192];
++
++		if (CG_AccessibilityLiftStatus(lift, sizeof(lift)))
++		{
++			ETA_Speech_Say(lift);
++			return;
++		}
++	}
+ 	if (!eta_areas.loaded)
+ 	{
+ 		ETA_Speech_Say("This level is all one area. T finds things, O leads to the way out");
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 7fd01e10..80142679 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -823,7 +823,12 @@ static void ETA_ThingsStep(int step)
+ 			}
+ 			if (!eta_things.things[i].known && !eta_things.things[i].ride
+ 			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+-			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
++			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
++			    /* A switch in this very area, on this floor: the way on.
++			       Past the crypt's bridge, the north switch was not on T
++			       until it had been seen, and the tester was lost. */
++			    && !( eta_things.things[i].kind == ETA_THING_SWITCH && CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
++			          && fabsf(eta_things.things[i].point[2] - ps->origin[2]) < 128.0f ))
+ 			{
+ 				continue;   /* not come across yet */
+ 			}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index e0502f86..075461d7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7637,6 +7637,98 @@ static void ETA_LiftsFrame(void)
+ 	}
+ }
+ 
++/*
++ * The lift, for F1, X and T: on it, where it is and what to do; near it,
++ * down and waiting, where. The tester, on the crypt's pillar, asked where
++ * they were and was not told, and X and T did not name the pillar.
++ */
++qboolean CG_AccessibilityLiftStatus(char *out, size_t size)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                  l, n;
++
++	out[0] = '\0';
++	if (!cg.snap)
++	{
++		return qfalse;
++	}
++	for (l = 0; l < eta_liftCount; l++)
++	{
++		const entityState_t *lift = NULL, *bridge = NULL;
++		qboolean             moving, bmoving = qfalse;
++
++		for (n = 0; n < cg.snap->numEntities; n++)
++		{
++			const entityState_t *es = &cg.snap->entities[n];
++
++			if (es->eType == ET_MOVER && es->modelindex == eta_lifts[l].mover)
++			{
++				lift = es;
++			}
++			else if (es->eType == ET_MOVER && eta_lifts[l].bridge && es->modelindex == eta_lifts[l].bridge)
++			{
++				bridge = es;
++			}
++		}
++		if (!lift)
++		{
++			continue;
++		}
++		moving = (qboolean)( lift->pos.trType != TR_STATIONARY && cg.time < lift->pos.trTime + lift->pos.trDuration );
++		if (bridge)
++		{
++			bmoving = (qboolean)( bridge->pos.trType != TR_STATIONARY && cg.time < bridge->pos.trTime + bridge->pos.trDuration );
++		}
++		if (ps->groundEntityNum == lift->number)
++		{
++			int secs = bmoving && !eta_lifts[l].bridgeOut ? ( bridge->pos.trTime + bridge->pos.trDuration - cg.time + 999 ) / 1000 : 0;
++
++			if (moving && lift->pos.trDelta[2] > 0.0f)
++			{
++				Com_sprintf(out, size, "On the lift, going up: stand still%s",
++				            secs > 1 ? va(". The bridge is out in about %d seconds", secs) : "");
++			}
++			else if (moving)
++			{
++				Q_strncpyz(out, "On the lift, going down", size);
++			}
++			else if (eta_lifts[l].bridge && eta_lifts[l].bridgeOut && !bmoving)
++			{
++				vec3_t at;
++
++				VectorAdd(cg_entities[bridge->number].lerpOrigin, cgs.inlineModelMidpoints[eta_lifts[l].bridge], at);
++				Com_sprintf(out, size, "On the lift, at the top. The bridge is out, %s: O turns you to it, then walk across",
++				            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)));
++			}
++			else if (secs > 0)
++			{
++				Com_sprintf(out, size, "On the lift, at the top: stand still. The bridge is out in %d seconds", secs);
++			}
++			else
++			{
++				Q_strncpyz(out, "On the lift: stand still on it, and it goes up", size);
++			}
++			return qtrue;
++		}
++		if (eta_lifts[l].announced)
++		{
++			vec3_t tmins, tmaxs, at;
++			int    meters;
++
++			trap_R_ModelBounds(cgs.inlineDrawModel[eta_lifts[l].trigger], tmins, tmaxs);
++			VectorAdd(tmins, tmaxs, at);
++			VectorScale(at, 0.5f, at);
++			meters = (int)( Distance(ps->origin, at) * ETA_QU_TO_METERS + 0.5f );
++			Com_sprintf(out, size, "The lift is down, %s, %d %s: stand on it to go up. O leads there",
++			            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)), meters < 1 ? 1 : meters,
++			            meters == 1 ? "meter" : "meters");
++			CG_AccessibilityChoose(at, "the lift");
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* For T: a lift down and waiting to be stood on, where; qfalse none. */
+ qboolean CG_AccessibilityLiftWaiting(vec3_t at)
+ {
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 7fd9ccc0..87bc18c3 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2438,6 +2438,7 @@ int CG_AccessibilityTrapGo( void );
+ qboolean CG_AccessibilityCrossing( void );
+ qboolean CG_AccessibilityLiftWaiting( vec3_t at );
+ qboolean CG_AccessibilityOnLift( void );
++qboolean CG_AccessibilityLiftStatus( char *out, size_t size );
+ const char *CG_AccessibilityTrapUnder( const vec3_t point );
+ void CG_AccessibilityAnswerSaid( int length );
+ qboolean CG_AccessibilityTrapRun( char *text, size_t textSize );
