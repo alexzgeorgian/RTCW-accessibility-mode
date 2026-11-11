@@ -1,0 +1,29 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 6c2d385c..c15f90ee 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1365,7 +1365,23 @@ static qboolean ETA_UseInReach(const etaAimTarget_t *target)
+ 
+ static void ETA_AimStartFollow(const etaAimTarget_t *target, const char *label)
+ {
+-	ETA_AimStartSnap(target, label ? label : target->name);
++	/* Out of reach, said so, and what to do: F at the crypt's west
++	   button, three metres off, turned to it and named it, and pressed
++	   nothing - the tester heard no press, and did not know why. */
++	if (!ETA_UseInReach(target))
++	{
++		int closer = (int)( target->meters - ETA_USE_REACH_METERS + 0.99f );
++
++		ETA_AimStartSnap(target, NULL);
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_AimSayThen(label ? label : target->name, target->point,
++		               va("Too far to reach from here: walk %d %s closer, and I say when F reaches it",
++		                  closer < 1 ? 1 : closer, closer <= 1 ? "meter" : "meters"));
++	}
++	else
++	{
++		ETA_AimStartSnap(target, label ? label : target->name);
++	}
+ 	eta_aim.mode      = ETA_AIM_FOLLOW;
+ 	eta_aim.follow    = *target;
+ 	eta_aim.saidReach = qfalse;

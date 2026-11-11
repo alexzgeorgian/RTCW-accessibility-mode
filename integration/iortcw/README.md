@@ -3013,3 +3013,13 @@ counts those checked. The pillar coming down marks all three pressed.
 And slash at the saws' far end went back across them, away from the
 button: it now goes the way O leads, or, in the trap's reach already,
 the way faced - from the tester's save, round no plate, to the button.
+
+### 0165 F out of reach says so
+
+F three metres from the crypt's west button turned to it and named it -
+"Button 3 of 3, west, ahead, 3 meters" - and pressed nothing: F reaches
+two and a half. The tester heard no press, and did not know why. Out of
+reach, F now says so and what to do: "Too far to reach from here: walk
+1 meter closer, and I say when F reaches it"; walking on, "Button 3 of
+3, west, in reach, F to use". From the tester's save, so: the button
+pressed, and the pillar down.
