@@ -2960,3 +2960,18 @@ game was loaded", and seen, "pressed already" or not, as the game has
 it. A button learnt to be pressed is no longer "Done. Nothing else
 found", and the button's state is short enough not to be cut off: "any
 order; in order, the south one first".
+
+### 0161 Round the plates
+
+The crypt's west button lies past three saws that cut only when a plate
+on the floor sets them off - one plate by the north wall, one by the
+south, one in the middle. Told the wall to keep to plate by plate, the
+test player following O drifted onto one, and the saws cut it down, as
+they had the tester. The cross key now takes the saws too: it finds a
+way that touches no plate - the floor on a grid, each plate and a body's
+width round it kept off, the walls too - and walks it, stopping at each
+turn to face the next: "Now. Walking you round the plates: 5 turns", and
+"Across, no plate touched. Button 3 of 3, west, ahead: F uses it". There
+and back from the tester's save without god mode, the saws never
+started. While it walks, the plate tips and "Don't stop here" are not
+said. And a plate stepped on is no longer "The floor is falling".

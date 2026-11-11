@@ -1,0 +1,368 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 0a329c7d..c5c5b9ef 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3990,6 +3990,9 @@ static struct
+ {
+ 	int      stage;        /* 0 off, 1 waiting, 2 facing, 3 running, 4 walking up to its edge */
+ 	vec3_t   ready;        /* the edge of its reach, where the wait is */
++	vec3_t   path[8];      /* round a trap's plates: the corners, the last its end */
++	int      pathCount, pathAt;
++	qboolean walking;      /* along the path: at a walk, stopped at each corner */
+ 	vec3_t   target;       /* where the run ends */
+ 	char     goalName[48]; /* what O leads to beyond it, if anything */
+ 	qboolean haveGoal;
+@@ -4004,7 +4007,7 @@ static void ETA_CrossStop(const char *say)
+ {
+ 	if (eta_cross.stage == 3 || eta_cross.stage == 4)
+ 	{
+-		trap_SendConsoleCommand("-forward\n-sprint\n");
++		trap_SendConsoleCommand("-forward\n-sprint\n-speed\n");
+ 	}
+ 	eta_cross.stage = 0;
+ 	if (say)
+@@ -4014,6 +4017,190 @@ static void ETA_CrossStop(const char *say)
+ 	}
+ }
+ 
++/*
++ * Round the plates. The crypt's saws only cut when a plate on the floor
++ * sets them off - three of them, by the north wall, the south wall and
++ * in the middle - and the test player, told the wall to keep to plate by
++ * plate, drifted onto one and was cut down. Across them, then, by a way
++ * that touches none: the floor on a grid, each plate and a body's width
++ * round it kept off, the walls too, and the way found taken at a walk,
++ * corner to corner. The saws never start.
++ */
++#define ETA_CROSS_CELL   8.0f
++#define ETA_CROSS_GRID   128
++
++static int ETA_CrossPlanPath(const vec3_t from, const vec3_t to, vec3_t *out, int max)
++{
++	static short     prev[ETA_CROSS_GRID * ETA_CROSS_GRID];
++	static int       queue[ETA_CROSS_GRID * ETA_CROSS_GRID];
++	static qboolean  blocked[ETA_CROSS_GRID * ETA_CROSS_GRID];
++	static const vec3_t probeMins = { -16.0f, -16.0f, -6.0f }, probeMaxs = { 16.0f, 16.0f, 24.0f };
++	vec3_t           pmins[16], pmaxs[16], lo;
++	int              plates = 0, i, w, h, x, y, start, goal, head = 0, tail = 0, cells[ETA_CROSS_GRID * 2], n = 0, k;
++
++	for (i = 0; plates < 16 && CG_AccessibilityPlateBox(i, pmins[plates], pmaxs[plates]); i++)
++	{
++		/* Near the way, on its floor. */
++		if (pmaxs[plates][0] < MIN(from[0], to[0]) - 64.0f || pmins[plates][0] > MAX(from[0], to[0]) + 64.0f
++		    || pmaxs[plates][1] < MIN(from[1], to[1]) - 160.0f || pmins[plates][1] > MAX(from[1], to[1]) + 160.0f
++		    || fabsf(pmaxs[plates][2] - ( from[2] - 24.0f )) > 48.0f)
++		{
++			continue;
++		}
++		plates++;
++	}
++	if (!plates)
++	{
++		return 0;
++	}
++	lo[0] = MIN(from[0], to[0]) - 160.0f;
++	lo[1] = MIN(from[1], to[1]) - 160.0f;
++	lo[2] = from[2];
++	w     = (int)( ( fabsf(to[0] - from[0]) + 320.0f ) / ETA_CROSS_CELL ) + 1;
++	h     = (int)( ( fabsf(to[1] - from[1]) + 320.0f ) / ETA_CROSS_CELL ) + 1;
++	if (w > ETA_CROSS_GRID || h > ETA_CROSS_GRID)
++	{
++		return -1;
++	}
++	for (y = 0; y < h; y++)
++	{
++		for (x = 0; x < w; x++)
++		{
++			vec3_t  at, down;
++			trace_t trace;
++			int     p;
++
++			at[0] = lo[0] + x * ETA_CROSS_CELL;
++			at[1] = lo[1] + y * ETA_CROSS_CELL;
++			at[2] = lo[2];
++			blocked[y * w + x] = qfalse;
++			for (p = 0; p < plates && !blocked[y * w + x]; p++)
++			{
++				blocked[y * w + x] = (qboolean)( at[0] > pmins[p][0] - 22.0f && at[0] < pmaxs[p][0] + 22.0f
++				                                 && at[1] > pmins[p][1] - 22.0f && at[1] < pmaxs[p][1] + 22.0f );
++			}
++			if (blocked[y * w + x])
++			{
++				continue;
++			}
++			trap_CM_BoxTrace(&trace, at, at, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++			if (trace.startsolid || trace.allsolid)
++			{
++				blocked[y * w + x] = qtrue;
++				continue;
++			}
++			VectorCopy(at, down);
++			down[2] -= 64.0f;
++			trap_CM_BoxTrace(&trace, at, down, probeMins, probeMaxs, 0, MASK_PLAYERSOLID);
++			blocked[y * w + x] = (qboolean)( trace.fraction >= 1.0f );
++			prev[y * w + x]    = -1;
++		}
++	}
++	start = (int)( ( from[1] - lo[1] ) / ETA_CROSS_CELL + 0.5f ) * w + (int)( ( from[0] - lo[0] ) / ETA_CROSS_CELL + 0.5f );
++	goal  = (int)( ( to[1] - lo[1] ) / ETA_CROSS_CELL + 0.5f ) * w + (int)( ( to[0] - lo[0] ) / ETA_CROSS_CELL + 0.5f );
++	/* An end on a plate, or by one: on past it, the way it goes. */
++	{
++		float dx = to[0] - from[0], dy = to[1] - from[1], len = sqrtf(dx * dx + dy * dy);
++		int   step;
++
++		for (step = 1; goal >= 0 && goal < w * h && blocked[goal] && step <= 16 && len > 1.0f; step++)
++		{
++			int gx = (int)( ( to[0] + dx / len * step * ETA_CROSS_CELL - lo[0] ) / ETA_CROSS_CELL + 0.5f );
++			int gy = (int)( ( to[1] + dy / len * step * ETA_CROSS_CELL - lo[1] ) / ETA_CROSS_CELL + 0.5f );
++
++			if (gx < 0 || gy < 0 || gx >= w || gy >= h)
++			{
++				break;
++			}
++			goal = gy * w + gx;
++		}
++	}
++	if (start < 0 || start >= w * h || goal < 0 || goal >= w * h || blocked[goal])
++	{
++		return -1;
++	}
++	for (i = 0; i < w * h; i++)
++	{
++		prev[i] = -1;
++	}
++	blocked[start] = qfalse;
++	prev[start]    = (short)start;
++	queue[tail++]  = start;
++	while (head < tail && prev[goal] < 0)
++	{
++		int c = queue[head++], dx, dy;
++
++		for (dy = -1; dy <= 1; dy++)
++		{
++			for (dx = -1; dx <= 1; dx++)
++			{
++				int nx = c % w + dx, ny = c / w + dy, nc = ny * w + nx;
++
++				if (( !dx && !dy ) || nx < 0 || ny < 0 || nx >= w || ny >= h || blocked[nc] || prev[nc] >= 0)
++				{
++					continue;
++				}
++				/* No corner cut past a plate or a wall. */
++				if (dx && dy && ( blocked[c / w * w + nx] || blocked[ny * w + c % w] ))
++				{
++					continue;
++				}
++				prev[nc]      = (short)c;
++				queue[tail++] = nc;
++			}
++		}
++	}
++	if (prev[goal] < 0)
++	{
++		return -1;
++	}
++	/* Back from the end, then the corners kept: the fewest straight runs
++	   that stay on free cells. */
++	for (i = goal; n < (int)ARRAY_LEN(cells); i = prev[i])
++	{
++		cells[n++] = i;
++		if (i == start)
++		{
++			break;
++		}
++	}
++	k = 0;
++	{
++		int at = n - 1;   /* cells[n - 1] is the start */
++
++		while (at > 0 && k < max)
++		{
++			int best = at - 1, j;
++
++			for (j = 0; j < at; j++)
++			{
++				int   a = cells[at], b = cells[j], steps, s;
++				float ax = a % w, ay = a / w, bx = b % w, by = b / w;
++				qboolean clear = qtrue;
++
++				steps = (int)( MAX(fabsf(bx - ax), fabsf(by - ay)) * 2.0f ) + 1;
++				for (s = 0; s <= steps && clear; s++)
++				{
++					int cx = (int)( ax + ( bx - ax ) * s / steps + 0.5f ), cy = (int)( ay + ( by - ay ) * s / steps + 0.5f );
++
++					clear = (qboolean)!blocked[cy * w + cx];
++				}
++				if (clear)
++				{
++					best = j;
++					break;
++				}
++			}
++			out[k][0] = lo[0] + ( cells[best] % w ) * ETA_CROSS_CELL;
++			out[k][1] = lo[1] + ( cells[best] / w ) * ETA_CROSS_CELL;
++			out[k][2] = from[2];
++			k++;
++			at = best;
++		}
++	}
++	return k;
++}
++
+ /* The cross key moving the player itself: "Stop!" is not for that. */
+ qboolean CG_AccessibilityCrossing(void)
+ {
+@@ -4104,6 +4291,21 @@ void CG_AccessibilityCrossTrap(void)
+ 	eta_cross.target[2] = ps->origin[2];
+ 	eta_cross.sawUnsafe = (qboolean)!safe;
+ 	eta_cross.stageAt   = cg.time;
++	eta_cross.pathCount = eta_cross.pathAt = 0;
++	eta_cross.walking   = qfalse;
++	/* Plates that set it off: round them, at a walk. */
++	if (Q_stricmp(eta_cross.kind, "blade"))
++	{
++		eta_cross.pathCount = ETA_CrossPlanPath(ps->origin, eta_cross.target, eta_cross.path, ARRAY_LEN(eta_cross.path));
++		if (eta_cross.pathCount < 0)
++		{
++			/* Straight across would step on one. */
++			eta_cross.pathCount = 0;
++			ETA_Speech_Say("No way round its plates found from here. Step back to the middle of the way in, and try again");
++			return;
++		}
++		eta_cross.walking = (qboolean)( eta_cross.pathCount > 0 );
++	}
+ 	/* A blade: from the edge of its reach, or there is not time to get
+ 	   across. Walked up to it first - safe there whatever it does. */
+ 	if (!Q_stricmp(eta_cross.kind, "blade") && gap > margin + 16.0f)
+@@ -4229,12 +4431,13 @@ static void ETA_CrossFrame(void)
+ 
+ 			memset(&aim, 0, sizeof(aim));
+ 			aim.entityNum = -1;
+-			VectorCopy(eta_cross.target, aim.point);
++			VectorCopy(eta_cross.walking ? eta_cross.path[0] : eta_cross.target, aim.point);
+ 			aim.point[2] += cg.predictedPlayerState.viewheight - 8.0f;
+ 			ETA_AimStartSnap(&aim, NULL);
+ 			eta_cross.stage   = 2;
+ 			eta_cross.stageAt = cg.time;
+-			ETA_Speech_Say("Now");
++			ETA_Speech_Say(eta_cross.walking ? va("Now. Walking you round the plates: %d %s", eta_cross.pathCount,
++			                                      eta_cross.pathCount == 1 ? "stretch" : "turns") : "Now");
+ 		}
+ 		else if (cg.time - eta_cross.stageAt > 30000)
+ 		{
+@@ -4248,11 +4451,16 @@ static void ETA_CrossFrame(void)
+ 		vec3_t to;
+ 		float  off;
+ 
+-		VectorSubtract(eta_cross.target, ps->origin, to);
++		VectorSubtract(eta_cross.walking ? eta_cross.path[eta_cross.pathAt] : eta_cross.target, ps->origin, to);
+ 		off = fabsf(AngleNormalize180(vectoyaw(to) - ps->viewangles[YAW]));
++		/* Round plates: still first, so a turn is not a slide onto one. */
++		if (eta_cross.walking && VectorLength(ps->velocity) > 30.0f && cg.time - eta_cross.stageAt < 1500)
++		{
++			return;
++		}
+ 		if (off < 6.0f || cg.time - eta_cross.stageAt > 600)
+ 		{
+-			trap_SendConsoleCommand("+forward\n+sprint\n");
++			trap_SendConsoleCommand(eta_cross.walking ? "+speed\n+forward\n" : "+forward\n+sprint\n");
+ 			eta_cross.stage      = 3;
+ 			eta_cross.stageAt    = cg.time;
+ 			eta_cross.lastMoveAt = cg.time;
+@@ -4261,6 +4469,58 @@ static void ETA_CrossFrame(void)
+ 		return;
+ 	}
+ 
++	/* Walking round the plates: to each corner, stopped there, turned to
++	   the next. */
++	if (eta_cross.walking)
++	{
++		vec3_t to, flat;
++
++		VectorSubtract(eta_cross.path[eta_cross.pathAt], ps->origin, to);
++		to[2] = 0.0f;
++		VectorSubtract(ps->origin, eta_cross.lastPos, flat);
++		flat[2] = 0.0f;
++		if (VectorLength(flat) > 8.0f)
++		{
++			eta_cross.lastMoveAt = cg.time;
++			VectorCopy(ps->origin, eta_cross.lastPos);
++		}
++		if (VectorLength(to) < 14.0f || ( DotProduct(to, ps->velocity) < 0.0f && cg.time - eta_cross.stageAt > 300 ))
++		{
++			etaAimTarget_t aim;
++
++			trap_SendConsoleCommand("-forward\n-speed\n");
++			if (++eta_cross.pathAt >= eta_cross.pathCount)
++			{
++				char said[160];
++
++				eta_cross.stage = 0;
++				if (eta_cross.haveGoal)
++				{
++					Com_sprintf(said, sizeof(said), "Across, no plate touched. %s, ahead: F uses it", eta_cross.goalName);
++				}
++				else
++				{
++					Q_strncpyz(said, "Across, no plate touched", sizeof(said));
++				}
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(said);
++				return;
++			}
++			memset(&aim, 0, sizeof(aim));
++			aim.entityNum = -1;
++			VectorCopy(eta_cross.path[eta_cross.pathAt], aim.point);
++			aim.point[2] += ps->viewheight - 8.0f;
++			ETA_AimStartSnap(&aim, NULL);
++			eta_cross.stage   = 2;
++			eta_cross.stageAt = cg.time;
++		}
++		else if (cg.time - eta_cross.lastMoveAt > 1200 || cg.time - eta_cross.stageAt > 8000)
++		{
++			ETA_CrossStop("Crossing stopped: something is in the way");
++		}
++		return;
++	}
++
+ 	/* Running: there, past it, held up, or too long. */
+ 	{
+ 		vec3_t to, flat;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index e24dccf8..bb5720b8 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8976,7 +8976,7 @@ static void ETA_TrapsFrame(void)
+ 			}
+ 			/* At rest, but stopped where it kills: the first blow comes in a
+ 			   fraction of a second when it next starts, too soon for "Out!". */
+-			if (gap <= margin && eta_trapGroups[g].state == ETA_TRAP_REST && !eta_trapGroups[g].restZoneSaid
++			if (gap <= margin && eta_trapGroups[g].state == ETA_TRAP_REST && !eta_trapGroups[g].restZoneSaid && !CG_AccessibilityCrossing()
+ 			    && sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]) < 40.0f)
+ 			{
+ 				float turn, run;
+@@ -9012,7 +9012,8 @@ static void ETA_TrapsFrame(void)
+ 		int   model, plate = 0;
+ 		vec3_t mid = { 0.0f, 0.0f, 0.0f }, mins, maxs;
+ 
+-		for (model = 1; speed > 40.0f && model < MAX_MODELS && model < cgs.numInlineModels; model++)
++		/* The cross key walks round them itself. */
++		for (model = 1; speed > 40.0f && !CG_AccessibilityCrossing() && model < MAX_MODELS && model < cgs.numInlineModels; model++)
+ 		{
+ 			vec3_t at, to;
+ 			float  dx, dy;
+@@ -9174,8 +9175,13 @@ static void ETA_FloorFrame(void)
+ 		return;
+ 	}
+ 	es = &cg_entities[ps->groundEntityNum].currentState;
++	/* A plate stepped on, a button, sinks a finger's width: no floor
++	   falling. The saws' plates were "The floor is falling". */
+ 	if (es->eType != ET_MOVER || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
+-	    || CG_AccessibilityDoorModel(es->modelindex, &opens))
++	    || eta_plateModel[es->modelindex] || eta_buttonModel[es->modelindex]
++	    || CG_AccessibilityDoorModel(es->modelindex, &opens)
++	    || ( es->pos.trType != TR_STATIONARY && fabsf(es->pos.trDelta[2]) * es->pos.trDuration * 0.001f < 32.0f
++	         && es->apos.trType == TR_STATIONARY ))
+ 	{
+ 		return;
+ 	}
