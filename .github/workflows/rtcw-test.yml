@@ -97,38 +97,45 @@ jobs:
           path: accessibility-mode
 
       # The package mirror has stalled before; each attempt is capped and
-      # retried rather than left hanging, as in the release workflow.
+      # retried rather than left hanging, as in the release workflow. When
+      # Ubuntu's servers cannot be reached from the runner at all, the
+      # mingw-w64 toolchain comes from llvm-mingw's releases on GitHub.
       - name: Install the cross-compilers
-        timeout-minutes: 15
+        timeout-minutes: 20
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          apt_opts="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-          # Fetch Ubuntu's packages over HTTPS: plain HTTP from the runners
-          # to the Ubuntu mirrors has stalled for whole days while HTTPS
-          # still answered.
-          ubuntu_https() {
-            sudo sed -i -E 's#http://([a-z.]*archive|security)\.ubuntu\.com/#https://\1.ubuntu.com/#g' \
-              /etc/apt/apt-mirrors.txt /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-          }
-          ubuntu_https
-          for attempt in 1 2 3; do
-            if sudo timeout 240 apt-get $apt_opts update \
+          apt_opts="-o Acquire::Retries=2 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for attempt in 1 2; do
+            if sudo timeout 150 apt-get $apt_opts update \
                && sudo timeout 240 apt-get $apt_opts install -y --no-install-recommends \
                     gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64; then
               exit 0
             fi
-            echo "::warning::installing the cross-compilers failed or stalled (attempt $attempt of 3)"
-            # The runner's own Ubuntu mirror sometimes stops answering for
-            # a while: try the main Ubuntu archive instead.
+            echo "::warning::installing the cross-compilers failed or stalled (attempt $attempt of 2)"
+            # Try Ubuntu's main archive, over HTTPS, next time.
             if [ -f /etc/apt/apt-mirrors.txt ]; then
               printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' \
                 | sudo tee /etc/apt/apt-mirrors.txt >/dev/null
             fi
-            sudo sed -i 's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' \
+            sudo sed -i -E 's#http://(azure\.)?archive\.ubuntu\.com/#https://archive.ubuntu.com/#g; s#http://security\.ubuntu\.com/#https://security.ubuntu.com/#g' \
               /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
-            ubuntu_https
-            sleep 10
+            sleep 5
           done
-          exit 1
+          echo "::warning::Ubuntu's package servers are not answering: using llvm-mingw from GitHub"
+          dl="$RUNNER_TEMP/llvm-mingw-dl"
+          mkdir -p "$dl"
+          gh release download --repo mstorsjo/llvm-mingw --dir "$dl" \
+            --pattern 'llvm-mingw-*-msvcrt-ubuntu-*-x86_64.tar.xz'
+          archive="$(ls "$dl"/*.tar.xz | sort | tail -1)"
+          echo "using $(basename "$archive")"
+          mkdir -p "$RUNNER_TEMP/llvm-mingw"
+          tar -xJf "$archive" -C "$RUNNER_TEMP/llvm-mingw" --strip-components=1
+          echo "$RUNNER_TEMP/llvm-mingw/bin" >> "$GITHUB_PATH"
+          for tool in gcc g++ windres; do
+            test -x "$RUNNER_TEMP/llvm-mingw/bin/x86_64-w64-mingw32-$tool" \
+              || { echo "::error::llvm-mingw has no x86_64-w64-mingw32-$tool"; exit 1; }
+          done
 
       - uses: actions/download-artifact@v4
         with:
