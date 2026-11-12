@@ -3334,3 +3334,17 @@ switch, then "The gate is still moving" while it rises, then "The gate
 is open. O leads on", and leads again to where the player was going.
 Tested in the church: from seven metres off, O led to the switch, F
 raised the gate, and O led through to a place beyond it.
+
+### 0190 Enemies described, Elite guards named
+
+The tester had never heard how the enemies look, and asked who the
+woman talking to the soldiers before the dig site was: an Elite guard
+(the game's own sound files for her lines are named "eli"). The
+cutscene lines now name the women in black leather as Elite guards, in
+the church and in Unhallowed Ground. And a couple of seconds after the
+first enemy of a kind is in sight, one sentence says how that kind
+looks - soldiers, Elite guards, Black guards, Venom soldiers, zombies,
+zombie warriors, Lopers, stim, proto and super soldiers, frogmen -
+once ever, remembered across missions in eta_enemiesMet. Tested at the
+start of the second crypt level: the soldier and the zombie warrior
+were each described once, after their own line.

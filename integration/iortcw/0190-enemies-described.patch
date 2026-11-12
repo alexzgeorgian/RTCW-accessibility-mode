@@ -1,0 +1,153 @@
+diff --git a/SP/code/cgame/cg_accessibility_cutscenes.h b/SP/code/cgame/cg_accessibility_cutscenes.h
+index f6338195..1bea58d9 100644
+--- a/SP/code/cgame/cg_accessibility_cutscenes.h
++++ b/SP/code/cgame/cg_accessibility_cutscenes.h
+@@ -92,8 +92,8 @@ static const struct {
+ 	/* Who is there said before anyone speaks - Helga, about seven seconds
+ 	   in - not at the end: the tester heard the place, then the talk, and
+ 	   only then who was talking. */
+-	{ "church", 0, "cs04_01", 0, "A tall stone church. Below, by a tomb: Helga von Bulow, a heavy woman in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather" },
+-	{ "church", 0, "cs04_03d", 0, "A dead warrior lies on the tomb. The woman in black leather watches, pistol in hand" },
++	{ "church", 0, "cs04_01", 0, "A tall stone church. Below, by a tomb: Helga von Bulow, a heavy woman in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather: an Elite guard, one of Helga's own guard" },
++	{ "church", 0, "cs04_03d", 0, "A dead warrior lies on the tomb. The Elite guard in black leather watches, pistol in hand" },
+ 
+ 	/* Mission 2, the tomb. */
+ 	{ "boss1", 0, "cs05_02", 0, "Night. Looking up past iron spikes at broken stone walls and arches" },
+@@ -118,7 +118,7 @@ static const struct {
+ 
+ 	/* Mission 6, unhallowed ground. */
+ 	{ "dark", 0, "cs15_01", 0, "Fog at night: tall standing stones and dead twisted trees" },
+-	{ "dark", 0, "cs15_01", 6500, "A blonde woman in black leather walks among the stones" },
++	{ "dark", 0, "cs15_01", 6500, "A blonde woman in black leather walks among the stones: an Elite guard" },
+ 	{ "dark", 0, "cs15_01", 11500, "Below, two soldiers by a lamp" },
+ 	{ "dark", 0, "cs15_06", 0, "She walks away into the fog, toward the stones" },
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 51ebfcb7..ec8838aa 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -9880,6 +9880,116 @@ static void ETA_FloorFrame(void)
+ 	}
+ }
+ 
++/*
++ * What each kind of enemy looks like, said once ever, a moment after the
++ * first one of its kind is in sight - the tester asked, never having heard
++ * how the enemies look. Remembered across missions in eta_enemiesMet, one
++ * bit for each kind. The people met in the story are told in the
++ * cutscenes, and friends are not enemies to be told.
++ */
++static const char *ETA_EnemyLooks(int aiChar)
++{
++	switch (aiChar)
++	{
++	case AICHAR_SOLDIER:
++		return "Soldiers are German army men in field-grey uniforms and steel helmets, with rifles and submachine guns";
++	case AICHAR_ELITEGUARD:
++		return "Elite guards are women of the SS Paranormal Division, Helga von Bulow's own guard, in black leather. Quick on "
++		       "their feet, often with a silenced Sten";
++	case AICHAR_BLACKGUARD:
++		return "Black guards are SS men in black uniforms, the best of the German soldiers, tougher than the army men";
++	case AICHAR_VENOM:
++		return "Venom soldiers are big men in heavy armour, each carrying a Venom: a gun with spinning barrels that fires very fast";
++	case AICHAR_ZOMBIE:
++		return "Zombies are rotting corpses risen from the old tombs, in rags. They come at you to strike with their hands";
++	case AICHAR_WARZOMBIE:
++		return "Zombie warriors are dead knights risen from their tombs, in old armour, with blades. Some throw ghosts at you";
++	case AICHAR_LOPER:
++		return "Lopers are made in the laboratories: a huge body with no legs, bounding on great arms, that shocks you "
++		       "with electricity close up";
++	case AICHAR_STIMSOLDIER1:
++	case AICHAR_STIMSOLDIER2:
++	case AICHAR_STIMSOLDIER3:
++		return "Stim soldiers are men given drugs in the laboratories: faster and harder to kill than soldiers";
++	case AICHAR_PROTOSOLDIER:
++		return "Proto soldiers are the first super soldiers: men sealed in heavy plates of armour, slow, with a Venom gun";
++	case AICHAR_SUPERSOLDIER:
++		return "The super soldier is a giant in armour, built in the laboratories, with a Venom gun and a rocket launcher";
++	case AICHAR_FROGMAN:
++		return "Frogmen are German divers in black rubber suits and masks, with spear guns";
++	default:
++		return NULL;
++	}
++}
++
++#define ETA_LOOKS_AFTER_MS 2500   /* after the first sight, so the enemy's own line is heard first */
++#define ETA_LOOKS_METERS   40.0f
++
++static void ETA_EnemyLooksFrame(void)
++{
++	static vmCvar_t met;
++	static qboolean registered;
++	static int      pendingKind, pendingAt;
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t          eye;
++	int             n;
++
++	if (!registered)
++	{
++		trap_Cvar_Register(&met, "eta_enemiesMet", "0", CVAR_ARCHIVE);
++		registered = qtrue;
++	}
++	trap_Cvar_Update(&met);
++	if (!eta_enemyCues.integer || !cg.snap || cg.cameraMode || ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0)
++	{
++		pendingKind = 0;
++		return;
++	}
++	if (pendingKind)
++	{
++		if (cg.time >= pendingAt)
++		{
++			const char *looks = ETA_EnemyLooks(pendingKind);
++
++			if (looks && !( met.integer & ( 1 << pendingKind ) ))
++			{
++				ETA_Speech_Say(looks);
++				trap_Cvar_Set("eta_enemiesMet", va("%d", met.integer | ( 1 << pendingKind )));
++			}
++			pendingKind = 0;
++		}
++		return;
++	}
++
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++	for (n = 0; n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es   = &cg.snap->entities[n];
++		const centity_t     *cent = &cg_entities[es->number];
++		vec3_t              low, high;
++
++		if (es->eType != ET_PLAYER || !es->aiChar || es->aiChar >= 31 || es->number == ps->clientNum
++		    || ( es->eFlags & EF_DEAD ) || !ETA_SeenAsEnemy(es) || !ETA_EnemyLooks(es->aiChar)
++		    || ( met.integer & ( 1 << es->aiChar ) )
++		    || Distance(cent->lerpOrigin, ps->origin) * ETA_QU_TO_METERS > ETA_LOOKS_METERS)
++		{
++			continue;
++		}
++		VectorCopy(cent->lerpOrigin, low);
++		low[2] += 8.0f;
++		VectorCopy(cent->lerpOrigin, high);
++		high[2] += 36.0f;
++		if (!ETA_ClearLine(eye, low) && !ETA_ClearLine(eye, high))
++		{
++			continue;
++		}
++		pendingKind = es->aiChar;
++		pendingAt   = cg.time + ETA_LOOKS_AFTER_MS;
++		return;
++	}
++}
++
+ static void ETA_LoadedForget(void);
+ 
+ void CG_AccessibilityWorldFrame(qboolean held)
+@@ -9891,6 +10001,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_LiftsFrame();
+ 	ETA_WarriorFrame();
+ 	ETA_SpiritFrame();
++	ETA_EnemyLooksFrame();
+ 	ETA_OrderFrame();
+ 	ETA_TrapsFrame();
+ 	ETA_WorldRead();
