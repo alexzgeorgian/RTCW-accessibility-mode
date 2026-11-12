@@ -1,0 +1,142 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 61dc89a8..779b67b8 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -47,6 +47,7 @@ typedef struct
+ 	int column, row, layer;
+ 	char name[48];     /* the square's name, "C,3", or the objective's */
+ 	int intoArea;      /* reached on coming into this area, from 1, or 0 */
++	qboolean walkOnto; /* a thing taken by walking onto it: reached on it, not three metres short */
+ } eta_marker_t;
+ 
+ static eta_marker_t eta_marker;
+@@ -59,6 +60,7 @@ static eta_marker_t eta_marker;
+  * reached by walking into it, which the grid decides rather than this.
+  */
+ #define ETA_MARKER_ARRIVE_METERS 3.0f
++#define ETA_MARKER_ONTO_UNITS    32.0f   /* a thing walked onto: this close, the player touches it, and takes it */
+ #define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
+ 
+ /**
+@@ -1388,7 +1390,8 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 
+ 	ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL,
+ 	                     eta_marker.square ? ETA_MarkerSquareRadius()
+-	                                       : ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS,
++	                     : eta_marker.walkOnto ? ETA_MARKER_ONTO_UNITS
++	                                           : ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS,
+ 	                     eta_marker.square);
+ 
+ 	eta_route.planned   = qtrue;
+@@ -2659,6 +2662,14 @@ void CG_AccessibilityMarkerFrame(void)
+ 	else
+ 	{
+ 		arrived = (qboolean)(eta_marker.leftIt && distance <= ETA_MARKER_ARRIVE_METERS);
++		if (eta_marker.walkOnto)
++		{
++			vec3_t flat;
++
++			VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++			flat[2] = 0.0f;
++			arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_ONTO_UNITS );
++		}
+ 		/* A way into an area: reached once in it, or right on the spot
+ 		   just through its doorway. */
+ 		if (eta_marker.intoArea)
+@@ -2804,6 +2815,17 @@ void CG_AccessibilityMarkerSet(const vec3_t origin, const char *name)
+ 	eta_progress.at = 0;
+ }
+ 
++/* The marker just put down is a thing taken by walking onto it - health,
++   ammo, a weapon, treasure: reached standing on it. In the church the
++   tester was led to a large health pack by a crate and told "Marker
++   reached" three metres short of it, with the crate's corner between;
++   they walked into the crate, and never took it. */
++void CG_AccessibilityMarkerWalkOnto(qboolean walkOnto)
++{
++	eta_marker.walkOnto = walkOnto;
++	ETA_RouteForget();
++}
++
+ /* The marker just put down is a way into an area: reached on coming
+    into it, not three metres short. */
+ void CG_AccessibilityMarkerIntoArea(int area)
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 92094aeb..a84deb5f 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1172,6 +1172,11 @@ static void ETA_ThingsStep(int step)
+ 	name[0] = (char)tolower((unsigned char)name[0]);
+ 	CG_AccessibilityChoose(thing->point, name);
+ 	CG_AccessibilityChosenIsThing();
++	if (( thing->kind == ETA_THING_ITEM || thing->kind == ETA_THING_TREASURE ) && !thing->ride
++	    && Q_stricmpn(thing->name, "Spot ", 5) && !Q_stristr(thing->name, "inside something to break"))
++	{
++		CG_AccessibilityChosenWalkOnto();
++	}
+ }
+ 
+ void CG_AccessibilityThingsNext(void)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index a567359c..24ab924c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6474,7 +6474,7 @@ static vec3_t   eta_ledPoint;
+ 
+ /* A thing T or Y chose: F turns to it there. Not a door X chose, whose
+    point is in the room beyond. */
+-static qboolean eta_chosenThing, eta_ledThing;
++static qboolean eta_chosenThing, eta_ledThing, eta_chosenWalkOnto;
+ static char     eta_ledName[64];
+ 
+ /* Where F turns to for the thing, when that is not where O leads: a
+@@ -6488,6 +6488,12 @@ void CG_AccessibilityChosenIsThing(void)
+ 	VectorCopy(eta_chosenPoint, eta_chosenAim);
+ }
+ 
++/* The thing chosen is taken by walking onto it: O leads onto it. */
++void CG_AccessibilityChosenWalkOnto(void)
++{
++	eta_chosenWalkOnto = qtrue;
++}
++
+ void CG_AccessibilityChosenAimAt(const vec3_t at)
+ {
+ 	VectorCopy(at, eta_chosenAim);
+@@ -6591,6 +6597,7 @@ void CG_AccessibilityWayOut(void)
+ 		Q_strncpyz(eta_ledName, eta_chosenName, sizeof(eta_ledName));
+ 		ETA_MarkerSetByO(eta_chosenPoint, eta_chosenName);
+ 		CG_AccessibilityMarkerIntoArea(eta_chosenArea - 1);
++		CG_AccessibilityMarkerWalkOnto(eta_chosenThing && eta_chosenWalkOnto);
+ 		eta_chosenArea = 0;
+ 		CG_AccessibilityFaceTheWay();
+ 		return;
+@@ -6850,6 +6857,7 @@ static void ETA_DestinationStep(int step)
+ 	}
+ 	ETA_WorldRead();
+ 	eta_chosenThing = qfalse;
++	eta_chosenWalkOnto = qfalse;
+ 	CG_AccessibilityUseChoiceClear();
+ 
+ 	for (i = 0; i < eta_exitCount; i++)
+@@ -7075,6 +7083,7 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+ {
+ 	eta_chosenThing = qfalse;
++	eta_chosenWalkOnto = qfalse;
+ 	eta_chosenArea  = 0;
+ 	CG_AccessibilityUseChoiceClear();
+ 	VectorCopy(point, eta_chosenPoint);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index f08f7bb0..3506b1b4 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2282,6 +2282,8 @@ void CG_AccessibilityChosenClear( void );
+ void CG_AccessibilityUseChoiceClear( void );
+ qboolean CG_AccessibilityLedTo( vec3_t out, char *name, size_t nameSize );
+ void CG_AccessibilityChosenIsThing( void );
++void CG_AccessibilityChosenWalkOnto( void );
++void CG_AccessibilityMarkerWalkOnto( qboolean walkOnto );
+ qboolean CG_AccessibilityThingChoice( vec3_t out, char *name, size_t nameSize, qboolean *pending );
+ void CG_AccessibilityLedClear( void );
+ void CG_AccessibilityThingsFrame( void );

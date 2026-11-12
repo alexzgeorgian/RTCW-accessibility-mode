@@ -3171,3 +3171,15 @@ meters, on top of something, 3 meters up. Climb up to it: O leads the
 way, a jump at a time"; and a marker that is a place to stand - ground
 under it - is not reached from more than a jump above or below it. A
 switch on a wall, reached by F from the floor, is as before.
+
+### 0177 Onto the health
+
+The health pack the tester could not take, with 36 health, was the one
+on the floor in the church's south-west corner, in a gap between a
+crate and the wall. Chosen with T and led to by O, it was "Marker
+reached" three metres short of it, the crate's corner between; walking
+on from there, "ahead left", went into the crate. A thing taken by
+walking onto it - health, ammo, a weapon, treasure - is now reached
+standing on it: O's way leads right onto it, and "Marker reached" is
+said only there. Tested from two starts by the crate: reached 1 metre
+off, on it, both times.
