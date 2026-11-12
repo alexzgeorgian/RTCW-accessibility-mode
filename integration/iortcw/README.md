@@ -3318,3 +3318,19 @@ the tomb. The woman in black leather watches, pistol in hand".
 
 The tester remembers Helga as fat, and "stout" did not say it plainly:
 she is "a heavy woman in a white shirt and black tie".
+
+### 0188 Gates and their switches
+
+In the church the tester heard O say it could not find the way out. A
+walk test showed why: O's way-finding does not know the portcullis the
+script raises, so it planned straight through the shut gate, and O
+turned the player again and again to "the opening nearest the way".
+The switches that move each gate are now read from the map (six in the
+church). When a shut gate with a switch is on the way, or no way is
+found and one stands toward the place, O says "A gate is shut across
+the way" and leads to its switch, or says it is right there and F
+presses it. After F, O says the gate starts a few seconds after the
+switch, then "The gate is still moving" while it rises, then "The gate
+is open. O leads on", and leads again to where the player was going.
+Tested in the church: from seven metres off, O led to the switch, F
+raised the gate, and O led through to a place beyond it.

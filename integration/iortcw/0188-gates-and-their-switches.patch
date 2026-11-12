@@ -1,0 +1,434 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 13fbe711..703f803d 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4905,6 +4905,116 @@ static void ETA_CrossFrame(void)
+ 	}
+ }
+ 
++/* No way found all the way there, and a gate the script moves shut
++   across it, with a switch the map gives it: to the switch, then wait for
++   the gate, then on to where the player was going. A test walk through
++   the church stood at its third portcullis for minutes, turned again and
++   again to the opening behind it; and once the switch was pressed, O
++   went off to places not explored while the gate was still rising. */
++static struct
++{
++	int    gate;       /* its model, 0 when none is being opened */
++	vec3_t target;     /* where the player was going */
++	char   name[96];
++	vec3_t switchAt;
++} eta_gateLead;
++
++static qboolean ETA_GateLead(const playerState_t *ps, qboolean noWayYet, const vec3_t routeAhead)
++{
++	vec3_t      origin, switchAt, stand, toSwitch;
++	const char *name = NULL;
++	int         gate, meters;
++
++	if (eta_gateLead.gate)
++	{
++		qboolean moving = qfalse;
++		int      state  = CG_AccessibilityGateState(eta_gateLead.gate, ps->origin, &moving);
++
++		if (state == 0 || ( !moving && state == 2 ))
++		{
++			/* Open, or out of sight: back to where the player was
++			   going, the way looked for again from here on the next
++			   press. */
++			CG_AccessibilityChoose(eta_gateLead.target, eta_gateLead.name[0] ? eta_gateLead.name : NULL);
++			eta_gateLead.gate = 0;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(state == 2 ? "The gate is open. O leads on" : "Back on the way. O leads on");
++			return qtrue;
++		}
++		if (moving)
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("The gate is still moving. Wait for it to stop, then O");
++			return qtrue;
++		}
++		/* Shut and still: just pressed - the gate starts a few seconds
++		   after its switch - or not pressed yet. */
++		if (eta_useKeyAt && cg.time - eta_useKeyAt < 8000
++		    && Distance(ps->origin, eta_gateLead.switchAt) < 160.0f)
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("The gate starts a few seconds after the switch, and rises slowly. Wait for it to stop, then O");
++			return qtrue;
++		}
++	}
++
++	/* The way found leads through the gate - the search takes no account
++	   of what the script moves - or none was found at all. */
++	if (!routeAhead && !noWayYet && !CG_AccessibilityMarkerPartial())
++	{
++		return qfalse;
++	}
++	if (eta_gateLead.gate)
++	{
++		VectorCopy(eta_gateLead.target, origin);
++		name = eta_gateLead.name[0] ? eta_gateLead.name : NULL;
++	}
++	else if (!CG_AccessibilityMarkerInfo(origin, &name))
++	{
++		return qfalse;
++	}
++	gate = routeAhead ? CG_AccessibilityGateInWay(ps->origin, routeAhead, 256.0f, switchAt)
++	                  : CG_AccessibilityGateInWay(ps->origin, origin, 512.0f, switchAt);
++	if (!gate)
++	{
++		return qfalse;
++	}
++	if (eta_gateLead.gate != gate)
++	{
++		eta_gateLead.gate = gate;
++		VectorCopy(origin, eta_gateLead.target);
++		Q_strncpyz(eta_gateLead.name, name ? name : "", sizeof(eta_gateLead.name));
++	}
++	VectorCopy(switchAt, eta_gateLead.switchAt);
++
++	VectorSubtract(switchAt, ps->origin, toSwitch);
++	meters = (int)( VectorLength(toSwitch) * ETA_QU_TO_METERS + 0.5f );
++	ETA_HudNarrator_HoldPassive(cg.time);
++	if (meters <= 2)
++	{
++		/* Already there: aimed at it, F presses it. */
++		etaAimTarget_t aim;
++
++		memset(&aim, 0, sizeof(aim));
++		aim.entityNum = -1;
++		VectorCopy(switchAt, aim.point);
++		ETA_AimStartSnap(&aim, NULL);
++		ETA_Speech_Say(va("A gate is shut across the way. Its switch is here, %s: F presses it. The gate opens "
++		                  "slowly: wait for it to stop, then O",
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(switchAt))));
++		return qtrue;
++	}
++	VectorCopy(switchAt, stand);
++	CG_AccessibilitySwitchStand(switchAt, stand);
++	CG_AccessibilityChoose(stand, "the switch that opens the gate");
++	CG_AccessibilityChosenIsThing();
++	CG_AccessibilityChosenAimAt(switchAt);
++	ETA_Speech_Say(va("A gate is shut across the way. Its switch is %d meters away, %s. O again leads to it, and F "
++	                  "presses it there. The gate opens slowly: wait for it to stop, then O",
++	                  meters, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(switchAt))));
++	return qtrue;
++}
++
+ static void ETA_FacePendingFrame(void)
+ {
+ 	if (!eta_facePendingAt)
+@@ -4922,6 +5032,12 @@ static void ETA_FacePendingFrame(void)
+ 		const char *name = NULL;
+ 
+ 		eta_facePendingAt = 0;
++		/* Still searching, but a gate with a switch is shut across the
++		   way: said now, not "no way found". */
++		if (ETA_GateLead(&cg.predictedPlayerState, qtrue, NULL))
++		{
++			return;
++		}
+ 		/* The way out, on a big level: the search gave up before it
+ 		   knew the way out was shut, and O said "tries again" every
+ 		   time, on and on - at the start of three levels in a check of
+@@ -5297,6 +5413,11 @@ static void ETA_FaceTheWayNow(void)
+ 		return;
+ 	}
+ 
++	if (ETA_GateLead(ps, qfalse, NULL))
++	{
++		return;
++	}
++
+ 	/* No way there at all from here yet: said so, and not turned into the
+ 	   wall nearest it. Once per press: going on to the next way, nothing
+ 	   chosen led back here, and round again without end - in the second
+@@ -5483,6 +5604,19 @@ static void ETA_FaceTheWayNow(void)
+ 			}
+ 		}
+ 
++		/* A shut gate on the way, a few steps on: to its switch, not
++		   to the opening beside it. */
++		if (VectorLength(delta) >= 16.0f)
++		{
++			vec3_t ahead;
++
++			VectorAdd(ps->origin, delta, ahead);
++			if (ETA_GateLead(ps, qfalse, ahead))
++			{
++				return;
++			}
++		}
++
+ 		if (VectorLength(delta) >= 16.0f && ETA_OpeningToward(vectoyaw(delta), &yaw))
+ 		{
+ 			etaAimTarget_t way;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index bde95532..7683ae43 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2973,6 +2973,12 @@ qboolean CG_AccessibilityMarkerWayKnown(void)
+  * The tester, led on from the wine cellar toward the way out beyond the
+  * locked doors, was turned into the wall nearest it, again and again.
+  */
++/* The way searched, and found only toward the marker, not to it. */
++qboolean CG_AccessibilityMarkerPartial(void)
++{
++	return (qboolean)(eta_marker.active && eta_route.done && ETA_PathFinder_State() == ETA_PATH_PARTIAL);
++}
++
+ qboolean CG_AccessibilityMarkerUnreachable(void)
+ {
+ 	return (qboolean)(eta_marker.active && eta_route.done && eta_route.jumps
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index d1a1509b..dc26365c 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -95,6 +95,25 @@ static struct
+ static int eta_objectivePlaceCount;
+ static int eta_unlockObjective;   /* being followed back, from 1; 0 a door */
+ 
++/*
++ * Gates the script moves - the church's portcullises - and the switches
++ * that move them. A test walk through the church, following O, stood at
++ * the third portcullis, shut, for minutes: O faced "the opening to a new
++ * area" behind it thirty-seven times, and never said a gate was in the
++ * way or that a button beside it raises it. A gate is a script_mover; a
++ * line of the script that triggers its "toggle", "up", "open" or "raise"
++ * is followed back to the switches the player presses for it.
++ */
++#define ETA_GATE_SWITCHES 16
++
++static struct
++{
++	int    gate;        /* the gate's brush model */
++	vec3_t at;          /* the switch */
++} eta_gateSwitches[ETA_GATE_SWITCHES];
++static int eta_gateSwitchCount;
++static int eta_unlockGate;        /* the gate being followed back, or 0 */
++
+ /* The door whose unlocking is being followed back. */
+ static int eta_unlockDoor;
+ static int eta_unlockSpotCount;
+@@ -108,6 +127,8 @@ void CG_AccessibilityUnlockReset(void)
+ 	eta_unlockRecordCount = eta_unlockLineCount = eta_unlockSpotCount = 0;
+ 	eta_objectivePlaceCount = 0;
+ 	eta_unlockObjective     = 0;
++	eta_gateSwitchCount     = 0;
++	eta_unlockGate          = 0;
+ 	memset(eta_unlockNever, 0, sizeof(eta_unlockNever));
+ }
+ 
+@@ -313,6 +334,29 @@ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ 	   middle in the air. */
+ 	at[2] = mins[2] + 24.0f;
+ 
++	/* A gate's switch: only a switch the player presses. */
++	if (eta_unlockGate)
++	{
++		if (!Q_stricmp(r->classname, "func_button") || !Q_stricmp(r->classname, "func_invisible_user"))
++		{
++			at[2] = ( mins[2] + maxs[2] ) * 0.5f;
++			for (i = 0; i < eta_gateSwitchCount; i++)
++			{
++				if (eta_gateSwitches[i].gate == eta_unlockGate && Distance(eta_gateSwitches[i].at, at) < 64.0f)
++				{
++					return -1;
++				}
++			}
++			if (eta_gateSwitchCount < ETA_GATE_SWITCHES)
++			{
++				VectorCopy(at, eta_gateSwitches[eta_gateSwitchCount].at);
++				eta_gateSwitches[eta_gateSwitchCount].gate = eta_unlockGate;
++				eta_gateSwitchCount++;
++			}
++		}
++		return -1;
++	}
++
+ 	/* An objective's place: kept apart from T's, which says what a spot
+ 	   does. A thing to break or press is led to where it is. */
+ 	if (eta_unlockObjective)
+@@ -453,7 +497,7 @@ static void ETA_UnlockFired(const char *name, int depth)
+ 		{
+ 			ETA_UnlockAddSpot(r, "Door that, opened, unlocks another");
+ 		}
+-		else if (eta_unlockObjective && r->model
++		else if (( eta_unlockObjective || eta_unlockGate ) && r->model
+ 		         && ( !Q_stricmp(r->classname, "func_explosive") || !Q_stricmp(r->classname, "func_button")
+ 		              || !Q_stricmp(r->classname, "func_invisible_user") ))
+ 		{
+@@ -617,6 +661,125 @@ void CG_AccessibilityUnlockResolve(void)
+ 		eta_unlockObjective = 0;
+ 	}
+ 	CG_Printf("eta: %d places meet objectives in %s\n", eta_objectivePlaceCount, cgs.mapname);
++
++	/* And the switches that move the script's gates. */
++	for (i = 0; i < eta_unlockRecordCount; i++)
++	{
++		const eta_unlockRecord_t *gate = &eta_unlockRecords[i];
++
++		if (Q_stricmp(gate->classname, "script_mover") || !gate->model || !gate->targetname[0])
++		{
++			continue;
++		}
++		eta_unlockGate = gate->model;
++		for (j = 0; j < eta_unlockLineCount; j++)
++		{
++			const eta_unlockLine_t *l = &eta_unlockLines[j];
++
++			if (l->verb == 't' && !Q_stricmp(l->what, gate->targetname)
++			    && ( Q_stristr(l->whatEvent, "toggle") || Q_stristr(l->whatEvent, "up") || Q_stristr(l->whatEvent, "open")
++			         || Q_stristr(l->whatEvent, "raise") )
++			    && Q_stricmp(l->owner, gate->targetname))
++			{
++				ETA_UnlockEvent(l->owner, l->event, 1);
++			}
++		}
++		eta_unlockGate = 0;
++	}
++	CG_Printf("eta: %d switches move gates in %s\n", eta_gateSwitchCount, cgs.mapname);
++}
++
++/* The nearest switch that moves this gate: qfalse if none is known. */
++qboolean CG_AccessibilityGateSwitch(int gate, const vec3_t from, vec3_t out)
++{
++	float best = 0.0f;
++	int   i, found = 0;
++
++	for (i = 0; i < eta_gateSwitchCount; i++)
++	{
++		if (eta_gateSwitches[i].gate == gate && ( !found || Distance(from, eta_gateSwitches[i].at) < best ))
++		{
++			best = Distance(from, eta_gateSwitches[i].at);
++			VectorCopy(eta_gateSwitches[i].at, out);
++			found = 1;
++		}
++	}
++	return (qboolean)found;
++}
++
++/* A gate as it is now, for a player at from: 1 shut - its bottom lower
++   than their head - 2 risen clear of it, 0 not in sight. Moving or not
++   in moving, when asked. */
++int CG_AccessibilityGateState(int gate, const vec3_t from, qboolean *moving)
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t              mins, maxs;
++
++		if (es->eType != ET_MOVER || es->modelindex != gate || !cgs.inlineDrawModel[gate])
++		{
++			continue;
++		}
++		if (moving)
++		{
++			*moving = (qboolean)( es->pos.trType != TR_STATIONARY || es->apos.trType != TR_STATIONARY );
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[gate], mins, maxs);
++		/* The player stands 56 units tall, their origin 24 above the
++		   floor. */
++		return cg_entities[es->number].lerpOrigin[2] + mins[2] > from[2] + 32.0f ? 2 : 1;
++	}
++	return 0;
++}
++
++/* A gate with a known switch, shut and stood still across the way from
++   the player toward a point, within reach of being the reason there is
++   no way there: its model, the switch's place, or 0. */
++int CG_AccessibilityGateInWay(const vec3_t from, const vec3_t toward, float within, vec3_t switchAt)
++{
++	int    n, best = 0;
++	float  bestFar = within;
++	vec3_t way;
++
++	VectorSubtract(toward, from, way);
++	way[2] = 0.0f;
++	if (VectorNormalize(way) < 1.0f || !cg.snap)
++	{
++		return 0;
++	}
++	for (n = 0; n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t              mid, to;
++		float               far;
++
++		if (es->eType != ET_MOVER || es->modelindex <= 0 || es->modelindex >= MAX_MODELS
++		    || es->pos.trType != TR_STATIONARY || CG_AccessibilityGateState(es->modelindex, from, NULL) != 1)
++		{
++			continue;
++		}
++		VectorAdd(cg_entities[es->number].lerpOrigin, cgs.inlineModelMidpoints[es->modelindex], mid);
++		VectorSubtract(mid, from, to);
++		to[2] = 0.0f;
++		far = VectorNormalize(to);
++		if (far > bestFar || DotProduct(to, way) < 0.5f || fabsf(mid[2] - from[2]) > 160.0f)
++		{
++			continue;
++		}
++		if (CG_AccessibilityGateSwitch(es->modelindex, from, switchAt))
++		{
++			best    = es->modelindex;
++			bestFar = far;
++		}
++	}
++	if (best)
++	{
++		CG_AccessibilityGateSwitch(best, from, switchAt);
++	}
++	return best;
+ }
+ 
+ /* The nearest place that meets an objective not met yet: qfalse with
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index ea0d909e..51ebfcb7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -26,6 +26,9 @@
+ #include "navigation/navigation_system.h"
+ #include "speech/speech_manager.h"
+ 
++/* When the use key was last pressed, F or the game's own. */
++int eta_useKeyAt;
++
+ /* No Quarter has no developer print of its own; these are for a developer. */
+ #define CG_DPrintf(...) ((void)0)
+ 
+@@ -7496,7 +7499,8 @@ static void ETA_DoorsLiveFrame(void)
+ 		}
+ 		if (using && !wasUsing)
+ 		{
+-			changed = qtrue;
++			changed      = qtrue;
++			eta_useKeyAt = cg.time;
+ 		}
+ 		wasUsing = using;
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c947359f..99f45f35 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2321,6 +2321,9 @@ void CG_AccessibilityAreasNoWayForget( void );
+ qboolean CG_AccessibilityObjectiveDone( int n );
+ const char *CG_AccessibilityObjectiveText( int n );
+ qboolean CG_AccessibilityObjectivePlace( const vec3_t from, vec3_t out, int *objective );
++qboolean CG_AccessibilityGateSwitch( int gate, const vec3_t from, vec3_t out );
++int CG_AccessibilityGateInWay( const vec3_t from, const vec3_t toward, float within, vec3_t switchAt );
++qboolean CG_AccessibilityMarkerPartial( void );
+ void CG_AccessibilityThingsNoWayForget( void );
+ void CG_AccessibilityRouteDoorsChanged( void );
+ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+@@ -2438,6 +2441,8 @@ qboolean CG_AccessibilityShutInSwitch( vec3_t out, vec3_t aim );
+ qboolean CG_AccessibilitySeenDoorSwitch( vec3_t out, vec3_t aim, float *doorFar );
+ void CG_AccessibilityChosenAimAt( const vec3_t at );
+ qboolean CG_AccessibilitySwitchStand( const vec3_t at, vec3_t out );
++extern int eta_useKeyAt;
++int CG_AccessibilityGateState( int gate, const vec3_t from, qboolean *moving );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+ qboolean CG_AccessibilityDoorBySwitch( int model );
