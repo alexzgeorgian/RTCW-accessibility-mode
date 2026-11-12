@@ -3402,3 +3402,22 @@ narrow beam runs west along the north side of the hall into a
 gallery"), the rail, the top of the wall, and the beam. The guided
 steps stay for whoever wants them. Tested: each said on arriving and by
 J at all four.
+
+### 0193 M: what is ahead
+
+The tester asked, beside J's area, for a key that says what is in front
+of them, as a sighted player sees it at a glance - whether there is a
+platform to get onto. M looks straight ahead along the view, up to 13
+meters, and says the first thing that is not open floor: a ledge up and
+how high (knee, waist or chest high), whether a hop takes it, how far
+its top goes and what is past it; or where the floor ends, how deep the
+drop is and whether it is safe, hurts or kills, and floor across the
+gap; or a wall; and first, when the player stands on something narrow
+or by an edge, which side. M was free since the enemy callouts left
+it; it is set only where empty, and is on the Accessibility keys page.
+Tested in the church: on the rail facing the wall, "The edge is right
+beside you, on your left. A ledge up, knee high, right in front of
+you, a hop up. Its top goes on 1 meter"; on the wall top facing west,
+"The floor ends right in front of you: a drop of 14 meters, which
+kills"; on the landing facing west, "The floor ends 2 meters ahead: a
+drop of 13 meters, which kills"; on stairs, "A step up, 1 meter ahead".

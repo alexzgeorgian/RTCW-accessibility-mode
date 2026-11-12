@@ -1,0 +1,276 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index e0c4d714..22bfc33a 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -825,6 +825,7 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityStatus" );
+ 	trap_AddCommand( "accessibilityNavSweep" );
+ 	trap_AddCommand( "accessibilitySecretJumpTest" );
++	trap_AddCommand( "accessibilityAhead" );
+ 	trap_AddCommand( "accessibilityObjectives" );
+ 	trap_AddCommand( "accessibilityRepeat" );
+ 	trap_AddCommand( "accessibilityStopSpeech" );
+@@ -873,6 +874,10 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityNavSweep_f();
+ 		return qtrue;
+ 	}
++	if ( !Q_stricmp( cmd, "accessibilityAhead" ) ) {
++		CG_AccessibilityAhead_f();
++		return qtrue;
++	}
+ 	if ( !Q_stricmp( cmd, "accessibilitySecretJumpTest" ) ) {
+ 		CG_AccessibilitySecretJumpTest_f();
+ 		return qtrue;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 2104418c..24eb5105 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7009,4 +7009,221 @@ void CG_AccessibilitySurroundings_f(void)
+ 	CG_AccessibilityWaysOn();
+ }
+ 
++
++/*
++ * M: what is ahead, as a sighted player sees it at a glance. The tester,
++ * on the church's wooden landing, heard the area's name and nothing of
++ * the rail at their feet, the wall top beside it or the beam beyond, and
++ * asked for a key to say what is in front of them - where to hop up,
++ * where the floor ends and what is across. Straight ahead along the
++ * view, up to 13 meters: the first thing that is not open floor - a
++ * step or ledge up, how high, whether a hop takes it, and what is on and
++ * beyond it; or the floor's end, how deep the drop, whether it hurts or
++ * kills, and floor across the gap; and first, when the floor is narrow
++ * under the player, so. Heights by the body: knee, waist, chest.
++ */
++#define ETA_AHEAD_FAR    512.0f
++#define ETA_AHEAD_STEP   8.0f
++#define ETA_AHEAD_HOP    44.0f    /* the most a jump lifts the feet onto */
++
++static const char *ETA_AheadHeight(float h)
++{
++	return h <= 18.0f ? "a step" : h <= 36.0f ? "knee high" : h <= 48.0f ? "waist high"
++	       : h <= 64.0f ? "chest high" : h <= 80.0f ? "head high" : "higher than you";
++}
++
++/* Floor under a point, from a little above it: its height; -1e9 with
++   none found, +1e9 inside something solid - a wall, not a drop. */
++static float ETA_AheadFloor(const vec3_t at, float from, float down)
++{
++	vec3_t  a, b;
++	trace_t tr;
++
++	VectorSet(a, at[0], at[1], from);
++	VectorSet(b, at[0], at[1], from - down);
++	CG_Trace(&tr, a, NULL, NULL, b, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++	if (tr.startsolid)
++	{
++		return 1.0e9f;
++	}
++	if (tr.fraction >= 1.0f)
++	{
++		return -1.0e9f;
++	}
++	return tr.endpos[2];
++}
++
++static void ETA_AheadDrop(float drop, char *out, size_t size)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 meters = (int)( drop * ETA_QU_TO_METERS + 0.5f );
++
++	if (drop >= 4000.0f)
++	{
++		Q_strncpyz(out, "a drop too deep to measure, which kills", size);
++		return;
++	}
++	if (drop >= ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_KILLS, (float)ps->gravity))
++	{
++		Com_sprintf(out, size, "a drop of %d meters, which kills", meters);
++	}
++	else if (drop >= ETA_HudNarrator_FallHeightForDelta(ETA_FALL_DELTA_HURT, (float)ps->gravity))
++	{
++		Com_sprintf(out, size, "a drop of %d meters, which hurts", meters < 1 ? 1 : meters);
++	}
++	else
++	{
++		Com_sprintf(out, size, "a drop of %d %s, safe", meters < 1 ? 1 : meters, meters <= 1 ? "meter" : "meters");
++	}
++}
++
++static const char *ETA_AheadMeters(float units)
++{
++	int m = (int)( units * ETA_QU_TO_METERS + 0.5f );
++
++	return m < 1 ? "right in front of you" : va("%d %s ahead", m, m == 1 ? "meter" : "meters");
++}
++
++void CG_AccessibilityAhead_f(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              dir, side, at, from, to, mins, maxs;
++	float               floorZ, yaw, s, h;
++	char                text[512], piece[160];
++	trace_t             tr;
++	int                 k, dropSides = 0;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	text[0] = '\0';
++	floorZ  = ps->origin[2] + ps->mins[2];
++	yaw     = ps->viewangles[YAW];
++	VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++	VectorSet(side, -dir[1], dir[0], 0.0f);
++
++	/* Under the player: narrow, with the edge close on a side. */
++	for (k = -1; k <= 1; k += 2)
++	{
++		VectorMA(ps->origin, k * 40.0f, side, at);
++		if (floorZ - ETA_AheadFloor(at, floorZ + 8.0f, 128.0f) > 32.0f)
++		{
++			dropSides |= k < 0 ? 1 : 2;
++		}
++	}
++	if (dropSides == 3)
++	{
++		Q_strcat(text, sizeof(text), "You stand on something narrow, with a drop on both sides. ");
++	}
++	else if (dropSides)
++	{
++		Q_strcat(text, sizeof(text), va("The edge is right beside you, on your %s. ", dropSides == 1 ? "right" : "left"));
++	}
++
++	/* Ahead: walked forward a little at a time, the body's box lifted a
++	   step, as the game walks it. */
++	VectorSet(mins, -15.0f, -15.0f, 0.0f);
++	VectorSet(maxs, 15.0f, 15.0f, 36.0f);
++	for (s = ETA_AHEAD_STEP; s <= ETA_AHEAD_FAR; s += ETA_AHEAD_STEP)
++	{
++		VectorMA(ps->origin, s - ETA_AHEAD_STEP, dir, from);
++		VectorMA(ps->origin, s, dir, to);
++		from[2] = to[2] = floorZ + 19.0f;
++		CG_Trace(&tr, from, mins, maxs, to, ps->clientNum, MASK_PLAYERSOLID);
++		if (tr.fraction < 1.0f || tr.startsolid)
++		{
++			/* Something in the way: how high its top is above the
++			   floor, felt for from above just past where it was met. */
++			float top = -1.0e9f, depth = 0.0f;
++			float wall;
++
++			VectorMA(tr.endpos, 20.0f, dir, at);
++			top = ETA_AheadFloor(at, floorZ + 120.0f, 160.0f);
++			h   = top - floorZ;
++			if (top < -1.0e8f || h > 100.0f)
++			{
++				Q_strcat(text, sizeof(text), va("A wall, %s", ETA_AheadMeters(s - ETA_AHEAD_STEP)));
++				break;
++			}
++			if (h <= 18.0f)
++			{
++				/* A step: stairs, most often; the rest is as walking
++				   tells it. */
++				Q_strcat(text, sizeof(text), va("A step up, %s", ETA_AheadMeters(s - ETA_AHEAD_STEP)));
++				break;
++			}
++			/* How deep its top is, and what is past it. */
++			for (wall = 8.0f; wall <= 256.0f; wall += 8.0f)
++			{
++				float t;
++
++				VectorMA(at, wall, dir, to);
++				t = ETA_AheadFloor(to, top + 24.0f, 48.0f);
++				if (t < top - 8.0f || t > top + 24.0f)
++				{
++					break;
++				}
++				depth = wall;
++			}
++			Q_strcat(text, sizeof(text), va("A ledge up, %s, %s", ETA_AheadHeight(h), ETA_AheadMeters(s - ETA_AHEAD_STEP)));
++			Q_strcat(text, sizeof(text), h <= ETA_AHEAD_HOP ? ", a hop up" : ", too high to hop onto");
++			Q_strcat(text, sizeof(text), depth < 24.0f ? ". Its top is narrow, a rail or a wall's edge"
++			                                            : va(". Its top goes on %d %s", (int)( depth * ETA_QU_TO_METERS + 0.5f ) < 1 ? 1
++			                                                 : (int)( depth * ETA_QU_TO_METERS + 0.5f ),
++			                                                 (int)( depth * ETA_QU_TO_METERS + 0.5f ) <= 1 ? "meter" : "meters"));
++			{
++				float past;
++
++				VectorMA(at, depth + 24.0f, dir, to);
++				past = ETA_AheadFloor(to, top + 24.0f, 4096.0f);
++				if (past < -1.0e8f || top - past > 32.0f)
++				{
++					ETA_AheadDrop(past < -1.0e8f ? 4096.0f : floorZ - past, piece, sizeof(piece));
++					Q_strcat(text, sizeof(text), va(", then %s from where you stand", piece));
++				}
++			}
++			break;
++		}
++		/* Open: does the floor go on? */
++		h = ETA_AheadFloor(to, floorZ + 19.0f, 4096.0f);
++		if (h < -1.0e8f || floorZ - h > 40.0f)
++		{
++			float across = -1.0f, g;
++
++			ETA_AheadDrop(h < -1.0e8f ? 4096.0f : floorZ - h, piece, sizeof(piece));
++			Q_strcat(text, sizeof(text), va("The floor ends %s: %s", ETA_AheadMeters(s - ETA_AHEAD_STEP), piece));
++			/* Floor across the gap, near this height. */
++			for (g = s + 16.0f; g <= s + 320.0f; g += 8.0f)
++			{
++				float f;
++
++				VectorMA(ps->origin, g, dir, at);
++				f = ETA_AheadFloor(at, floorZ + 48.0f, 96.0f);
++				if (f > -1.0e8f && fabsf(f - floorZ) <= 48.0f)
++				{
++					across = g;
++					h      = f - floorZ;
++					break;
++				}
++			}
++			if (across > 0.0f)
++			{
++				int gap = (int)( ( across - s ) * ETA_QU_TO_METERS + 0.5f );
++
++				Q_strcat(text, sizeof(text), va(". Across a gap of %d %s, floor again, %s", gap < 1 ? 1 : gap,
++				                                 gap <= 1 ? "meter" : "meters",
++				                                 h > 18.0f ? "a little higher" : h < -18.0f ? "a little lower" : "at the same height"));
++			}
++			break;
++		}
++	}
++	if (s > ETA_AHEAD_FAR)
++	{
++		Q_strcat(text, sizeof(text), "Open floor ahead, 13 meters or more");
++	}
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(text);
++}
++
+ #endif
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0147b622..4d915775 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2447,6 +2447,7 @@ void CG_AccessibilitySecretJumpTest_f( void );
+ qboolean CG_AccessibilitySecretJumpActive( void );
+ qboolean CG_AccessibilitySecretJumpSayStep( void );
+ const char *CG_AccessibilityLandmarkText( const vec3_t at );
++void CG_AccessibilityAhead_f( void );
+ int CG_AccessibilityGateState( int gate, const vec3_t from, qboolean *moving );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 71f35b5f..fc03ba3d 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8423,6 +8423,10 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   not use the F keys. J was let go of in the fifteenth
+ 		   generation, so only where it is still empty. */
+ 		{ 'j',          "accessibilityStatus",        21, NULL },
++		/* What is ahead, as a sighted player sees it: a ledge to hop
++		   onto, where the floor ends and what is across. M, let go of
++		   from the enemy callouts, so only where it is empty. */
++		{ 'm',          "accessibilityAhead",         26, NULL },
+ 	};
+ 
+ 	/*

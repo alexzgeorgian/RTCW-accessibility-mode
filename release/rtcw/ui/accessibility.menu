@@ -287,9 +287,10 @@ menuDef {
 	ETA_KEY(50, "Health", "accessibilityHealth")
 	ETA_KEY(68, "Weapon, ammo and what you carry", "accessibilityAmmo")
 	ETA_KEY(86, "Facing and coordinates", "accessibilityFacing")
-	ETA_KEY(104, "Say the last thing again", "accessibilityRepeat")
-	ETA_KEY(122, "Read the screen", "accessibilityReadScreen")
-	ETA_KEY(140, "Stop speaking", "accessibilityStopSpeech")
-	ETA_BUTTON(168, "BACK", close eta_acc_keys_told ; open eta_accessibility)
+	ETA_KEY(104, "What is ahead", "accessibilityAhead")
+	ETA_KEY(122, "Say the last thing again", "accessibilityRepeat")
+	ETA_KEY(140, "Read the screen", "accessibilityReadScreen")
+	ETA_KEY(158, "Stop speaking", "accessibilityStopSpeech")
+	ETA_BUTTON(186, "BACK", close eta_acc_keys_told ; open eta_accessibility)
 }
 }
