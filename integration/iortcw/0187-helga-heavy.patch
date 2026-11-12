@@ -1,0 +1,13 @@
+diff --git a/SP/code/cgame/cg_accessibility_cutscenes.h b/SP/code/cgame/cg_accessibility_cutscenes.h
+index efc78474..f6338195 100644
+--- a/SP/code/cgame/cg_accessibility_cutscenes.h
++++ b/SP/code/cgame/cg_accessibility_cutscenes.h
+@@ -92,7 +92,7 @@ static const struct {
+ 	/* Who is there said before anyone speaks - Helga, about seven seconds
+ 	   in - not at the end: the tester heard the place, then the talk, and
+ 	   only then who was talking. */
+-	{ "church", 0, "cs04_01", 0, "A tall stone church. Below, by a tomb: Helga von Bulow, stout, in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather" },
++	{ "church", 0, "cs04_01", 0, "A tall stone church. Below, by a tomb: Helga von Bulow, a heavy woman in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather" },
+ 	{ "church", 0, "cs04_03d", 0, "A dead warrior lies on the tomb. The woman in black leather watches, pistol in hand" },
+ 
+ 	/* Mission 2, the tomb. */

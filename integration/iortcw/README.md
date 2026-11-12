@@ -3313,3 +3313,8 @@ stone church. Below, by a tomb: Helga von Bulow, stout, in a white shirt
 and black tie; an old scientist in glasses; a red-haired woman in black
 leather". The last shot says only what is new: "A dead warrior lies on
 the tomb. The woman in black leather watches, pistol in hand".
+
+### 0187 Helga, heavy
+
+The tester remembers Helga as fat, and "stout" did not say it plainly:
+she is "a heavy woman in a white shirt and black tie".
