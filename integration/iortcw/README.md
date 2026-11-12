@@ -3301,3 +3301,15 @@ for F2, the objectives key, gone. It is let go of once where it is
 still on the mode's command, and taken off the Accessibility pages and
 the install notes; the command stays, for a player who binds it.
 Tested: after a start, F2 bound to nothing.
+
+### 0186 The church: who is there, first
+
+In the church's opening scene the tester heard the place, then the talk,
+and only at the end who was talking: the people were described in the
+last shot, after it all. Watched again, shot by shot (eta_cameraShots),
+Helga speaks about seven seconds in, as the camera comes down to the
+tomb. The first line now says who is there before she does: "A tall
+stone church. Below, by a tomb: Helga von Bulow, stout, in a white shirt
+and black tie; an old scientist in glasses; a red-haired woman in black
+leather". The last shot says only what is new: "A dead warrior lies on
+the tomb. The woman in black leather watches, pistol in hand".
