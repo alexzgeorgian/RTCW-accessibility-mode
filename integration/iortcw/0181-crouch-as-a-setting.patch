@@ -1,0 +1,223 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index b45aa348..859611d7 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -52,6 +52,7 @@ vmCvar_t eta_edgeGuard;
+ vmCvar_t eta_waysCallouts;
+ vmCvar_t eta_enemyCues;
+ vmCvar_t eta_secretsLead;
++vmCvar_t eta_crouchToggle;
+ /* How loud each kind of marking sound is, 0 to 100. */
+ vmCvar_t eta_doorVolume;
+ vmCvar_t eta_ladderVolume;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index bf2bddf8..cb638c10 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2688,6 +2688,7 @@ static void ETA_GuideCrouch(qboolean down)
+  * under a low ceiling, or a ceiling too low to stand up under yet.
+  */
+ #define ETA_CROUCH_KEY "991"
++#define ETA_CROUCH_TOGGLE_KEY "980"   /* the crouch key's toggle, cl_input.c */
+ 
+ static qboolean eta_crouchOn;
+ static int      eta_crouchSaid = -1;   /* 1 crouched, 0 standing, as last said */
+@@ -2703,7 +2704,7 @@ void CG_AccessibilityCrouch_f(void)
+ 	}
+ 	eta_crouchOn = (qboolean)!eta_crouchOn;
+ 	trap_SendConsoleCommand(va("%smovedown " ETA_CROUCH_KEY "\n", eta_crouchOn ? "+" : "-"));
+-	eta_crouchStandAt = eta_crouchOn ? 0 : cg.time;
++	eta_crouchStandAt = 0;
+ }
+ 
+ static void ETA_CrouchFrame(void)
+@@ -2721,6 +2722,11 @@ static void ETA_CrouchFrame(void)
+ 			eta_crouchOn = qfalse;
+ 			trap_SendConsoleCommand("-movedown " ETA_CROUCH_KEY "\n");
+ 		}
++		/* And the crouch key's own toggle (eta_crouchToggle, cl_input.c). */
++		if (ps->pm_type == PM_DEAD || ps->stats[STAT_HEALTH] <= 0 || cg.cameraMode)
++		{
++			trap_SendConsoleCommand("-movedown " ETA_CROUCH_TOGGLE_KEY "\n");
++		}
+ 		eta_crouchSaid = -1;
+ 		return;
+ 	}
+@@ -2734,6 +2740,20 @@ static void ETA_CrouchFrame(void)
+ 		eta_crouchSaid = now;
+ 		return;
+ 	}
++
++	/* Let go of, whichever key or setting held the crouch: the player's
++	   command no longer asks to be down, and they still are - from then,
++	   for "Too low to stand". The crouch key's own toggle is the
++	   engine's (cl_input.c), and says nothing to the cgame itself. */
++	if (now && !eta_crouchStandAt)
++	{
++		usercmd_t cmd;
++
++		if (trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) && cmd.upmove >= 0 && now == eta_crouchSaid)
++		{
++			eta_crouchStandAt = cg.time > 0 ? cg.time : 1;
++		}
++	}
+ 	if (now != eta_crouchSaid)
+ 	{
+ 		eta_crouchSaid    = now;
+diff --git a/SP/code/cgame/cg_accessibility_settings.h b/SP/code/cgame/cg_accessibility_settings.h
+index 3216fcbe..b3feb2d3 100644
+--- a/SP/code/cgame/cg_accessibility_settings.h
++++ b/SP/code/cgame/cg_accessibility_settings.h
+@@ -30,6 +30,7 @@ ETA_SETTING( eta_edgeGuard,           "1" )
+ ETA_SETTING( eta_waysCallouts,        "1" )
+ ETA_SETTING( eta_enemyCues,           "1" )
+ ETA_SETTING( eta_secretsLead,         "1" )
++ETA_SETTING( eta_crouchToggle,        "1" )
+ ETA_SETTING( eta_doorVolume,          "100" )
+ ETA_SETTING( eta_ladderVolume,        "100" )
+ ETA_SETTING( eta_crosshairVolume,     "100" )
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3506b1b4..daa7c954 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2501,6 +2501,7 @@ qboolean CG_AccessibilityAlarmLoud( int sound );
+ extern vmCvar_t eta_waysCallouts;
+ extern vmCvar_t eta_enemyCues;
+ extern vmCvar_t eta_secretsLead;
++extern vmCvar_t eta_crouchToggle;
+ int CG_AccessibilityOnStairs( void );
+ 
+ #ifndef MIN
+diff --git a/SP/code/client/cl_input.c b/SP/code/client/cl_input.c
+index 116e0deb..1fc5e00b 100644
+--- a/SP/code/client/cl_input.c
++++ b/SP/code/client/cl_input.c
+@@ -193,8 +193,57 @@ float CL_KeyState( kbutton_t *key ) {
+ 
+ void IN_UpDown( void ) {IN_KeyDown( &kb[KB_UP] );}
+ void IN_UpUp( void ) {IN_KeyUp( &kb[KB_UP] );}
++#ifdef FEATURE_ACCESSIBILITY
++/*
++ * [Accessibility]: the crouch key, pressed once to crouch and again to
++ * stand, when the Accessibility setting eta_crouchToggle is on. The
++ * tester, with one hand on the keys that move and one on those that say,
++ * could not hold it, and wanted the game's own Controls left as they
++ * were: C stays on +movedown, and only a real key's press is taken as
++ * the toggle. The mode's own crouches, on made-up key numbers past
++ * MAX_KEYS, still hold only while held. The toggle is a made-up key of
++ * its own, held down in the button until the next press - or until the
++ * cgame lets it go, at death or a cutscene.
++ */
++#define ETA_CROUCH_TOGGLE_KEY 980
++
++static qboolean IN_CrouchToggleKey( void ) {
++	int k;
++
++	if ( Cmd_Argc() < 2 || !Cvar_VariableIntegerValue( "eta_crouchToggle" ) ) {
++		return qfalse;
++	}
++	k = atoi( Cmd_Argv( 1 ) );
++	return (qboolean)( k > 0 && k < MAX_KEYS );
++}
++
++void IN_DownDown( void ) {
++	if ( IN_CrouchToggleKey() ) {
++		qboolean held = (qboolean)( kb[KB_DOWN].down[0] == ETA_CROUCH_TOGGLE_KEY
++									|| kb[KB_DOWN].down[1] == ETA_CROUCH_TOGGLE_KEY );
++		char time[16];
++
++		Q_strncpyz( time, Cmd_Argv( 2 ), sizeof( time ) );
++		Cmd_TokenizeString( va( "%cmovedown %d %s", held ? '-' : '+', ETA_CROUCH_TOGGLE_KEY, time ) );
++		if ( held ) {
++			IN_KeyUp( &kb[KB_DOWN] );
++		} else {
++			IN_KeyDown( &kb[KB_DOWN] );
++		}
++		return;
++	}
++	IN_KeyDown( &kb[KB_DOWN] );
++}
++void IN_DownUp( void ) {
++	if ( IN_CrouchToggleKey() ) {
++		return;
++	}
++	IN_KeyUp( &kb[KB_DOWN] );
++}
++#else
+ void IN_DownDown( void ) {IN_KeyDown( &kb[KB_DOWN] );}
+ void IN_DownUp( void ) {IN_KeyUp( &kb[KB_DOWN] );}
++#endif
+ void IN_LeftDown( void ) {IN_KeyDown( &kb[KB_LEFT] );}
+ void IN_LeftUp( void ) {IN_KeyUp( &kb[KB_LEFT] );}
+ void IN_RightDown( void ) {IN_KeyDown( &kb[KB_RIGHT] );}
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 3b3f6da5..196d31dc 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8420,9 +8420,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'i',          "accessibilityAmmo",          19, NULL },
+ 		{ 'v',          "accessibilityFacing",        19, NULL },
+ 		{ ';',          "accessibilityAreasBack",     19, NULL },
+-		/* C crouches and C again stands, rather than only while held:
+-		   taken over from the game's own crouch. */
+-		{ 'c',          "accessibilityCrouch",        20, "+movedown" },
+ 		/* Where the player is, on a letter as well as F1: the tester does
+ 		   not use the F keys. J was let go of in the fifteenth
+ 		   generation, so only where it is still empty. */
+@@ -8462,9 +8459,13 @@ void UI_AccessibilityInstallBinds( void ) {
+ 	} retiredAgain[] = {
+ 		{ '/',  "accessibilityCrossTrap" },
+ 		{ 'm',  "accessibilityEnemyCallouts" },
++		/* C, the mode's crouch since generation 20, given back to the
++		   game's own: the tester wanted the game's Controls as they were,
++		   and the crouch to stay down as a setting (eta_crouchToggle). */
++		{ 'c',  "accessibilityCrouch" },
+ 	};
+ 	const int retiredAt      = 15;
+-	const int retiredAgainAt = 23;
++	const int retiredAgainAt = 24;
+ 	const int introAt   = 18;
+ 
+ 	vmCvar_t installed;
+@@ -8512,7 +8513,7 @@ void UI_AccessibilityInstallBinds( void ) {
+ 			current[0] = '\0';
+ 			trap_Key_GetBindingBuf( retiredAgain[i].key, current, sizeof( current ) );
+ 			if ( !Q_stricmp( current, retiredAgain[i].command ) ) {
+-				trap_Key_SetBinding( retiredAgain[i].key, "" );
++				trap_Key_SetBinding( retiredAgain[i].key, retiredAgain[i].key == 'c' ? "+movedown" : "" );
+ 			}
+ 		}
+ 		trap_Cvar_Set( "eta_playerCallouts", "1" );
+@@ -8559,20 +8560,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		}
+ 	}
+ 
+-	/* C back on the game's own crouch, which lasts only while the key is
+-	   held: the tester pressed C, and stood up the moment they let go.
+-	   The game's own defaults put it there (default.cfg); wherever C is
+-	   on it, it is moved on to the mode's crouch, C and C again, every
+-	   time. */
+-	{
+-		char current[MAX_STRING_CHARS];
+-
+-		current[0] = '\0';
+-		trap_Key_GetBindingBuf( 'c', current, sizeof( current ) );
+-		if ( !Q_stricmp( current, "+movedown" ) ) {
+-			trap_Key_SetBinding( 'c', "accessibilityCrouch" );
+-		}
+-	}
+ 
+ 	/* The controls page keeps its own copy of which key each command is
+ 	   on, read at start-up. Left stale, the first key changed there would
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 6bc46d9b..2c48b972 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4620,7 +4620,6 @@ static bind_t g_bindings[] =
+ 	{"accessibilityMarkerClear",     K_BACKSPACE,    -1, -1, -1},
+ 	{"+accessibilityTurnLeft",       K_LEFTARROW,    -1, -1, -1},
+ 	{"+accessibilityTurnRight",      K_RIGHTARROW,   -1, -1, -1},
+-	{"accessibilityCrouch",          'c',            -1, -1, -1},
+ 	{"accessibilityThingsNext",      't',            -1, -1, -1},
+ 	{"accessibilityThingsPrev",      'y',            -1, -1, -1},
+ 	{"+accessibilityActivate",       'f',            K_ENTER, -1, -1},

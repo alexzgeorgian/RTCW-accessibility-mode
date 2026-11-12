@@ -3226,3 +3226,20 @@ for each attack, and not for one at someone else: tested at the
 crypt's start with the enemies hunting, the zombie's first attack, at
 the soldier it was fighting, went unsaid, and its next two, at the
 player, were said.
+
+### 0181 Crouch as a setting
+
+The tester wanted the game's own controls kept as they were, and the
+crouch that stays down as an Accessibility setting instead. C is the
+game's crouch again (+movedown): moved back once where it was on the
+mode's, and no longer moved to it at every start as in 0179. The new
+setting, Moving and aiming, "Crouch key: press to crouch, again to
+stand" (eta_crouchToggle, on), makes the crouch key - whichever key the
+player's Controls put it on - crouch on one press and stand on the
+next: in the engine, a real key's press holds a made-up key in the
+button until the next press, and its release does nothing; the mode's
+own crouches, on made-up keys, hold only while held. The cgame lets it
+go at death or a cutscene. "Too low to stand here" now follows the
+player's command, whatever held the crouch. Tested: C tapped, crouched
+through a walk, tapped, standing; with the setting off, down only
+while held.
