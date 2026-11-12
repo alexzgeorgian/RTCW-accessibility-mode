@@ -1,0 +1,281 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 3a925701..1f5bb728 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -410,6 +410,12 @@ void CG_AccessibilityAreasNoWay(const vec3_t point)
+ 	eta_areaNoWayCount++;
+ }
+ 
++/* A door opened or shut somewhere: what had no way may have one now. */
++void CG_AccessibilityAreasNoWayForget(void)
++{
++	eta_areaNoWayCount = 0;
++}
++
+ static qboolean ETA_AreaNoWayNear(const vec3_t point)
+ {
+ 	int i, n = eta_areaNoWayCount < ETA_AREA_NO_WAY_MAX ? eta_areaNoWayCount : ETA_AREA_NO_WAY_MAX;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 779b67b8..bde95532 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3040,6 +3040,17 @@ qboolean CG_AccessibilityMarkerCrouchNow(void)
+ 	return (qboolean)(eta_marker.active && eta_route.crouched);
+ }
+ 
++/* A door opened or shut somewhere: the places the player could not get
++   past are tried again, and the way is looked for afresh. */
++void CG_AccessibilityRouteDoorsChanged(void)
++{
++	eta_routeBlockedCount = eta_routeBlockedNext = 0;
++	if (eta_marker.active)
++	{
++		ETA_RouteForget();
++	}
++}
++
+ /**
+  * @brief The way looked for again from here: the walk guide found the
+  * player held against something the way did not expect.
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index a84deb5f..7b403d97 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1179,6 +1179,17 @@ static void ETA_ThingsStep(int step)
+ 	}
+ }
+ 
++/* A door opened or shut somewhere: what had no way may have one now. */
++void CG_AccessibilityThingsNoWayForget(void)
++{
++	int i;
++
++	for (i = 0; i < eta_things.count; i++)
++	{
++		eta_things.things[i].noWayAt = 0;
++	}
++}
++
+ void CG_AccessibilityThingsNext(void)
+ {
+ 	ETA_ThingsStep(1);
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 93f0a7ad..aef1f30d 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -571,7 +571,8 @@ int CG_AccessibilityUnlockState(int index)
+ }
+ 
+ /* A door's lock as the game has it now (g_main.c): 'L' locked, 'S' opened
+-   only by a switch or the story, 'd' opens or stands open; 0 not known. */
++   only by a switch or the story, 'd' shut and opens by hand, 'O' open now,
++   seen or not; 0 not known. */
+ char CG_AccessibilityDoorLive(int model)
+ {
+ 	const char *state = CG_ConfigString(CS_ETA_TRIGGERS);
+@@ -582,7 +583,7 @@ char CG_AccessibilityDoorLive(int model)
+ 		return 0;
+ 	}
+ 	c = state[model];
+-	return c == 'L' || c == 'S' || c == 'd' ? c : 0;
++	return c == 'L' || c == 'S' || c == 'd' || c == 'O' ? c : 0;
+ }
+ 
+ /* The spot that unlocks a door, the first not yet used: for X, and for T
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6d10ad21..ea0d909e 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6249,7 +6249,18 @@ int CG_AccessibilityDoorShutNow(int door)
+ 			        && Distance(es->pos.trBase, eta_doorOrigins[door]) < 1.0f) ? 1 : 0;
+ 		}
+ 	}
+-	return -1;
++	/* Out of sight: as the game says it is now. */
++	switch (CG_AccessibilityDoorLive(door))
++	{
++	case 'O':
++		return 0;
++	case 'L':
++	case 'S':
++	case 'd':
++		return 1;
++	default:
++		return -1;
++	}
+ }
+ 
+ int CG_AccessibilitySwitchDoorShut(const vec3_t point)
+@@ -6313,6 +6324,10 @@ qboolean CG_AccessibilityDoorModel(int modelindex, qboolean *opens)
+ 	   since the map was read, or one only a switch opens. */
+ 	switch (CG_AccessibilityDoorLive(modelindex))
+ 	{
++	case 'O':
++		/* Open now, whatever opened it: the way goes through. */
++		*opens = qtrue;
++		break;
+ 	case 'L':
+ 	case 'S':
+ 		*opens = qfalse;
+@@ -7387,16 +7402,114 @@ static void ETA_WorldRead(void)
+ 	}
+ }
+ 
+-/* Out of sight: open as last seen, or as the map starts it. */
++/* Out of sight: open as the game says it is now (g_main.c), or failing
++   that as last seen, or as the map starts it. Kept as last seen, a door a
++   switch in another room had opened stayed shut: in the church, after
++   the first switch, O said there was no way on. */
+ qboolean CG_AccessibilityDoorOpenUnseen(int model)
+ {
++	char live;
++
+ 	if (model <= 0 || model >= MAX_MODELS)
+ 	{
+ 		return qfalse;
+ 	}
++	live = CG_AccessibilityDoorLive(model);
++	if (live)
++	{
++		return (qboolean)( live == 'O' );
++	}
+ 	return (qboolean)( eta_doorSeen[model] == 1 || ( !eta_doorSeen[model] && eta_doorStartOpen[model] ) );
+ }
+ 
++/* The doors as the game says they are now (g_main.c): when one opens or
++   shuts anywhere, seen or not - or a gate starts to move, or the player
++   uses something - what O found no way to, and the places it found
++   blocked, are tried again. */
++static void ETA_DoorsLiveFrame(void)
++{
++	static char last[MAX_MODELS + 1];
++	char        now[MAX_MODELS + 1];
++	int         model;
++	qboolean    changed = qfalse;
++
++	for (model = 1; model < MAX_MODELS; model++)
++	{
++		char live = eta_doorLocked[model] >= 0 ? CG_AccessibilityDoorLive(model) : 0;
++
++		now[model] = live ? live : '-';
++		if (last[model] && last[model] != now[model] && ( last[model] == 'O' || now[model] == 'O' ))
++		{
++			changed = qtrue;
++		}
++	}
++	now[0]         = '!';
++	now[MAX_MODELS] = '\0';
++
++	/* A gate the script moves - the church's portcullises, which its
++	   first switches raise - starting or stopping where it can be seen: the
++	   player stood held against it while it was down, and O marked the
++	   place blocked and found no way on after it rose. Not the traps,
++	   which move all the time. */
++	{
++		static qboolean wasMoving[MAX_MODELS];
++		int             n, k;
++
++		for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++		{
++			const entityState_t *es = &cg.snap->entities[n];
++			qboolean            moving, trap = qfalse;
++
++			if (es->eType != ET_MOVER || es->modelindex <= 0 || es->modelindex >= MAX_MODELS)
++			{
++				continue;
++			}
++			for (k = 0; k < eta_trapMoverCount; k++)
++			{
++				trap = (qboolean)( trap || eta_trapMovers[k].model == es->modelindex );
++			}
++			if (trap || eta_plateModel[es->modelindex])
++			{
++				continue;
++			}
++			moving = (qboolean)( es->pos.trType != TR_STATIONARY || es->apos.trType != TR_STATIONARY );
++			/* Starting, and stopping: the church's portcullis takes
++			   thirteen seconds to rise, and the way is open only then. */
++			if (moving != wasMoving[es->modelindex])
++			{
++				changed = qtrue;
++			}
++			wasMoving[es->modelindex] = moving;
++		}
++	}
++
++	/* And the use key pressed, F or the game's own: a switch somewhere
++	   may have opened the way. */
++	{
++		static qboolean wasUsing;
++		usercmd_t       cmd;
++		qboolean        using = qfalse;
++
++		if (trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd))
++		{
++			using = (qboolean)( ( cmd.buttons & BUTTON_ACTIVATE ) != 0 );
++		}
++		if (using && !wasUsing)
++		{
++			changed = qtrue;
++		}
++		wasUsing = using;
++	}
++
++	if (changed)
++	{
++		CG_AccessibilityAreasNoWayForget();
++		CG_AccessibilityThingsNoWayForget();
++		CG_AccessibilityRouteDoorsChanged();
++	}
++	memcpy(last, now, sizeof(last));
++}
++
+ static void ETA_DoorsSeen(void)
+ {
+ 	int n;
+@@ -9778,6 +9891,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_TrapsFrame();
+ 	ETA_WorldRead();
+ 	ETA_DoorsSeen();
++	ETA_DoorsLiveFrame();
+ 
+ 	ETA_BeaconDoors();
+ 	ETA_BeaconLadders();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index daa7c954..d0816d29 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,9 @@ qboolean CG_AccessibilityUnlockSpot( int index, vec3_t at, char *name, size_t na
+ int CG_AccessibilityUnlockState( int index );
+ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
+ char CG_AccessibilityDoorLive( int model );
++void CG_AccessibilityAreasNoWayForget( void );
++void CG_AccessibilityThingsNoWayForget( void );
++void CG_AccessibilityRouteDoorsChanged( void );
+ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );
+ qboolean CG_AccessibilityMarkerUnreachable( void );
+ void CG_AccessibilityCrouch_f( void );
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index a863ef12..82d03846 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2469,7 +2469,9 @@ Advances the non-player objects in the world
+  * so a door the script locks or unlocks later, or one only a switch or
+  * the story opens, was said and led through wrongly. 'L' locked, 'S'
+  * opened only by a switch or the story, 'd' one that opens by hand or
+- * stands open now.
++ * stands open now. 'O' a door open now, whatever opened it: the client
++ * kept a door out of its sight as it last saw it, and after a switch in
++ * another room opened one, O said there was no way on.
+  *
+  * And an invisible switch's: 'U' it works, 'u' switched off - the tram's
+  * buttons are, while the tram is on its way, and F at one did nothing.
+@@ -2505,7 +2507,7 @@ static void G_AccessibilityTriggers( void ) {
+ 		} else if ( !Q_strncmp( ent->classname, "func_door", 9 ) ) {
+ 			qboolean shut = ( ent->moverState == MOVER_POS1 || ent->moverState == MOVER_POS1ROTATE );
+ 
+-			state[model] = !shut ? 'd' : ent->key >= KEY_LOCKED_ENT ? 'L' : ent->key == KEY_LOCKED_TARGET ? 'S' : 'd';
++			state[model] = !shut ? 'O' : ent->key >= KEY_LOCKED_ENT ? 'L' : ent->key == KEY_LOCKED_TARGET ? 'S' : 'd';
+ 		} else {
+ 			state[model] = 'x';
+ 		}

@@ -3243,3 +3243,21 @@ go at death or a cutscene. "Too low to stand here" now follows the
 player's command, whatever held the crouch. Tested: C tapped, crouched
 through a walk, tapped, standing; with the setting off, down only
 while held.
+
+### 0182 O after a switch
+
+In the church, after the first switch, O said there was no way on. Two
+things O kept from before the switch. A door out of sight was taken as
+it was last seen, though the game already told the client each door's
+lock: a door open now was 'd', the same as one shut that opens by hand,
+so the open one stayed shut. The game now says 'O' for a door open now,
+seen or not, and out of sight the client takes doors as the game says.
+And the places O marked blocked - "Blocked. Finding a way round", the
+player held against the church's portcullis while it was down - stayed
+blocked after it rose; and what O had found no way to stayed so for
+three minutes. Now, when a door opens or shuts anywhere, a gate the
+script moves starts or stops where it is seen (not the traps), or the
+player uses something, those are forgotten and the way looked for
+afresh. Tested at the first portcullis: held against it, the switch
+pressed, and once it had risen - thirteen seconds - O led through it,
+"Marker reached" on the far side.
