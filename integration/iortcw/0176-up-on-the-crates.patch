@@ -1,0 +1,133 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index d7d5b34c..61dc89a8 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -59,6 +59,7 @@ static eta_marker_t eta_marker;
+  * reached by walking into it, which the grid decides rather than this.
+  */
+ #define ETA_MARKER_ARRIVE_METERS 3.0f
++#define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
+ 
+ /**
+  * @brief How far toward the marker its sound is placed.
+@@ -2319,6 +2320,20 @@ static void ETA_MarkerTarget(vec3_t out)
+  * Flat for a square, which has no height of its own; straight-line for a
+  * spot, which does - a spot on the floor above is not where you are.
+  */
++/* Whether the marker is a place to stand - ground just under it, as
++   under a waypoint or a thing lying somewhere - rather than a switch on a
++   wall, which F reaches from the floor below. */
++static qboolean ETA_MarkerStoodOn(void)
++{
++	trace_t tr;
++	vec3_t  below;
++
++	VectorCopy(eta_marker.origin, below);
++	below[2] -= 40.0f;
++	CG_Trace(&tr, eta_marker.origin, NULL, NULL, below, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++	return (qboolean)( !tr.startsolid && tr.fraction < 1.0f && tr.plane.normal[2] >= 0.7f );
++}
++
+ static int ETA_MarkerDistance(void)
+ {
+ 	vec3_t delta;
+@@ -2653,6 +2668,19 @@ void CG_AccessibilityMarkerFrame(void)
+ 		}
+ 	}
+ 
++	/* Not arrived standing below it: in the church a large health pack
++	   lies on top of a stack of crates, three metres up, and the
++	   waypoint put on it said "reached" at the foot of the stack - its
++	   distance, counted in whole metres, came to three. The tester could
++	   not take it, and did not know it was up there. On its own level,
++	   or near it, as a step or a jump goes. */
++	if (arrived && !eta_marker.square && !eta_marker.intoArea
++	    && fabs(eta_marker.origin[2] - cg.predictedPlayerState.origin[2]) > ETA_MARKER_ARRIVE_RISE
++	    && ETA_MarkerStoodOn())
++	{
++		arrived = qfalse;
++	}
++
+ 	/* Not arrived while standing where a trap kills: the crypt's south
+ 	   button is three metres past the blade's reach, and "Marker
+ 	   reached" stopped the tester inside it, where the next swing killed
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 80142679..92094aeb 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -34,6 +34,7 @@
+ #define ETA_THINGS_MAX       160
+ #define ETA_THINGS_LOOK_MS   500     /* the list looked at this often */
+ #define ETA_THINGS_SAME      48.0f   /* this near another: the same thing */
++#define ETA_THING_CLIMB_RISE 48.0f   /* a thing this far above the player: up on something, not walked onto */
+ #define ETA_THINGS_GONE      600.0f  /* this near, and not there: taken */
+ #define ETA_THINGS_LIST_MS   30000   /* T or Y again this soon: on along the same list */
+ #define ETA_FIGHT_QUIET_MS   6000    /* no enemy in sight this long: over */
+@@ -785,7 +786,7 @@ static void ETA_ThingsStep(int step)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                 count = 0, i, j, meters, hidden = 0, elsewhere = 0, area;
+-	char                progress[160], name[80], why[128], shown[128], puzzleState[64] = "";
++	char                progress[160], name[80], why[128], shown[128], puzzleState[64] = "", high[48];
+ 	qboolean            isPuzzle = qfalse;
+ 	const char          *trapUnder;
+ 	vec3_t              liftAt;
+@@ -1108,6 +1109,19 @@ static void ETA_ThingsStep(int step)
+ 		}
+ 	}
+ 
++	/* Up on something, higher than a jump: in the church a large health
++	   pack lies on a stack of crates, and T said "Walk onto it" - the
++	   tester walked round the crates, and could not take it. Said with how
++	   high, and that it is climbed to. */
++	high[0] = '\0';
++	if (( thing->kind == ETA_THING_ITEM || thing->kind == ETA_THING_TREASURE )
++	    && thing->point[2] - ps->origin[2] > ETA_THING_CLIMB_RISE)
++	{
++		int up = (int)( ( thing->point[2] - ps->origin[2] ) * ETA_QU_TO_METERS + 0.5f );
++
++		Com_sprintf(high, sizeof(high), ", on top of something, %d %s up", up < 1 ? 1 : up, up > 1 ? "meters" : "meter");
++	}
++
+ 	/* Close enough to reach: only what to do with it. */
+ 	if (meters <= 4)
+ 	{
+@@ -1116,11 +1130,9 @@ static void ETA_ThingsStep(int step)
+ 			"Walk onto it", "F uses it", "F turns you to it, to break it", "Walk onto it",
+ 			"Its way in is hidden close by"
+ 		};
++		const char *action;
+ 
+-		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. %s", eta_things.listPos + 1, eta_things.listCount, shown,
+-		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+-		                  meters == 1 ? "meter" : "meters",
+-		                  thing->ride ? "Walk in, and stay inside"
++		action = thing->ride ? "Walk in, and stay inside"
+ 		                  : trapUnder ? "Walk up to it, and the moment you have it, step straight back"
+ 		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
+@@ -1135,13 +1147,21 @@ static void ETA_ThingsStep(int step)
+ 		                  ? va("Walk %d %s closer, then F uses it", meters - 2, meters - 2 == 1 ? "meter" : "meters")
+ 		                  : why[0] ? "Walking onto it does nothing yet"
+ 		                  : Q_stristr(thing->name, "inside something to break") ? "Break what it is in first"
+-		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind]));
++		                  : !Q_stricmpn(thing->name, "Spot ", 5) ? "Walk onto it" : what[thing->kind];
++		if (high[0] && !Q_stricmp(action, "Walk onto it"))
++		{
++			action = "Climb up to it: O leads the way, a jump at a time";
++		}
++
++		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s. %s", eta_things.listPos + 1, eta_things.listCount, shown,
++		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
++		                  meters == 1 ? "meter" : "meters", high, action));
+ 	}
+ 	else
+ 	{
+-		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s. O leads there", eta_things.listPos + 1, eta_things.listCount,
++		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s. O leads there", eta_things.listPos + 1, eta_things.listCount,
+ 		                  shown, why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
+-		                  meters, meters == 1 ? "meter" : "meters"));
++		                  meters, meters == 1 ? "meter" : "meters", high));
+ 	}
+ 	ETA_Speech_EndReport();
+ 	/* Heard out: a trap's coming and going waits for it. */

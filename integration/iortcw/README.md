@@ -3158,3 +3158,16 @@ takes up to 13 seconds to settle; past about 20 metres that is said:
 "Locked, Zombie, ahead, 25 meters. Hold still: your aim steadies in 9
 seconds, or half that crouched", and "Steady" when it is. Said by 2
 seconds whatever, so the key is never silent.
+
+### 0176 Up on the crates
+
+In the church the tester found a large health pack by some crates and
+could not take it. Read from the map, one lies on top of a stack of
+crates, three metres up - a pallet, crates on it, and one more on top -
+and T said "Large Health, ahead, 3 meters. Walk onto it"; a waypoint on
+it said "Marker reached" at the foot of the stack, its distance counted
+in whole metres coming to three. Now T says it: "Large Health, ahead, 4
+meters, on top of something, 3 meters up. Climb up to it: O leads the
+way, a jump at a time"; and a marker that is a place to stand - ground
+under it - is not reached from more than a jump above or below it. A
+switch on a wall, reached by F from the floor, is as before.
