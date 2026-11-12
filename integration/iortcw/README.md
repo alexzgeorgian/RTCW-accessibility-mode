@@ -3279,3 +3279,17 @@ the thing to break that unlocks the way to the cathedral, for "Pursue
 Helga von Bulow"; an objective met by beating soldiers has no place,
 and O goes on as before. Tested by reading the places out in three
 levels; not yet walked with everything explored.
+
+### 0184 The notebook says done
+
+The tester asked for the notebook to say which objectives are met,
+rather than a key of their own. The game's notebook is the mission's
+briefing, objectives and all, with nothing to show which are met. Read
+aloud, it now says ", done" after each one met, and ends each objective
+with a full stop - the page ran one into the next, heard as one
+sentence. The objectives' words come from the cgame, which reads them
+from the same pages, as eta_objectiveText1 on; each met one's
+g_objective cvar is 1. Tested in the church with the second met:
+"MISSION OBJECTIVES: Infiltrate Wulfburg Church. Pursue Helga von
+Bulow to the ruined cathedral, done. Eliminate all of von Bulow's
+personal "Elite guards"."

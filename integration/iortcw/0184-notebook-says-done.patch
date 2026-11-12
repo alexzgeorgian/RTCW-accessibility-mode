@@ -1,0 +1,120 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 32a74f85..ef86b84a 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1373,6 +1373,16 @@ void CG_AccessibilityFrame( void ) {
+ 		memset( &etaHud, 0, sizeof( etaHud ) );
+ 		CG_AccessibilityLoadObjectives();
+ 		eta.objectives = CG_AccessibilityObjectiveBits();
++		/* Their words for the notebook, which the menus read
++		   (ETA_MenuScreenText): it says "done" after each one met. */
++		{
++			int k;
++
++			for ( k = 0; k < eta.numObjectiveTexts; k++ ) {
++				trap_Cvar_Set( va( "eta_objectiveText%i", k + 1 ), eta.objectiveText[k] );
++			}
++			trap_Cvar_Set( "eta_objectiveCount", va( "%i", eta.numObjectiveTexts ) );
++		}
+ 		eta.weapon = ps->weapon;
+ 		eta.health = ps->stats[STAT_HEALTH];
+ 		trap_Cvar_VariableStringBuffer( "cg_youGotMail", value, sizeof( value ) );
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 2c48b972..ea43b85d 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -2339,6 +2339,84 @@ static qboolean ETA_ItemTakesKey( itemDef_t *item, int key ) {
+  * mission's orders and objectives. For the screens that are nothing but
+  * reading, said as they open, and for any screen on the read key.
+  */
++/*
++ * [Accessibility]: the notebook's objectives, each one met said as done.
++ * The game's notebook is the mission's briefing, objectives and all, with
++ * nothing to show which are met; the tester asked for it to say so, rather
++ * than a key of its own. The objectives' words come from the cgame, which
++ * reads them from the same pages (eta_objectiveText1 on), and each met
++ * one's g_objective cvar is 1; found on the page with its spacing as the
++ * page has it, ", done" goes after it.
++ */
++static const char *ETA_FindLoosely( const char *page, const char *words, const char **end ) {
++	const char *start;
++
++	for ( start = page; *start; start++ ) {
++		const char *p = start, *w = words;
++
++		while ( *w ) {
++			if ( *w == ' ' ) {
++				if ( *p != ' ' ) {
++					break;
++				}
++				while ( *p == ' ' ) {
++					p++;
++				}
++				while ( *w == ' ' ) {
++					w++;
++				}
++				continue;
++			}
++			if ( tolower( (unsigned char)*p ) != tolower( (unsigned char)*w ) ) {
++				break;
++			}
++			p++;
++			w++;
++		}
++		if ( !*w ) {
++			*end = p;
++			return start;
++		}
++	}
++	return NULL;
++}
++
++static void ETA_MarkObjectivesDone( char *out, size_t outSize ) {
++	char value[MAX_CVAR_VALUE_STRING], words[MAX_CVAR_VALUE_STRING];
++	int  i, count;
++
++	DC->getCVarString( "eta_objectiveCount", value, sizeof( value ) );
++	count = atoi( value );
++	for ( i = 1; i <= count && i <= 16; i++ ) {
++		const char *end, *at, *after;
++		size_t     length = strlen( out ), tail;
++		qboolean   done;
++		char       mark[16];
++
++		DC->getCVarString( va( "g_objective%i", i ), value, sizeof( value ) );
++		done = (qboolean)( atoi( value ) != 0 );
++		DC->getCVarString( va( "eta_objectiveText%i", i ), words, sizeof( words ) );
++		if ( !words[0] || !( at = ETA_FindLoosely( out, words, &end ) ) ) {
++			continue;
++		}
++		/* After its last word, before the full stop that ends it. The
++		   page runs one objective into the next with no stop between,
++		   heard as one sentence: each is ended with one. */
++		while ( end > at && ( end[-1] == ' ' || end[-1] == '.' ) ) {
++			end--;
++		}
++		for ( after = end; *after == ' '; after++ ) {
++		}
++		Com_sprintf( mark, sizeof( mark ), "%s%s", done ? ", done" : "", *after == '.' ? "" : "." );
++		if ( !mark[0] || length + strlen( mark ) + 1 > outSize ) {
++			continue;
++		}
++		tail = length - ( end - out );
++		memmove( (char *)end + strlen( mark ), end, tail + 1 );
++		memcpy( (char *)end, mark, strlen( mark ) );
++	}
++}
++
+ qboolean ETA_MenuScreenText( menuDef_t *menu, char *out, size_t outSize ) {
+ 	int i;
+ 
+@@ -2394,6 +2472,9 @@ qboolean ETA_MenuScreenText( menuDef_t *menu, char *out, size_t outSize ) {
+ 		Q_strcat( out, outSize, text );
+ 	}
+ 
++	if ( out[0] && menu->window.name && !Q_stricmp( menu->window.name, "notebook" ) ) {
++		ETA_MarkObjectivesDone( out, outSize );
++	}
+ 	return out[0] ? qtrue : qfalse;
+ }
+ #else
