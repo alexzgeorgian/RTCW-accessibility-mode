@@ -1,0 +1,224 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 859611d7..32a74f85 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -553,6 +553,22 @@ static void CG_AccessibilityLoadObjectives( void ) {
+ 	}
+ }
+ 
++static int CG_AccessibilityObjectiveBits( void );
++static int CG_AccessibilityObjectiveCount( void );
++
++/* For O (cg_accessibility_unlock.c): whether objective n, from 1, is met,
++   and its words. */
++qboolean CG_AccessibilityObjectiveDone( int n ) {
++	return (qboolean)( n > 0 && n <= ETA_MAX_OBJECTIVES && ( CG_AccessibilityObjectiveBits() & ( 1 << ( n - 1 ) ) ) );
++}
++
++const char *CG_AccessibilityObjectiveText( int n ) {
++	if ( n <= 0 || n > CG_AccessibilityObjectiveCount() ) {
++		return "";
++	}
++	return eta.objectiveText[n - 1];
++}
++
+ static int CG_AccessibilityObjectiveBits( void ) {
+ 	char value[16];
+ 	int i, bits = 0;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index cb638c10..13fbe711 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -5187,6 +5187,32 @@ static void ETA_FaceTheWayUnreachable(void)
+ 				return;
+ 			}
+ 		}
++		/* Nothing open left to explore: on toward an objective not met
++		   yet, where the level's script meets it - only where, and the
++		   objective in the notebook's own words. The tester heard O say
++		   there was nowhere left to go, and asked to be led on as a
++		   player keen to get on would go. */
++		if (!CG_AccessibilityAreasSomethingNew())
++		{
++			vec3_t place;
++			int    objective = 0;
++
++			if (CG_AccessibilityObjectivePlace(cg.predictedPlayerState.origin, place, &objective))
++			{
++				const char *words = CG_AccessibilityObjectiveText(objective);
++				vec3_t      toPlace;
++				int         meters;
++
++				VectorSubtract(place, cg.predictedPlayerState.origin, toPlace);
++				meters = (int)( VectorLength(toPlace) * ETA_QU_TO_METERS + 0.5f );
++				CG_AccessibilityChoose(place, "the way to your next objective");
++				ETA_Speech_Say(va("Everything open is explored. On toward your next objective%s%s, %d %s, %s. "
++				                  "O again leads there", words[0] ? ": " : "", words,
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(place))));
++				return;
++			}
++		}
+ 		/* First the openings not yet explored, as X's; only when
+ 		   none is left, the rooms where things are still to be
+ 		   found. */
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index aef1f30d..d1a1509b 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -75,6 +75,26 @@ static struct
+ 	int    door;        /* the door it unlocks, as first found */
+ } eta_unlockSpots[ETA_UNLOCK_SPOTS];
+ 
++/*
++ * The places that meet the level's objectives, for O when nothing open is
++ * left to explore. The tester found O saying there was nowhere left to
++ * go, and asked to be led on toward the objectives - as a player keen to
++ * get on follows the way the level opens - without the story given away.
++ * Each "objectivemet" line of the scripts is followed back, as a door's
++ * unlocking is, to where the player sets it going: a place walked into,
++ * something to break, a switch. Only where; what happens there is the
++ * level's to tell.
++ */
++#define ETA_OBJECTIVE_PLACES 16
++
++static struct
++{
++	vec3_t at;
++	int    objective;   /* from 1 */
++} eta_objectivePlaces[ETA_OBJECTIVE_PLACES];
++static int eta_objectivePlaceCount;
++static int eta_unlockObjective;   /* being followed back, from 1; 0 a door */
++
+ /* The door whose unlocking is being followed back. */
+ static int eta_unlockDoor;
+ static int eta_unlockSpotCount;
+@@ -86,6 +106,8 @@ static qboolean eta_unlockNever[MAX_MODELS];
+ void CG_AccessibilityUnlockReset(void)
+ {
+ 	eta_unlockRecordCount = eta_unlockLineCount = eta_unlockSpotCount = 0;
++	eta_objectivePlaceCount = 0;
++	eta_unlockObjective     = 0;
+ 	memset(eta_unlockNever, 0, sizeof(eta_unlockNever));
+ }
+ 
+@@ -242,6 +264,14 @@ static void ETA_UnlockReadScript(const char *file)
+ 				Q_strncpyz(l->what, word[1], sizeof(l->what));
+ 				Q_strncpyz(l->whatEvent, word[2], sizeof(l->whatEvent));
+ 			}
++			else if (( !Q_stricmp(word[0], "objectivemet") || !Q_stricmp(word[0], "missionsuccess") ) && words > 1
++			         && atoi(word[1]) > 0)
++			{
++				/* An objective met: which, kept in what. */
++				l->verb = 'o';
++				Q_strncpyz(l->what, word[1], sizeof(l->what));
++				l->whatEvent[0] = '\0';
++			}
+ 			else
+ 			{
+ 				continue;
+@@ -282,6 +312,30 @@ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ 	/* A trigger stands from the floor up: led to its foot, not its
+ 	   middle in the air. */
+ 	at[2] = mins[2] + 24.0f;
++
++	/* An objective's place: kept apart from T's, which says what a spot
++	   does. A thing to break or press is led to where it is. */
++	if (eta_unlockObjective)
++	{
++		if (!Q_stricmpn(r->classname, "func_", 5))
++		{
++			at[2] = ( mins[2] + maxs[2] ) * 0.5f;
++		}
++		for (i = 0; i < eta_objectivePlaceCount; i++)
++		{
++			if (eta_objectivePlaces[i].objective == eta_unlockObjective && Distance(eta_objectivePlaces[i].at, at) < 64.0f)
++			{
++				return -1;
++			}
++		}
++		if (eta_objectivePlaceCount < ETA_OBJECTIVE_PLACES)
++		{
++			VectorCopy(at, eta_objectivePlaces[eta_objectivePlaceCount].at);
++			eta_objectivePlaces[eta_objectivePlaceCount].objective = eta_unlockObjective;
++			eta_objectivePlaceCount++;
++		}
++		return -1;
++	}
+ 	for (i = 0; i < eta_unlockSpotCount; i++)
+ 	{
+ 		if (Distance(eta_unlockSpots[i].at, at) < 64.0f)
+@@ -399,6 +453,12 @@ static void ETA_UnlockFired(const char *name, int depth)
+ 		{
+ 			ETA_UnlockAddSpot(r, "Door that, opened, unlocks another");
+ 		}
++		else if (eta_unlockObjective && r->model
++		         && ( !Q_stricmp(r->classname, "func_explosive") || !Q_stricmp(r->classname, "func_button")
++		              || !Q_stricmp(r->classname, "func_invisible_user") ))
++		{
++			ETA_UnlockAddSpot(r, "");
++		}
+ 		else if (!r->model && r->targetname[0])
+ 		{
+ 			/* A relay, a delay, a script trigger: whatever fires it. */
+@@ -541,6 +601,46 @@ void CG_AccessibilityUnlockResolve(void)
+ 		}
+ 	}
+ 	CG_Printf("eta: %d places unlock doors in %s\n", eta_unlockSpotCount, cgs.mapname);
++
++	/* And where each objective is met. */
++	eta_unlockDoor = 0;
++	for (i = 0; i < eta_unlockLineCount; i++)
++	{
++		const eta_unlockLine_t *l = &eta_unlockLines[i];
++
++		if (l->verb != 'o')
++		{
++			continue;
++		}
++		eta_unlockObjective = atoi(l->what);
++		ETA_UnlockEvent(l->owner, l->event, 1);
++		eta_unlockObjective = 0;
++	}
++	CG_Printf("eta: %d places meet objectives in %s\n", eta_objectivePlaceCount, cgs.mapname);
++}
++
++/* The nearest place that meets an objective not met yet: qfalse with
++   none known. */
++qboolean CG_AccessibilityObjectivePlace(const vec3_t from, vec3_t out, int *objective)
++{
++	float best = 0.0f;
++	int   i, found = 0;
++
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (CG_AccessibilityObjectiveDone(eta_objectivePlaces[i].objective))
++		{
++			continue;
++		}
++		if (!found || Distance(from, eta_objectivePlaces[i].at) < best)
++		{
++			best = Distance(from, eta_objectivePlaces[i].at);
++			VectorCopy(eta_objectivePlaces[i].at, out);
++			*objective = eta_objectivePlaces[i].objective;
++			found      = 1;
++		}
++	}
++	return (qboolean)found;
+ }
+ 
+ qboolean CG_AccessibilityDoorNeverOpens(int model)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index d0816d29..c947359f 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2318,6 +2318,9 @@ int CG_AccessibilityUnlockState( int index );
+ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
+ char CG_AccessibilityDoorLive( int model );
+ void CG_AccessibilityAreasNoWayForget( void );
++qboolean CG_AccessibilityObjectiveDone( int n );
++const char *CG_AccessibilityObjectiveText( int n );
++qboolean CG_AccessibilityObjectivePlace( const vec3_t from, vec3_t out, int *objective );
+ void CG_AccessibilityThingsNoWayForget( void );
+ void CG_AccessibilityRouteDoorsChanged( void );
+ qboolean CG_AccessibilityUnlockSpotForDoor( int model, vec3_t at, int *index );

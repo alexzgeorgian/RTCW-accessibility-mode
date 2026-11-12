@@ -3261,3 +3261,21 @@ player uses something, those are forgotten and the way looked for
 afresh. Tested at the first portcullis: held against it, the switch
 pressed, and once it had risen - thirteen seconds - O led through it,
 "Marker reached" on the far side.
+
+### 0183 On toward the objective
+
+In the church, with one objective of three met, the tester heard O say
+there was nowhere left to explore, and asked to be led on toward the
+objectives, as a player keen to get on follows the way the level opens,
+without the story given away. Each "objectivemet" line of a level's
+scripts is now followed back, as a door's unlocking is, to where the
+player sets it going: a place walked into, something to break, a
+switch. With nothing open left to explore and the way out still shut,
+O leads to the nearest such place for an objective not met yet:
+"Everything open is explored. On toward your next objective: <the
+notebook's words>, 25 meters, ahead right. O again leads there". Only
+where - T says what is there once it is come to. Found in the church:
+the thing to break that unlocks the way to the cathedral, for "Pursue
+Helga von Bulow"; an objective met by beating soldiers has no place,
+and O goes on as before. Tested by reading the places out in three
+levels; not yet walked with everything explored.
