@@ -1,0 +1,52 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index ef86b84a..31280e0b 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -12,7 +12,8 @@
+  *  - the mission's objectives as each is done, and a new notebook page;
+  *  - a cutscene starting, and how to skip it;
+  *  - the console opening and closing.
+- * And on keys: the status (F1) and the objectives (F2). F6 repeats, F7
++ * And on keys: the status (F1); the objectives are the notebook's, which
++ * says which are done (ui_shared.c). F6 repeats, F7
+  * reads the screen on top and F8 stops speech, here or in the menus.
+  */
+ 
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 196d31dc..71f35b5f 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8370,7 +8370,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ K_F7, "accessibilityReadScreen", 1, NULL },
+ 		{ K_F8, "accessibilityStopSpeech", 1, NULL },
+ 		{ K_F1, "accessibilityStatus",     1, NULL },
+-		{ K_F2, "accessibilityObjectives", 1, NULL },
+ 		/* Getting around. F3 is free in the stock config. The arrows
+ 		   still turn as the game's +left and +right do while held; a tap
+ 		   turns to the next compass point and says it. */
+@@ -8463,9 +8462,12 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   game's own: the tester wanted the game's Controls as they were,
+ 		   and the crouch to stay down as a setting (eta_crouchToggle). */
+ 		{ 'c',  "accessibilityCrouch" },
++		/* F2, the objectives: the notebook says which are done now, and
++		   the tester asked for the key gone. */
++		{ K_F2, "accessibilityObjectives" },
+ 	};
+ 	const int retiredAt      = 15;
+-	const int retiredAgainAt = 24;
++	const int retiredAgainAt = 25;
+ 	const int introAt   = 18;
+ 
+ 	vmCvar_t installed;
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index ea43b85d..b4f9b9c2 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4710,7 +4710,6 @@ static bind_t g_bindings[] =
+ 	{"accessibilityHealth",          'h',            -1, -1, -1},
+ 	{"accessibilityAmmo",            'i',            -1, -1, -1},
+ 	{"accessibilityFacing",          'v',            -1, -1, -1},
+-	{"accessibilityObjectives",      K_F2,           -1, -1, -1},
+ 	{"accessibilityRepeat",          K_F6,           -1, -1, -1},
+ 	{"accessibilityReadScreen",      K_F7,           -1, -1, -1},
+ 	{"accessibilityStopSpeech",      K_F8,           -1, -1, -1}

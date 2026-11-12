@@ -3293,3 +3293,11 @@ g_objective cvar is 1. Tested in the church with the second met:
 "MISSION OBJECTIVES: Infiltrate Wulfburg Church. Pursue Helga von
 Bulow to the ruined cathedral, done. Eliminate all of von Bulow's
 personal "Elite guards"."
+
+### 0185 F2 gone
+
+With the notebook saying which objectives are done, the tester asked
+for F2, the objectives key, gone. It is let go of once where it is
+still on the mode's command, and taken off the Accessibility pages and
+the install notes; the command stays, for a player who binds it.
+Tested: after a start, F2 bound to nothing.
