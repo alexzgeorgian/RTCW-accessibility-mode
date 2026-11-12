@@ -1,0 +1,149 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 9e6731ca..e0c4d714 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -678,6 +678,19 @@ static void CG_AccessibilityStatus_f( void ) {
+ 		CG_AccessibilityPlaceText( text, sizeof( text ) );
+ 	}
+ 
++	/* A place described as it looks - the church's wooden landing:
++	   said first. */
++	{
++		const char *looks = CG_AccessibilityLandmarkText( cg.predictedPlayerState.origin );
++
++		if ( looks ) {
++			char rest[1024];
++
++			Q_strncpyz( rest, text, sizeof( rest ) );
++			Com_sprintf( text, sizeof( text ), "%s. %s", looks, rest );
++		}
++	}
++
+ 	/* On a lift, the crypt's pillar: said first. */
+ 	if ( CG_AccessibilityOnLift() ) {
+ 		char lift[192], rest[1024];
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 26b32436..2104418c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3676,6 +3676,100 @@ static void ETA_EdgeNearFrame(const usercmd_t *cmd)
+ 	ETA_Speech_Say("1 meter");
+ }
+ 
++/*
++ * Places described as a sighted player sees them, where the area alone
++ * ("the corridor") says nothing of what matters: the tester, on the
++ * church's wooden landing, heard "a corridor" and asked to be told what
++ * was in front of them - where a sighted player would see where to
++ * jump. J says it, and it is said once on first standing there. A box
++ * for where the player stands (origin), and the words.
++ */
++typedef struct
++{
++	const char *map;
++	vec3_t      mins, maxs;
++	const char *text;
++} etaLandmark_t;
++
++static const etaLandmark_t eta_landmarks[] =
++{
++	/* Most particular first: the first that holds the player is said. */
++	{ "church", { 300.0f, 440.0f, 1138.0f }, { 340.0f, 504.0f, 1152.0f },
++	  "On the low wooden rail at the landing's edge, over a drop of 13 meters into the hall, which kills. To the north, "
++	  "right against you, the top of a stone wall, a short hop up" },
++	{ "church", { 296.0f, 488.0f, 1168.0f }, { 480.0f, 540.0f, 1190.0f },
++	  "On top of the stone wall by the wooden landing, a narrow path a meter wide running east to west. Below it to the "
++	  "south, the landing; to the west and south-west, the hall's drop. At its west end, a step down and a little to the north-west, the narrow beam along the north side "
++	  "of the hall, which leads into a gallery" },
++	{ "church", { 64.0f, 520.0f, 1128.0f }, { 304.0f, 580.0f, 1150.0f },
++	  "On the narrow beam along the north side of the hall, a meter wide, over the 13 meter drop. North of it, a step "
++	  "down, the gallery" },
++	{ "church", { 330.0f, 60.0f, 1100.0f }, { 450.0f, 504.0f, 1130.0f },
++	  "A wooden landing high over the main hall. To the west, a drop of 13 meters, which kills, behind a low wooden "
++	  "rail, knee high, along the landing's edge. At the rail's north end the landing meets a stone wall about chest "
++	  "high, its top a short hop above the rail. Past the west end of that wall, a step lower, a narrow beam runs west "
++	  "along the north side of the hall into a gallery" },
++};
++
++/* The words for where the player stands, or NULL. */
++const char *CG_AccessibilityLandmarkText(const vec3_t at)
++{
++	const char *map = cgs.mapname;
++	int        i;
++
++	if (!Q_strncmp(map, "maps/", 5))
++	{
++		map += 5;
++	}
++	for (i = 0; i < (int)ARRAY_LEN(eta_landmarks); i++)
++	{
++		const etaLandmark_t *l = &eta_landmarks[i];
++
++		if (!Q_stricmpn(map, l->map, strlen(l->map)) && map[strlen(l->map)] == '.'
++		    && at[0] >= l->mins[0] && at[0] <= l->maxs[0] && at[1] >= l->mins[1] && at[1] <= l->maxs[1]
++		    && at[2] >= l->mins[2] && at[2] <= l->maxs[2])
++		{
++			return l->text;
++		}
++	}
++	return NULL;
++}
++
++/* Said once on first standing in each, on this level. */
++static void ETA_LandmarkFrame(void)
++{
++	static char        level[64];
++	static const char *said[8];
++	const playerState_t *ps = &cg.predictedPlayerState;
++	const char          *text;
++	int                 i;
++
++	if (Q_stricmp(level, cgs.mapname))
++	{
++		Q_strncpyz(level, cgs.mapname, sizeof(level));
++		memset(said, 0, sizeof(said));
++	}
++	if (ps->pm_type != PM_NORMAL || ps->groundEntityNum == ENTITYNUM_NONE || cg.cameraMode
++	    || !( text = CG_AccessibilityLandmarkText(ps->origin) ))
++	{
++		return;
++	}
++	for (i = 0; i < (int)ARRAY_LEN(said); i++)
++	{
++		if (said[i] == text)
++		{
++			return;
++		}
++		if (!said[i])
++		{
++			said[i] = text;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(text);
++			return;
++		}
++	}
++}
++
+ /*
+  * A secret reached only by jumping. The church's: from the wooden
+  * landing over the nave, onto its low rail, up onto the top of the wall
+@@ -4248,6 +4342,7 @@ static void ETA_EdgeGuardFrame(void)
+ 	{
+ 		return;
+ 	}
++	ETA_LandmarkFrame();
+ 	if (ETA_SecretJumpFrame(&cmd))
+ 	{
+ 		return;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index a8746228..0147b622 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2446,6 +2446,7 @@ qboolean CG_AccessibilitySecretByJump( const vec3_t at );
+ void CG_AccessibilitySecretJumpTest_f( void );
+ qboolean CG_AccessibilitySecretJumpActive( void );
+ qboolean CG_AccessibilitySecretJumpSayStep( void );
++const char *CG_AccessibilityLandmarkText( const vec3_t at );
+ int CG_AccessibilityGateState( int gate, const vec3_t from, qboolean *moving );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );

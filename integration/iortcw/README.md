@@ -3387,3 +3387,18 @@ guard on; and a run without Shift, or out of breath, fell short into a
 pocket below the beam - now it is not begun, and says why. Tested: the
 free presser stayed at the start; done as told, from seven metres
 away, twice, each reached the gallery.
+
+### 0192 Places described as they look
+
+On the church's wooden landing J said "the corridor", and the tester,
+who fell after reaching the start of the guided way up, asked instead
+to be told what is in front of them, as a sighted player sees it, and
+to jump by themselves. Places that matter and that an area's name says
+nothing of now have words of their own, said once on first standing
+there and by J each time: the landing ("high over the main hall... a
+drop of 13 meters, which kills, behind a low wooden rail, knee high...
+a stone wall about chest high... past its west end, a step lower, a
+narrow beam runs west along the north side of the hall into a
+gallery"), the rail, the top of the wall, and the beam. The guided
+steps stay for whoever wants them. Tested: each said on arriving and by
+J at all four.
