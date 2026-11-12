@@ -1,0 +1,55 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index a8396470..bf2bddf8 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2711,9 +2711,11 @@ static void ETA_CrouchFrame(void)
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	int                 now;
+ 
+-	if (ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0)
++	if (ps->pm_type == PM_DEAD || ps->stats[STAT_HEALTH] <= 0 || cg.cameraMode)
+ 	{
+-		/* Dead or in a cutscene: the toggle let go, said fresh after. */
++		/* Dead or in a cutscene: the toggle let go, said fresh after.
++		   Not for a moment the game holds the player still - it stays
++		   down until C again. */
+ 		if (eta_crouchOn)
+ 		{
+ 			eta_crouchOn = qfalse;
+@@ -2722,6 +2724,10 @@ static void ETA_CrouchFrame(void)
+ 		eta_crouchSaid = -1;
+ 		return;
+ 	}
++	if (ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
+ 	now = ( ps->pm_flags & PMF_DUCKED ) ? 1 : 0;
+ 	if (eta_crouchSaid < 0)
+ 	{
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 3b1de68d..3b3f6da5 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8559,6 +8559,21 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		}
+ 	}
+ 
++	/* C back on the game's own crouch, which lasts only while the key is
++	   held: the tester pressed C, and stood up the moment they let go.
++	   The game's own defaults put it there (default.cfg); wherever C is
++	   on it, it is moved on to the mode's crouch, C and C again, every
++	   time. */
++	{
++		char current[MAX_STRING_CHARS];
++
++		current[0] = '\0';
++		trap_Key_GetBindingBuf( 'c', current, sizeof( current ) );
++		if ( !Q_stricmp( current, "+movedown" ) ) {
++			trap_Key_SetBinding( 'c', "accessibilityCrouch" );
++		}
++	}
++
+ 	/* The controls page keeps its own copy of which key each command is
+ 	   on, read at start-up. Left stale, the first key changed there would
+ 	   write that copy back over what was just installed. */

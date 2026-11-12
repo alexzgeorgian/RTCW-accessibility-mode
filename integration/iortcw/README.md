@@ -3201,3 +3201,15 @@ The server sends a character's movement extrapolated (TR_LINEAR_STOP),
 not interpolated, which the aim's lead had been waiting for in vain.
 Tested at the crypt's start with the enemies hunting: "Enemy Zombie,
 ahead left, 23 meters", out of sight, where nothing was said before.
+
+### 0179 Crouch stays
+
+The tester pressed C to crouch and stood up the moment they let go: C
+was back on the game's own crouch, which lasts only while the key is
+held - the game's defaults (default.cfg) put it there, and the mode
+moved C to its own crouch only once. Wherever C is on +movedown it is
+now moved to the mode's crouch, C and C again, every time the game
+starts. And the crouch is let go of only at death or a cutscene, not
+for a moment the game holds the player still. Tested with C put back
+on +movedown before the start: pressed and let go, "Crouched", and
+still down after walking on.
