@@ -246,8 +246,7 @@ menuDef {
 	ETA_KEY(158, "Turn left", "+accessibilityTurnLeft")
 	ETA_KEY(176, "Turn right", "+accessibilityTurnRight")
 	ETA_KEY(194, "Crouch, and again to stand", "accessibilityCrouch")
-	ETA_KEY(212, "Cross a trap for me", "accessibilityCrossTrap")
-	ETA_BUTTON(240, "BACK", close eta_acc_keys_around ; open eta_accessibility)
+	ETA_BUTTON(222, "BACK", close eta_acc_keys_around ; open eta_accessibility)
 }
 
 menuDef {
@@ -268,8 +267,7 @@ menuDef {
 	ETA_KEY(68, "Use, turn to a thing, climb a ladder", "+accessibilityActivate")
 	ETA_KEY(86, "Lock on to an enemy, and again to let go", "accessibilityEnemyLock")
 	ETA_KEY(104, "Lock on while held", "+accessibilityAimLock")
-	ETA_KEY(122, "Enemy announcements on and off", "accessibilityEnemyCallouts")
-	ETA_BUTTON(150, "BACK", close eta_acc_keys_things ; open eta_accessibility)
+	ETA_BUTTON(132, "BACK", close eta_acc_keys_things ; open eta_accessibility)
 }
 
 menuDef {

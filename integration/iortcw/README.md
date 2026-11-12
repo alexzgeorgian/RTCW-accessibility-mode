@@ -3183,3 +3183,21 @@ walking onto it - health, ammo, a weapon, treasure - is now reached
 standing on it: O's way leads right onto it, and "Marker reached" is
 said only there. Tested from two starts by the crate: reached 1 metre
 off, on it, both times.
+
+### 0178 Keys gone, enemies heard
+
+The tester finished the crypt without the cross key, and asked for it
+gone, and found M, the enemy callouts off and on, of no use. Both keys
+are given up - let go of once where they are still on the mode's
+command, and off the Accessibility pages - and the callouts are put
+back on for a player who had turned them off; the trap lines no longer
+name slash. The cross key's walking is left in the code, unbound.
+
+They also found the callouts came too late: a sighted player sees an
+enemy coming sooner, and is shooting by then. An enemy coming at the
+player out of sight - within 25 metres, near their floor, moving toward
+them - is now said as one in sight is, and kept while within 32 metres.
+The server sends a character's movement extrapolated (TR_LINEAR_STOP),
+not interpolated, which the aim's lead had been waiting for in vain.
+Tested at the crypt's start with the enemies hunting: "Enemy Zombie,
+ahead left, 23 meters", out of sight, where nothing was said before.

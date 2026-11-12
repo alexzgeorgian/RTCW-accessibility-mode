@@ -1,0 +1,254 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 8560d8ee..b45aa348 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -591,21 +591,6 @@ static void CG_AccessibilityObjectives_f( void ) {
+ 	ETA_Speech_SayLong( text );
+ }
+ 
+-/*
+- * M: the enemy callouts off, and on again. The tester asked to be spared
+- * the console, and the mode has no page in the game's menus: a key, said
+- * either way, and kept for the next time (eta_playerCallouts is archived).
+- */
+-static void CG_AccessibilityEnemyCallouts_f( void ) {
+-	qboolean on = (qboolean)!eta_playerCallouts.integer;
+-
+-	trap_Cvar_Set( "eta_playerCallouts", on ? "1" : "0" );
+-	trap_Cvar_Update( &eta_playerCallouts );
+-	trap_Cvar_Set( "eta_enemyCues", on ? "1" : "0" );
+-	trap_Cvar_Update( &eta_enemyCues );
+-	CG_AccessibilitySay( on ? "Enemy callouts on" : "Enemy callouts off. M turns them on" );
+-}
+-
+ /*
+  * The status, as 1428 has it, on a key each rather than all on F1, which
+  * the tester found too long to wait through: F1 where the player is, H
+@@ -816,7 +801,6 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityWayOut" );
+ 	trap_AddCommand( "accessibilityFacing" );
+ 	trap_AddCommand( "accessibilityEnemyLock" );
+-	trap_AddCommand( "accessibilityEnemyCallouts" );
+ 	trap_AddCommand( "accessibilityMarkerClear" );
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+@@ -838,7 +822,6 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "+accessibilityAimLock" );
+ 	trap_AddCommand( "-accessibilityAimLock" );
+ 	trap_AddCommand( "accessibilityUseNext" );
+-	trap_AddCommand( "accessibilityCrossTrap" );
+ 	trap_AddCommand( "accessibilityUsePrev" );
+ 	trap_AddCommand( "accessibilityEnemyNext" );
+ 	trap_AddCommand( "accessibilityEnemyPrev" );
+@@ -868,8 +851,6 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityFacing_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityEnemyLock" ) ) {
+ 		CG_AccessibilityEnemyLock_f();
+-	} else if ( !Q_stricmp( cmd, "accessibilityEnemyCallouts" ) ) {
+-		CG_AccessibilityEnemyCallouts_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityMarkerClear" ) ) {
+ 		CG_AccessibilityChosenClear();
+ 		CG_AccessibilityMarkerClear();
+@@ -915,8 +896,6 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityAimLockDown_f();
+ 	} else if ( !Q_stricmp( cmd, "-accessibilityAimLock" ) ) {
+ 		CG_AccessibilityAimLockUp_f();
+-	} else if ( !Q_stricmp( cmd, "accessibilityCrossTrap" ) ) {
+-		CG_AccessibilityCrossTrap();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityUseNext" ) ) {
+ 		CG_AccessibilityUseNext_f();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityUsePrev" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 24ab924c..1bcf8066 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2274,6 +2274,65 @@ static qboolean ETA_ClearLine(const vec3_t eye, const vec3_t point)
+  * Things are listed out to a little past where they stop being news, so
+  * an enemy leaving is heard leaving rather than vanishing.
+  */
++/*
++ * An enemy out of sight, coming: said as one in sight is. The tester
++ * found the callouts came too late - a zombie round a corner was already
++ * on them when it was named - and, though they hear the footsteps as a
++ * sighted player does, a sighted player sees the enemy coming sooner and
++ * is shooting by then. So one coming at the player, within earshot and
++ * near their floor, is said before it is in sight; once said, it stays
++ * said while it is close, coming or not, so it is not lost and found
++ * again at every corner.
++ */
++#define ETA_HEARD_METERS     25.0f   /* coming, this close: heard */
++#define ETA_HEARD_KEEP       32.0f   /* said, and this close: still there */
++#define ETA_HEARD_FLOOR      160.0f  /* above or below by more than this: another floor */
++#define ETA_HEARD_COMING     40.0f   /* units a second toward the player: coming */
++
++static int eta_heardSince[MAX_GENTITIES];
++
++static qboolean ETA_EnemyHeardComing(const entityState_t *es, const centity_t *cent, const vec3_t delta, float meters)
++{
++	vec3_t toPlayer;
++	float  speed;
++
++	(void)cent;
++	if (es->number < 0 || es->number >= MAX_GENTITIES || (es->eFlags & EF_DEAD)
++	    || fabs(delta[2]) > ETA_HEARD_FLOOR)
++	{
++		return qfalse;
++	}
++
++	/* Said already, and still close: kept. */
++	if (eta_heardSince[es->number] && cg.time >= eta_heardSince[es->number] && meters <= ETA_HEARD_KEEP)
++	{
++		return qtrue;
++	}
++	eta_heardSince[es->number] = 0;
++
++	/* Its velocity, as the server sends a character's: extrapolated
++	   (TR_LINEAR_STOP) or not. */
++	if (meters > ETA_HEARD_METERS || ( es->pos.trType != TR_INTERPOLATE && es->pos.trType != TR_LINEAR_STOP ))
++	{
++		return qfalse;
++	}
++
++	VectorScale(delta, -1.0f, toPlayer);
++	toPlayer[2] = 0.0f;
++	if (VectorNormalize(toPlayer) < 1.0f)
++	{
++		return qfalse;
++	}
++	speed = es->pos.trDelta[0] * toPlayer[0] + es->pos.trDelta[1] * toPlayer[1];
++	if (speed < ETA_HEARD_COMING)
++	{
++		return qfalse;
++	}
++
++	eta_heardSince[es->number] = cg.time > 0 ? cg.time : 1;
++	return qtrue;
++}
++
+ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players, qboolean ground)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -2322,7 +2381,8 @@ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players,
+ 					continue;
+ 				}
+ 
+-				if (!ETA_ClearLine(eye, low) && !ETA_ClearLine(eye, high))
++				if (!ETA_ClearLine(eye, low) && !ETA_ClearLine(eye, high)
++				    && !ETA_EnemyHeardComing(es, cent, delta, meters))
+ 				{
+ 					continue;
+ 				}
+@@ -9209,7 +9269,7 @@ static void ETA_TrapsFrame(void)
+ 					if (eta_plateModel[model] && !eta_opensDoor[model]
+ 					    && Distance(cgs.inlineModelMidpoints[model], centers[members[0]]) < ETA_TRAP_GROUP)
+ 					{
+-						Q_strcat(text, sizeof(text), va(" Plates on the floor set %s off: slash walks you round them, touching none.", count > 1 ? "them" : "it"));
++						Q_strcat(text, sizeof(text), va(" Plates on the floor set %s off: keep off them.", count > 1 ? "them" : "it"));
+ 						break;
+ 					}
+ 				}
+@@ -9327,7 +9387,7 @@ static void ETA_TrapsFrame(void)
+ 							int closer = (int)( ( gap - margin - 8.0f ) * ETA_QU_TO_METERS + 0.5f );
+ 
+ 							ETA_TrapCycleSay(g, quiet, va("Blade back up. Too far to get across in time from here: walk %d %s "
+-							                              "closer, to the edge of its reach, and wait there. Or slash crosses for you",
++							                              "closer, to the edge of its reach, and wait there",
+ 							                              closer < 1 ? 1 : closer, closer <= 1 ? "meter" : "meters"));
+ 						}
+ 						else if (go > 0)
+@@ -9505,7 +9565,7 @@ static void ETA_TrapsFrame(void)
+ 
+ 				toWall[wall == 'n' || wall == 's' ? 1 : 0] = wall == 'n' || wall == 'e' ? 1.0f : -1.0f;
+ 				left = AngleNormalize180(vectoyaw(toWall) - ps->viewangles[YAW]);
+-				ETA_Speech_Say(va("Pressure plate %s: %s. Keep to the %s wall%s. Or slash walks you round",
++				ETA_Speech_Say(va("Pressure plate %s: %s. Keep to the %s wall%s",
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
+ 				                  eta_opensDoor[plate] ? "it opens a door" : "it sets off a trap",
+ 				                  wall == 'n' ? "north" : wall == 's' ? "south" : wall == 'e' ? "east" : "west",
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 5ed2dac6..3b1de68d 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8393,9 +8393,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   go, as F is for things. U is taken over only from the enemy step
+ 		   it once had. */
+ 		{ 'u',          "accessibilityEnemyLock",     7, "accessibilityEnemyPrev" },
+-		/* The enemy callouts off and on, without the console: M, free in
+-		   the stock config. */
+-		{ 'm',          "accessibilityEnemyCallouts", 8, NULL },
+ 		/* The marker taken away, and its ping with it, as Keypad star does
+ 		   in the Enemy Territory mode: a laptop has no keypad. */
+ 		{ K_BACKSPACE,  "accessibilityMarkerClear",   9, NULL },
+@@ -8430,9 +8427,6 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   not use the F keys. J was let go of in the fifteenth
+ 		   generation, so only where it is still empty. */
+ 		{ 'j',          "accessibilityStatus",        21, NULL },
+-		/* Across a trap's reach, at its safe moment, straight: slash,
+-		   free in the stock config, where every letter is taken. */
+-		{ '/',          "accessibilityCrossTrap",     22, NULL },
+ 	};
+ 
+ 	/*
+@@ -8458,7 +8452,19 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		{ 'y',  "accessibilityEnemyPrev" },
+ 		{ 'h',  "accessibilityFacing" },
+ 	};
+-	const int retiredAt = 15;
++	/* Given up again: the cross key, which the tester found they did
++	   without, finishing the crypt; and M, the enemy callouts off and on,
++	   which they found of no use - the callouts are always on, and are
++	   put back on for a player who had turned them off. */
++	static const struct {
++		int key;
++		const char  *command;
++	} retiredAgain[] = {
++		{ '/',  "accessibilityCrossTrap" },
++		{ 'm',  "accessibilityEnemyCallouts" },
++	};
++	const int retiredAt      = 15;
++	const int retiredAgainAt = 23;
+ 	const int introAt   = 18;
+ 
+ 	vmCvar_t installed;
+@@ -8499,6 +8505,23 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		}
+ 	}
+ 
++	if ( installed.integer < retiredAgainAt ) {
++		for ( i = 0; i < (int)( sizeof( retiredAgain ) / sizeof( retiredAgain[0] ) ); i++ ) {
++			char current[MAX_STRING_CHARS];
++
++			current[0] = '\0';
++			trap_Key_GetBindingBuf( retiredAgain[i].key, current, sizeof( current ) );
++			if ( !Q_stricmp( current, retiredAgain[i].command ) ) {
++				trap_Key_SetBinding( retiredAgain[i].key, "" );
++			}
++		}
++		trap_Cvar_Set( "eta_playerCallouts", "1" );
++		trap_Cvar_Set( "eta_enemyCues", "1" );
++	}
++	if ( retiredAgainAt > newest ) {
++		newest = retiredAgainAt;
++	}
++
+ #ifdef CINEMATICS_INTRO
+ 	/* The intro at start, which "Reset to defaults" in the options had
+ 	   marked as seen for good: the tester found it no longer started.
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 8271421f..6bc46d9b 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4621,13 +4621,11 @@ static bind_t g_bindings[] =
+ 	{"+accessibilityTurnLeft",       K_LEFTARROW,    -1, -1, -1},
+ 	{"+accessibilityTurnRight",      K_RIGHTARROW,   -1, -1, -1},
+ 	{"accessibilityCrouch",          'c',            -1, -1, -1},
+-	{"accessibilityCrossTrap",       '/',            -1, -1, -1},
+ 	{"accessibilityThingsNext",      't',            -1, -1, -1},
+ 	{"accessibilityThingsPrev",      'y',            -1, -1, -1},
+ 	{"+accessibilityActivate",       'f',            K_ENTER, -1, -1},
+ 	{"accessibilityEnemyLock",       'u',            -1, -1, -1},
+ 	{"+accessibilityAimLock",        K_INS,          -1, -1, -1},
+-	{"accessibilityEnemyCallouts",   'm',            -1, -1, -1},
+ 	{"accessibilityStatus",          'j',            K_F1, -1, -1},
+ 	{"accessibilityHealth",          'h',            -1, -1, -1},
+ 	{"accessibilityAmmo",            'i',            -1, -1, -1},
