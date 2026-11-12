@@ -3335,7 +3335,7 @@ is open. O leads on", and leads again to where the player was going.
 Tested in the church: from seven metres off, O led to the switch, F
 raised the gate, and O led through to a place beyond it.
 
-### 0190 Enemies described, Elite guards named
+### 0189 Enemies described, Elite guards named
 
 The tester had never heard how the enemies look, and asked who the
 woman talking to the soldiers before the dig site was: an Elite guard
@@ -3348,3 +3348,27 @@ zombie warriors, Lopers, stim, proto and super soldiers, frogmen -
 once ever, remembered across missions in eta_enemiesMet. Tested at the
 start of the second crypt level: the soldier and the zombie warrior
 were each described once, after their own line.
+
+### 0190 The church's secret: the way up, step by step
+
+The tester found the church's secret area and could not reach it; a
+helper's search of the map found no way in, but a walkthrough video the
+tester sent ("jump over something, then run over something") showed
+there is one. The gallery along the north wall of the nave is reached
+from the wooden landing over the hall: onto the landing's low rail, up
+onto the top of the wall beside it, and off the wall's end onto the
+beam that runs along the north wall into the gallery. A test player
+pressing keys made the one long jump once in about twenty-five tries.
+Now T names it "Secret area, by a running jump", and O leads to where
+the run starts. There the mode turns the player exactly for each step
+(held turn keys, then nudges measured to the degree) and makes the
+jumps, while they hold W: to the exact start, W let go of early enough
+that the slide ends on it; a running jump with Shift and W onto the
+rail; a hop onto the wall; a walk off its end onto the beam. W is let
+go of for them on landing on the rail or the wall, so it never walks
+them off over the drop, and the edge guard keeps watch until the run
+starts. Each landing is said, and a fall below says the way up starts
+again. Tested in the church from six starting spots on the landing:
+the five that ran with Shift held each reached the gallery, and the
+game said "You found a secret area"; the one run without Shift fell
+short, into the pocket below the beam.
