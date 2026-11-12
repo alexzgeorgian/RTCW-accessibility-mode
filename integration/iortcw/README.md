@@ -3213,3 +3213,16 @@ starts. And the crouch is let go of only at death or a cutscene, not
 for a moment the game holds the player still. Tested with C put back
 on +movedown before the start: pressed and let go, "Crouched", and
 still down after walking on.
+
+### 0180 Ghosts thrown
+
+The tester found zombies, and Helga at the end of the crypt, throwing
+ghosts at them. A zombie stands and draws the light in for up to six
+seconds (AIFunc_ZombieAttack2), the ghosts flying at its enemy as it
+goes; a sighted player sees the glow gather. The attack lasts only
+while it sees its enemy. Now, as one begins at the player: "Zombie
+throwing ghosts at you, ahead, 12 meters: get out of its sight". Once
+for each attack, and not for one at someone else: tested at the
+crypt's start with the enemies hunting, the zombie's first attack, at
+the soldier it was fighting, went unsaid, and its next two, at the
+player, were said.

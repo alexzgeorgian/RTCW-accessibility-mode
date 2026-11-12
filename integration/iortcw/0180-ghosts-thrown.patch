@@ -1,0 +1,70 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 1bcf8066..6d10ad21 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -9590,6 +9590,57 @@ static void ETA_TrapsFrame(void)
+  */
+ #define ETA_WARRIOR_NEAR 25.0f   /* meters */
+ 
++/*
++ * A zombie's ghost attack, said as it begins. The tester found zombies,
++ * and Helga at the end of the crypt, throwing ghosts at them: a zombie
++ * stands and draws the light in for up to six seconds (AIFunc_ZombieAttack2,
++ * EF_MONSTER_EFFECT), the ghosts flying at the player as it goes - a
++ * sighted player sees the glow gather and gets out of the way. The attack
++ * only lasts while the zombie sees the player: out of its sight, behind
++ * a pillar or round a corner, it stops. Said once for each attack.
++ */
++static int eta_spiritSaid[MAX_GENTITIES];
++
++static void ETA_SpiritFrame(void)
++{
++	int i;
++
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	for (i = 0; i < cg.snap->numEntities; i++)
++	{
++		const entityState_t *es = &cg.snap->entities[i];
++		const centity_t     *cent;
++		int                 meters;
++
++		if (es->eType != ET_PLAYER || ( es->aiChar != AICHAR_ZOMBIE && es->aiChar != AICHAR_HELGA )
++		    || (es->eFlags & EF_DEAD) || es->number < 0 || es->number >= MAX_GENTITIES)
++		{
++			continue;
++		}
++		/* At the player: one at a soldier it is fighting is not news. */
++		if (!(es->eFlags & EF_MONSTER_EFFECT) || es->otherEntityNum2 != cg.snap->ps.clientNum)
++		{
++			continue;
++		}
++		/* The same attack: its start time, as the client draws it by. */
++		if (eta_spiritSaid[es->number] == es->effect1Time + 1)
++		{
++			continue;
++		}
++		eta_spiritSaid[es->number] = es->effect1Time + 1;
++
++		cent   = &cg_entities[es->number];
++		meters = (int)( Distance(cent->lerpOrigin, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f );
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("%s throwing ghosts at you, %s, %d %s: get out of its sight",
++		                  ETA_CharacterKind(es), ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)),
++		                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++	}
++}
++
+ static void ETA_WarriorFrame(void)
+ {
+ 	static qboolean warned[MAX_GENTITIES], placed[MAX_GENTITIES];
+@@ -9722,6 +9773,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_SwitchNoticeFrame();
+ 	ETA_LiftsFrame();
+ 	ETA_WarriorFrame();
++	ETA_SpiritFrame();
+ 	ETA_OrderFrame();
+ 	ETA_TrapsFrame();
+ 	ETA_WorldRead();
