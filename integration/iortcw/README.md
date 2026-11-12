@@ -3372,3 +3372,18 @@ again. Tested in the church from six starting spots on the landing:
 the five that ran with Shift held each reached the gallery, and the
 game said "You found a secret area"; the one run without Shift fell
 short, into the pocket below the beam.
+
+### 0191 The secret's way up: O leads there, and nothing walks you off
+
+The tester, in build 247, could get no closer than five metres to the
+church's secret: after the first O said the way up starts from the
+wooden landing, every O after it said the same again instead of leading
+there. Now the second O leads to the start like any other place. Tests
+of a player pressing O and W freely during the steps found two
+dangers, both closed: O during the steps led off toward the way out,
+and W then walked off the landing - now O during the steps says the
+step again, and W while not facing the run is let go of, with the edge
+guard on; and a run without Shift, or out of breath, fell short into a
+pocket below the beam - now it is not begun, and says why. Tested: the
+free presser stayed at the start; done as told, from seven metres
+away, twice, each reached the gallery.
