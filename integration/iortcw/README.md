@@ -3529,3 +3529,14 @@ says what he is - "Olaric is the ancient dead warrior Helga raised
 from the tomb: a huge rotting beast. He throws spirits at you, and
 strikes hard up close" (his attacks are AIFunc_Helga_SpiritAttack and
 AIFunc_Helga_Melee). The ghost warning already covered him.
+
+### 0202 U turns you toward the enemy out of sight
+
+In the tomb the tester heard Olaric's steps, pressed U and heard there
+was no enemy - he was behind a pillar - and could not turn fast enough
+by keys to face him as he came out. U with no enemy in sight, the
+nearest still alive within 40 meters, now also turns the player toward
+it: "No enemy in sight. Still alive in the level: 1 Olaric. The
+nearest, Olaric, 28 meters, ahead left. O leads there. Turned toward
+it" - and a moment later "Enemy Olaric, ahead, 26 meters". Tested in
+the tomb's arena.

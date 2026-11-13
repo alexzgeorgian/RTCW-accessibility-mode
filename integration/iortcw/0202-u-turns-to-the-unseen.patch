@@ -1,0 +1,35 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1dea4305..d5f98cb9 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -206,6 +206,7 @@ static void ETA_TurnStopStep(qboolean arrived)
+ #define ETA_AIM_KEY_UP      "996"
+ #define ETA_AIM_KEY_DOWN    "995"
+ static qboolean ETA_EnemiesElsewhere(const char *first);
++static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label);
+ #define ETA_EnemiesElsewhereSay() ETA_EnemiesElsewhere(NULL)
+ #define ETA_AIM_PULSE_LEFT  "989"
+ #define ETA_AIM_PULSE_RIGHT "988"
+@@ -1305,6 +1306,22 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 		                                 below >= 2 ? va(", %d meters below you", below)
+ 		                                 : below <= -2 ? va(", %d meters above you", -below) : ""));
+ 		CG_AccessibilityChoose(nearAt, va("the nearest %s still alive", CG_AccessibilityAiCharName(nearChar)));
++
++		/* Near, and out of sight - behind a pillar, round a corner -
++		   on U: turned toward them, so they are faced as they come into
++		   sight. The tester heard Olaric's steps in the tomb, was told
++		   there was no enemy, and could not turn fast enough by keys. */
++		if (!first && nearDist * ETA_QU_TO_METERS <= 40.0f)
++		{
++			etaAimTarget_t aim;
++
++			memset(&aim, 0, sizeof(aim));
++			aim.entityNum = -1;
++			VectorCopy(nearAt, aim.point);
++			aim.point[2] += 20.0f;
++			ETA_AimStartSnap(&aim, NULL);
++			Q_strcat(text, sizeof(text), ". Turned toward it");
++		}
+ 	}
+ 	ETA_Speech_Say(text);
+ 	return qtrue;
