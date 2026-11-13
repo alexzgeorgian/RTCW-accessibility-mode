@@ -1,0 +1,25 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7cff47f6..74ab8ed9 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2238,7 +2238,9 @@ static const char *ETA_CharacterKind(const entityState_t *es)
+ 	case AICHAR_BLACKGUARD:    return "Black guard";
+ 	case AICHAR_PROTOSOLDIER:  return "Proto soldier";
+ 	case AICHAR_FROGMAN:       return "Frogman";
+-	case AICHAR_HELGA:         return "Helga";
++	/* The game's code names the tomb's boss after Helga, who wakes it;
++	   it is Olaric, the beast she raises, and he kills her. */
++	case AICHAR_HELGA:         return "Olaric";
+ 	case AICHAR_HEINRICH:      return "Heinrich";
+ 	case AICHAR_PARTISAN:      return "Partisan";
+ 	case AICHAR_CIVILIAN:      return "Civilian";
+@@ -9960,6 +9962,9 @@ static const char *ETA_EnemyLooks(int aiChar)
+ 		return "The super soldier is a giant in armour, built in the laboratories, with a Venom gun and a rocket launcher";
+ 	case AICHAR_FROGMAN:
+ 		return "Frogmen are German divers in black rubber suits and masks, with spear guns";
++	case AICHAR_HELGA:
++		return "Olaric is the ancient dead warrior Helga raised from the tomb: a huge rotting beast. He throws spirits at "
++		       "you, and strikes hard up close";
+ 	default:
+ 		return NULL;
+ 	}

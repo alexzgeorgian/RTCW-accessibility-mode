@@ -3518,3 +3518,14 @@ alive in the level: 4 Elite guards. The nearest...". U's own answer
 with no enemy in sight is unchanged and was tested again; this O path
 was not walked end to end in a test, as it needs the whole level
 explored first.
+
+### 0201 Olaric
+
+The tester, at the tomb, remembered its boss as Olaric. The game's code
+calls him Helga (AICHAR_HELGA, ai_boss_helga "helga_zombie"), after
+the woman who raises him; his model is the beast's. The mode said
+"Enemy Helga": it now says "Olaric", and the first time he is in sight
+says what he is - "Olaric is the ancient dead warrior Helga raised
+from the tomb: a huge rotting beast. He throws spirits at you, and
+strikes hard up close" (his attacks are AIFunc_Helga_SpiritAttack and
+AIFunc_Helga_Melee). The ghost warning already covered him.
