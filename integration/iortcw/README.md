@@ -3557,3 +3557,15 @@ were tried for the list and given back to the game's weapon steps at the
 tester's asking. Spoken hints that named L for the list now name K.
 Walked from the boss arena with O to the waypoint on top in the cellar
 in 26 seconds.
+
+### 0204 O leads to the boss
+
+In the tomb the tester wanted O on the boss, U on the zombies about them,
+and L on the waypoint back to the ammo. While a boss (AICHAR_HELGA, the
+tomb's Olaric, or AICHAR_HEINRICH) is alive in the server's list of the
+living (CS_ETA_ENEMIES), O with nothing chosen leads to the nearest boss
+instead of the way out, and O again moves the marker to where the boss is
+now and turns the player toward it. Something chosen - the waypoint on top
+with L - still comes first. Tested in the arena: "Olaric, 30 meters, ahead
+left", then O again "Facing the way. 18 meters, then left. Olaric, 27
+meters", while U locked on to a zombie 7 meters off.

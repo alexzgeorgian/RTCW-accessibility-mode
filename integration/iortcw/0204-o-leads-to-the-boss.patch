@@ -1,0 +1,101 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index d5f98cb9..185d5dd5 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6075,6 +6075,41 @@ static int ETA_DoorToward(float yaw)
+ /* A drop the way goes down, deeper than a stair: faced and said. */
+ #define ETA_CLIMB_DROP_SAID 80.0f
+ 
++/*
++ * A boss still alive in the level - Olaric, Heinrich - the nearest, from
++ * the server's list of the living (CS_ETA_ENEMIES): for O, which leads to
++ * the boss while the level's way out stays shut until it falls. The
++ * tester, in the tomb, wanted O on the boss and U on the zombies about
++ * them, and L on the waypoint back to the ammo.
++ */
++qboolean CG_AccessibilityBossAlive(vec3_t at, int *aichar)
++{
++	const char          *list = CG_ConfigString(CS_ETA_ENEMIES);
++	const playerState_t *ps   = &cg.predictedPlayerState;
++	float               best  = 1.0e9f;
++
++	*aichar = 0;
++	while (list && *list)
++	{
++		int    c;
++		vec3_t there;
++
++		if (sscanf(list, "%d %f %f %f", &c, &there[0], &there[1], &there[2]) == 4
++		    && ( c == AICHAR_HELGA || c == AICHAR_HEINRICH ) && Distance(there, ps->origin) < best)
++		{
++			best    = Distance(there, ps->origin);
++			*aichar = c;
++			VectorCopy(there, at);
++		}
++		list = strchr(list, ';');
++		if (list)
++		{
++			list++;
++		}
++	}
++	return *aichar != 0;
++}
++
+ static void ETA_FaceTheWayUnreachable(void)
+ {
+ 	vec3_t      origin;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2279a631..01e6d749 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6726,6 +6726,38 @@ void CG_AccessibilityWayOut(void)
+ 		return;
+ 	}
+ 
++	/* A boss alive - Olaric, Heinrich: O leads to the boss, the way on
++	   being through it, and again turns toward where the boss is now.
++	   The tester, in the tomb, wanted O on the boss, U on the zombies
++	   about them, and L on the waypoint back to the ammo. */
++	{
++		int         bossChar;
++		const char *ledTo = NULL;
++		vec3_t      markerAt;
++
++		if (CG_AccessibilityBossAlive(point, &bossChar))
++		{
++			const char *who   = CG_AccessibilityAiCharName(bossChar);
++			qboolean    again = ETA_MarkerIsO() && CG_AccessibilityMarkerInfo(markerAt, &ledTo) && ledTo
++			                    && !Q_stricmp(ledTo, who);
++
++			ETA_MarkerSetByO(point, who);
++			if (again)
++			{
++				CG_AccessibilityFaceTheWay();
++				return;
++			}
++			VectorSubtract(point, ps->origin, delta);
++			meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++			ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++			ETA_Speech_Say(va("%s, %d %s, %s%s%s. O again turns you toward %s, U locks on to the nearest enemy", who,
++			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++			                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++			                  height[0] ? ", " : "", height, CG_AccessibilityAiCharName(bossChar)));
++			return;
++		}
++	}
++
+ 	/* Pressed again on the way: turned toward the way, and how far it
+ 	   is - the walking is the player's. Only on O's own way: where T, V
+ 	   or anything else put the marker, O leads on instead. */
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0bf938fa..685cf7a6 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2230,6 +2230,7 @@ void CG_AccessibilityWaypointNext( void );
+ void CG_AccessibilityWaypointPrev( void );
+ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
++qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ int CG_AccessibilityWaysList( int *stamp );
+ qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
