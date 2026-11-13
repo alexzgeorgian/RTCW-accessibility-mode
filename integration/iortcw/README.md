@@ -3540,3 +3540,20 @@ it: "No enemy in sight. Still alive in the level: 1 Olaric. The
 nearest, Olaric, 28 meters, ahead left. O leads there. Turned toward
 it" - and a moment later "Enemy Olaric, ahead, 26 meters". Tested in
 the tomb's arena.
+
+### 0203 The waypoint on top on L, the waypoint list on K
+
+In the boss fight the tester found stepping through L's list too slow to
+get back to the ammo and health below the arena, and asked for one
+waypoint kept on top. Shift+P marks where the player stands as the
+waypoint on top, named for the supplies the map lays out within 15
+meters ("ammo and health"), or else as P names a waypoint. It is kept
+apart from the nine, so P never pushes it out. L now goes straight to
+it - how far, which way, how far up or down - and chooses it, so O leads
+there; "Back at the waypoint on top" is said on arriving. The list moves
+to K, on and round, Shift+K back (accessibilityWaypointList, bind
+generation 27, taken over only from K's old step back). The brackets
+were tried for the list and given back to the game's weapon steps at the
+tester's asking. Spoken hints that named L for the list now name K.
+Walked from the boss arena with O to the waypoint on top in the cellar
+in 26 seconds.

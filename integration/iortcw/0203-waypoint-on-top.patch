@@ -1,0 +1,305 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 3423edeb..12a1c06d 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -850,6 +850,8 @@ void CG_AccessibilityInit( void ) {
+ 	trap_AddCommand( "accessibilityWaypointPlace" );
+ 	trap_AddCommand( "accessibilityWaypointNext" );
+ 	trap_AddCommand( "accessibilityWaypointPrev" );
++	trap_AddCommand( "accessibilityWaypointTop" );
++	trap_AddCommand( "accessibilityWaypointList" );
+ 	trap_AddCommand( "accessibilityExplore" );
+ 	trap_AddCommand( "accessibilityThingsNext" );
+ 	trap_AddCommand( "accessibilityThingsPrev" );
+@@ -913,6 +915,10 @@ qboolean CG_AccessibilityCommand( const char *cmd ) {
+ 		CG_AccessibilityWaypointNext();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityWaypointPrev" ) ) {
+ 		CG_AccessibilityWaypointPrev();
++	} else if ( !Q_stricmp( cmd, "accessibilityWaypointTop" ) ) {
++		CG_AccessibilityWaypointTop();
++	} else if ( !Q_stricmp( cmd, "accessibilityWaypointList" ) ) {
++		CG_AccessibilityWaypointList();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityExplore" ) ) {
+ 		CG_AccessibilityExplore();
+ 	} else if ( !Q_stricmp( cmd, "accessibilityThingsNext" ) ) {
+diff --git a/SP/code/cgame/cg_accessibility_ways.c b/SP/code/cgame/cg_accessibility_ways.c
+index 03fa73d2..4361f341 100644
+--- a/SP/code/cgame/cg_accessibility_ways.c
++++ b/SP/code/cgame/cg_accessibility_ways.c
+@@ -1378,7 +1378,7 @@ static void ETA_WaysSayAll(void)
+ 		ETA_WayText(&eta_ways.ways[i], line, sizeof(line));
+ 		ETA_Speech_Say(line);
+ 	}
+-	ETA_Speech_Say("L goes through them");
++	ETA_Speech_Say("K goes through them");
+ 	ETA_Speech_EndReport();
+ }
+ 
+@@ -1853,7 +1853,7 @@ static void ETA_FrontierFrame(void)
+ 				eta_frontier.target = -1;
+ 				ETA_ExploreProgress(progress, sizeof(progress));
+ 				ETA_Speech_BeginReport();
+-				ETA_Speech_Say(va("New way reached. %s. L finds the next", progress));
++				ETA_Speech_Say(va("New way reached. %s. K finds the next", progress));
+ 				ETA_Speech_EndReport();
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 74ab8ed9..2279a631 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -16,6 +16,7 @@
+ #ifdef FEATURE_ACCESSIBILITY
+ 
+ #include "cg_local.h"
++#include "../client/keycodes.h"
+ 
+ #include "audio/audio_cue_system.h"
+ #include "hud/hud_narrator.h"
+@@ -6542,7 +6543,7 @@ static void ETA_NarrateStuckDetection(playerState_t *ps, playerState_t *ops)
+ 		   already knows. Same report the objectives key gives, so a player
+ 		   who is wedged or lost hears the way out rather than a label for
+ 		   their predicament. */
+-		ETA_Speech_Say("You may be stuck. L says the ways on from here");
++		ETA_Speech_Say("You may be stuck. K says the ways on from here");
+ 	}
+ }
+ 
+@@ -6802,6 +6803,15 @@ static vec3_t eta_waypoints[ETA_MAX_WAYPOINTS];
+ static char   eta_waypointNames[ETA_MAX_WAYPOINTS][48];   /* "locked door", or "" */
+ static int    eta_waypointCount, eta_waypointNext, eta_destination;
+ 
++/* The waypoint on top: Shift+P sets it, L goes straight to it. The tester,
++   in the boss fight, found stepping through a list too slow to get back
++   to the ammo and health below the arena. Kept apart from the nine, so a
++   tenth P never pushes it out. */
++static vec3_t   eta_topPoint;
++static char     eta_topName[48];
++static qboolean eta_topSet;
++#define ETA_TOP_AT  ( ETA_MAX_WAYPOINTS + 1 )   /* eta_trail.waypointAt: at the top one */
++
+ /* Kept as the next waypoint, named; the number it was given. */
+ static int ETA_WaypointAdd(const vec3_t at, const char *name)
+ {
+@@ -6855,7 +6865,7 @@ void CG_AccessibilityWaypointRemember(const vec3_t at, const char *name)
+ 		VectorCopy(ps->origin, spot);
+ 	}
+ 
+-	ETA_Speech_Say(va("Waypoint %d: %s. L finds it again", ETA_WaypointAdd(spot, name), name));
++	ETA_Speech_Say(va("Waypoint %d: %s. K finds it again", ETA_WaypointAdd(spot, name), name));
+ }
+ 
+ /* A waypoint kept by itself where something happened, as it stands:
+@@ -6865,18 +6875,65 @@ int CG_AccessibilityWaypointAt(const vec3_t at, const char *name)
+ 	return ETA_WaypointAdd(at, name);
+ }
+ 
++/* What the map lays out to pick up around a spot, for the waypoint on
++   top: "ammo and health", "health", or "" with neither within 15 meters. */
++static void ETA_SuppliesNear(const vec3_t at, char *out, size_t size)
++{
++	qboolean ammo = qfalse, health = qfalse;
++	int      i;
++
++	out[0] = '\0';
++	ETA_WorldRead();
++	for (i = 0; i < eta_mapItemCount; i++)
++	{
++		gitem_t *it = &bg_itemlist[eta_mapItems[i].item];
++
++		if (eta_mapItems[i].hidden || Distance(at, eta_mapItems[i].at) > 15.0f / ETA_QU_TO_METERS
++		    || fabsf(at[2] - eta_mapItems[i].at[2]) > 96.0f)
++		{
++			continue;
++		}
++		if (it->giType == IT_HEALTH)
++		{
++			health = qtrue;
++		}
++		else if (it->giType == IT_AMMO || it->giType == IT_WEAPON)
++		{
++			ammo = qtrue;
++		}
++	}
++	Q_strncpyz(out, ammo && health ? "ammo and health" : ammo ? "ammo" : health ? "health" : "", size);
++}
++
+ void CG_AccessibilityWaypointPlace(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	etaAimTarget_t      near[16];
+ 	char                name[48];
+ 	int                 count, i;
++	qboolean            top = trap_Key_IsDown(K_SHIFT);
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+ 	{
+ 		return;
+ 	}
+ 
++	/* Shift+P: the waypoint on top, named for the supplies by it when
++	   there are any. */
++	if (top)
++	{
++		ETA_SuppliesNear(ps->origin, name, sizeof(name));
++		if (name[0])
++		{
++			VectorCopy(ps->origin, eta_topPoint);
++			Q_strncpyz(eta_topName, name, sizeof(eta_topName));
++			eta_topSet           = qtrue;
++			eta_trail.waypointAt = ETA_TOP_AT;
++			ETA_Speech_Say(va("Waypoint on top set here, %s. L leads back to it", name));
++			return;
++		}
++	}
++
+ 	/* Named for what is there, as 1428 names its points, so the list
+ 	   says where the player has been: the thing to use nearest it -
+ 	   "by the locked door", "by the stairs up" - or a thing the map names
+@@ -6935,10 +6992,58 @@ void CG_AccessibilityWaypointPlace(void)
+ 		}
+ 	}
+ 
++	if (top)
++	{
++		VectorCopy(ps->origin, eta_topPoint);
++		Q_strncpyz(eta_topName, name, sizeof(eta_topName));
++		eta_topSet           = qtrue;
++		eta_trail.waypointAt = ETA_TOP_AT;
++		ETA_Speech_Say(name[0] ? va("Waypoint on top set, %s. L leads back to it", name)
++		                       : "Waypoint on top set here. L leads back to it");
++		return;
++	}
++
+ 	i = ETA_WaypointAdd(ps->origin, name);
+ 	eta_trail.waypointAt = i;
+-	ETA_Speech_Say(name[0] ? va("Waypoint %d set, %s. L chooses where to go", i, name)
+-	                       : va("Waypoint %d set here. L chooses where to go", i));
++	ETA_Speech_Say(name[0] ? va("Waypoint %d set, %s. K chooses where to go", i, name)
++	                       : va("Waypoint %d set here. K chooses where to go", i));
++}
++
++/*
++ * L: straight to the waypoint on top - said with how far and where, and
++ * chosen, so O leads there, as a waypoint chosen from the list is.
++ */
++void CG_AccessibilityWaypointTop(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              delta;
++	char                height[64];
++	int                 meters;
++
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	if (!eta_topSet)
++	{
++		ETA_Speech_Say("No waypoint on top yet. Shift P sets it where you stand. K steps through the others");
++		return;
++	}
++
++	VectorSubtract(eta_topPoint, ps->origin, delta);
++	meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++	if (meters <= 1)
++	{
++		ETA_Speech_Say(eta_topName[0] ? va("You are at the waypoint on top, %s", eta_topName)
++		               : "You are at the waypoint on top");
++		return;
++	}
++	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++	ETA_Speech_Say(va("Waypoint on top%s%s, %d meters, %s%s%s. O leads there", eta_topName[0] ? ", " : "", eta_topName,
++	                  meters, ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++	                  height[0] ? ", " : "", height));
++	CG_AccessibilityChoose(eta_topPoint, eta_topName[0] ? va("the waypoint on top, %s", eta_topName)
++	                       : "the waypoint on top");
+ }
+ 
+ /* How far a place is from the way out, in metres, a floor up or down
+@@ -7121,6 +7226,12 @@ void CG_AccessibilityWaypointPrev(void)
+ 	ETA_DestinationStep(-1);
+ }
+ 
++/* K: on through the list, going round; Shift+K back. */
++void CG_AccessibilityWaypointList(void)
++{
++	ETA_DestinationStep(trap_Key_IsDown(K_SHIFT) ? -1 : 1);
++}
++
+ /*
+  * The level's things to take or press, as the map lays them out, for T
+  * (cg_accessibility_things.c): its items, its switches and buttons - not
+@@ -7322,7 +7433,11 @@ static void ETA_TrailFrame(void)
+ 	{
+ 		int at = 0;
+ 
+-		for (i = 0; i < eta_waypointCount; i++)
++		if (eta_topSet && ETA_TrailClose(ps->origin, eta_topPoint, ETA_WAYPOINT_AT))
++		{
++			at = ETA_TOP_AT;
++		}
++		for (i = 0; !at && i < eta_waypointCount; i++)
+ 		{
+ 			if (ETA_TrailClose(ps->origin, eta_waypoints[i], ETA_WAYPOINT_AT))
+ 			{
+@@ -7336,9 +7451,17 @@ static void ETA_TrailFrame(void)
+ 			eta_trail.saidAt     = cg.time;
+ 			VectorCopy(ps->origin, eta_trail.saidFrom);
+ 			ETA_Speech_BeginReport();
+-			ETA_Speech_Say(eta_waypointNames[at - 1][0]
+-			               ? va("Back at waypoint %d, %s", at, eta_waypointNames[at - 1])
+-			               : va("Back at waypoint %d", at));
++			if (at == ETA_TOP_AT)
++			{
++				ETA_Speech_Say(eta_topName[0] ? va("Back at the waypoint on top, %s", eta_topName)
++				               : "Back at the waypoint on top");
++			}
++			else
++			{
++				ETA_Speech_Say(eta_waypointNames[at - 1][0]
++				               ? va("Back at waypoint %d, %s", at, eta_waypointNames[at - 1])
++				               : va("Back at waypoint %d", at));
++			}
+ 			ETA_Speech_EndReport();
+ 			return;
+ 		}
+@@ -7415,6 +7538,7 @@ void CG_AccessibilityWorldInit(void)
+ {
+ 	eta_worldRead     = qfalse;
+ 	eta_waypointCount = eta_waypointNext = 0;
++	eta_topSet        = qfalse;
+ 	eta_destination      = -1;
+ 	eta_destinationStamp = -2;
+ 	memset(&eta_trail, 0, sizeof(eta_trail));
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0b89007f..0bf938fa 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2228,6 +2228,8 @@ void CG_AccessibilityEnemyLock_f( void );
+ void CG_AccessibilityWaypointPlace( void );
+ void CG_AccessibilityWaypointNext( void );
+ void CG_AccessibilityWaypointPrev( void );
++void CG_AccessibilityWaypointTop( void );
++void CG_AccessibilityWaypointList( void );
+ int CG_AccessibilityWaysList( int *stamp );
+ qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index fc03ba3d..88a5fcd9 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8427,6 +8427,13 @@ void UI_AccessibilityInstallBinds( void ) {
+ 		   onto, where the floor ends and what is across. M, let go of
+ 		   from the enemy callouts, so only where it is empty. */
+ 		{ 'm',          "accessibilityAhead",         26, NULL },
++		/* L straight to the waypoint on top (Shift+P): the tester, in
++		   the boss fight, found stepping through L's list too slow to get
++		   back to the ammo. The list is on K, round and on, Shift+K back;
++		   the brackets stay the game's own weapon steps, as the tester
++		   asked. */
++		{ 'l',          "accessibilityWaypointTop",   27, "accessibilityWaypointNext" },
++		{ 'k',          "accessibilityWaypointList",  27, "accessibilityWaypointPrev" },
+ 	};
+ 
+ 	/*
