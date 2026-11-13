@@ -1,0 +1,213 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 0e4183d5..26416599 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -205,6 +205,7 @@ static void ETA_TurnStopStep(qboolean arrived)
+  */
+ #define ETA_AIM_KEY_UP      "996"
+ #define ETA_AIM_KEY_DOWN    "995"
++static void ETA_EnemiesElsewhereSay(void);
+ #define ETA_AIM_PULSE_LEFT  "989"
+ #define ETA_AIM_PULSE_RIGHT "988"
+ #define ETA_AIM_PULSE_UP    "987"
+@@ -1178,8 +1179,7 @@ static void ETA_EnemyChooseStep(int step)
+ 	if (count <= 0)
+ 	{
+ 		eta_enemyChoose.held = qfalse;
+-		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say("No enemy in sight");
++		ETA_EnemiesElsewhereSay();
+ 		return;
+ 	}
+ 
+@@ -1224,6 +1224,86 @@ void CG_AccessibilityEnemyPrev_f(void)
+ 
+ /* Turns to a thing to use and says what it is - or, with no label,
+    quietly, leaving the game's own use icon to name it. */
++/*
++ * No enemy in sight: those still alive in the level, from the server -
++ * how many of each kind, and the nearest, chosen for O. The tester could
++ * not leave the church, its last objective counting twenty Elite guards
++ * dead, with four still alive in rooms left behind.
++ */
++static void ETA_EnemiesElsewhereSay(void)
++{
++	const char *list = CG_ConfigString(CS_ETA_ENEMIES);
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int         kinds[64], counts[64], nk = 0, total = 0, i;
++	int         nearChar = 0;
++	float       nearDist = 1.0e9f;
++	vec3_t      nearAt;
++	char        text[512];
++
++	while (list && *list)
++	{
++		int    c;
++		vec3_t at;
++
++		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4)
++		{
++			for (i = 0; i < nk && kinds[i] != c; i++)
++			{
++			}
++			if (i == nk && nk < 64)
++			{
++				kinds[nk] = c;
++				counts[nk++] = 0;
++			}
++			if (i < nk)
++			{
++				counts[i]++;
++			}
++			total++;
++			if (Distance(at, ps->origin) < nearDist)
++			{
++				nearDist = Distance(at, ps->origin);
++				nearChar = c;
++				VectorCopy(at, nearAt);
++			}
++		}
++		list = strchr(list, ';');
++		if (list)
++		{
++			list++;
++		}
++	}
++	ETA_HudNarrator_HoldPassive(cg.time);
++	if (!total)
++	{
++		ETA_Speech_Say("No enemy in sight, and none left alive that the level has brought in yet");
++		return;
++	}
++	Q_strncpyz(text, "No enemy in sight. Still alive in the level: ", sizeof(text));
++	for (i = 0; i < nk; i++)
++	{
++		const char *name = CG_AccessibilityAiCharName(kinds[i]);
++
++		Q_strcat(text, sizeof(text), va("%s%d %s%s", i ? ", " : "", counts[i], name,
++		                                 counts[i] > 1 && name[strlen(name) - 1] != 's' ? "s" : ""));
++	}
++	{
++		vec3_t to;
++		int    meters, below;
++
++		VectorSubtract(nearAt, ps->origin, to);
++		meters = (int)( nearDist * ETA_QU_TO_METERS + 0.5f );
++		below  = (int)( -to[2] * ETA_QU_TO_METERS + ( to[2] < 0 ? 0.5f : -0.5f ) );
++		Q_strcat(text, sizeof(text), va(". The nearest, %s, %d meters, %s%s. O leads there",
++		                                 CG_AccessibilityAiCharName(nearChar), meters,
++		                                 ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(nearAt)),
++		                                 below >= 2 ? va(", %d meters below you", below)
++		                                 : below <= -2 ? va(", %d meters above you", -below) : ""));
++		CG_AccessibilityChoose(nearAt, va("the nearest %s still alive", CG_AccessibilityAiCharName(nearChar)));
++	}
++	ETA_Speech_Say(text);
++}
++
+ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+ {
+ 	/* A tap turn still running would fight this for the same keys. */
+@@ -2415,7 +2495,8 @@ void CG_AccessibilityAimLockDown_f(void)
+ 	{
+ 		eta_aim.entityNum = -1;
+ 		eta_aim.saidLost  = qtrue;
+-		ETA_Speech_Say("No enemy in sight");
++		ETA_AimStop();
++		ETA_EnemiesElsewhereSay();
+ 	}
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 99f8988c..7cff47f6 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2246,6 +2246,18 @@ static const char *ETA_CharacterKind(const entityState_t *es)
+ 	}
+ }
+ 
++/* What a character is called, by its kind alone: for the enemies alive
++   elsewhere in the level, which the client does not see. */
++const char *CG_AccessibilityAiCharName(int aiChar)
++{
++	entityState_t es;
++
++	memset(&es, 0, sizeof(es));
++	es.aiChar = aiChar;
++	return ETA_CharacterKind(&es);
++}
++
++
+ /**
+  * @brief Whether nothing solid stands between the eye and a point - the
+  * same test sight makes. Players, bodies and items do not block it.
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 4d915775..8a683202 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2448,6 +2448,7 @@ qboolean CG_AccessibilitySecretJumpActive( void );
+ qboolean CG_AccessibilitySecretJumpSayStep( void );
+ const char *CG_AccessibilityLandmarkText( const vec3_t at );
+ void CG_AccessibilityAhead_f( void );
++const char *CG_AccessibilityAiCharName( int aiChar );
+ int CG_AccessibilityGateState( int gate, const vec3_t from, qboolean *moving );
+ qboolean CG_AccessibilityDoorOpenUnseen( int model );
+ qboolean CG_AccessibilityPlateBox( int index, vec3_t mins, vec3_t maxs );
+diff --git a/SP/code/game/bg_public.h b/SP/code/game/bg_public.h
+index 6fde0dcc..c00debaa 100644
+--- a/SP/code/game/bg_public.h
++++ b/SP/code/game/bg_public.h
+@@ -198,6 +198,11 @@ typedef enum {
+ #if ( CS_ETA_TRIGGERS ) >= MAX_CONFIGSTRINGS
+ #error overflow: CS_ETA_TRIGGERS
+ #endif
++// [Accessibility]: the enemies alive in the level, and where (g_main.c)
++#define CS_ETA_ENEMIES      ( CS_ETA_TRIGGERS + 1 )
++#if ( CS_ETA_ENEMIES ) >= MAX_CONFIGSTRINGS
++#error overflow: CS_ETA_ENEMIES
++#endif
+ #endif
+ 
+ #if ( CS_MAX ) > MAX_CONFIGSTRINGS
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index 82d03846..1bd2336b 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2518,6 +2518,38 @@ static void G_AccessibilityTriggers( void ) {
+ 	if ( strcmp( state, sent ) ) {
+ 		trap_SetConfigstring( CS_ETA_TRIGGERS, state );
+ 	}
++
++	/*
++	 * The enemies alive in the level and in it now - spawned, not yet
++	 * killed - with what each is and where: "aichar x y z;" each. The
++	 * tester could not leave the church, its last objective counting
++	 * twenty Elite guards dead, and did not know four were still alive
++	 * in rooms they had left behind: the client knows only those in its
++	 * sight. Not the allies (team 1) nor the neutral (7).
++	 */
++	{
++		char list[1024], one[48], was[1024];
++		int  n = 0;
++
++		list[0] = '\0';
++		for ( i = 0, ent = g_entities; i < level.maxclients && n < 40; i++, ent++ ) {
++			if ( !ent->inuse || !( ent->r.svFlags & SVF_CASTAI ) || !ent->r.linked || ent->health <= 0
++				 || ent->aiTeam == 1 || ent->aiTeam == 7 ) {
++				continue;
++			}
++			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", ent->aiCharacter, (int)ent->r.currentOrigin[0],
++						 (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
++			if ( strlen( list ) + strlen( one ) >= sizeof( list ) ) {
++				break;
++			}
++			Q_strcat( list, sizeof( list ), one );
++			n++;
++		}
++		trap_GetConfigstring( CS_ETA_ENEMIES, was, sizeof( was ) );
++		if ( strcmp( list, was ) ) {
++			trap_SetConfigstring( CS_ETA_ENEMIES, list );
++		}
++	}
+ }
+ #endif
+ 

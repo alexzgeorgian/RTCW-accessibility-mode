@@ -3479,3 +3479,19 @@ W" the moment its turn is done (within a degree and a half). Tested
 from the tester's save with a player who holds W only after hearing
 "Turned", at 76 and 30 frames a second: each reached the secret
 gallery.
+
+### 0198 The enemies still alive
+
+The tester had done everything in the church they knew of and still
+could not leave: its third objective counts twenty Elite guards dead
+(maps/church.script, objective3), the way out works only with all three
+objectives, and in their save four Elite guards were still alive in
+rooms behind them. The client knows only the enemies in its sight. The
+server now sends, every half second, the enemies alive and in the level
+now (spawned, not killed; not allies or neutrals), each with its kind
+and place (CS_ETA_ENEMIES). U with no enemy in sight says how many are
+left and of what kind, and where the nearest is, and chooses it for O:
+"No enemy in sight. Still alive in the level: 4 Elite guards. The
+nearest, Elite guard, 21 meters, ahead, 12 meters below you. O leads
+there". Tested from the tester's save: from the wooden landing U said
+so and O led toward the nearest.
