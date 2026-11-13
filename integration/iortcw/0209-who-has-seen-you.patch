@@ -1,0 +1,171 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 0bedbe26..20d86394 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3084,6 +3084,146 @@ static int eta_buildBusyUntil;
+ #define ETA_BUILD_BUSY_MS 2500
+ 
+ 
++/*
++ * Whether the enemies have seen the player, from the state the game sends
++ * with each (entityState_t aiState). The tester, in the forest, where an
++ * alarm sounded fails the mission, wanted most to know who had not seen
++ * them yet: said with each enemy as they come into sight, and the moment
++ * one sees them.
++ */
++static const char *ETA_AwareWords(int entityNum)
++{
++	switch (cg_entities[entityNum].currentState.aiState)
++	{
++	case AISTATE_RELAXED:
++		return "has not seen you";
++	case AISTATE_QUERY:
++		return "heard something";
++	case AISTATE_ALERT:
++		return "alert, searching";
++	default:
++		return "has seen you";
++	}
++}
++
++/* An enemy coming into sight - "Enemy Soldier, ahead, 30 meters" - said
++   with whether they have seen the player; several at once, with how many
++   have. */
++static void ETA_AwareAddSeen(char *said, size_t size, const ETA_AwareThing *list, int count)
++{
++	const char *m;
++	int         meters = -1, i, best = -1, enemies = 0, seen = 0;
++	float       bestOff = 1.0e9f;
++	qboolean    group;
++
++	if (strstr(said, " closer, ") || strstr(said, "out of sight") || strstr(said, "moving away"))
++	{
++		return;
++	}
++	group = (qboolean)( strstr(said, " enemies, nearest ") != NULL );
++	if (!group && Q_stricmpn(said, "Enemy ", 6))
++	{
++		return;
++	}
++	m = strstr(said, " meter");
++	if (m)
++	{
++		while (m > said && m[-1] >= '0' && m[-1] <= '9')
++		{
++			m--;
++		}
++		meters = atoi(m);
++	}
++	for (i = 0; i < count; i++)
++	{
++		if (list[i].kind != ETA_AWARE_ENEMY || list[i].id < 0 || list[i].id >= MAX_GENTITIES)
++		{
++			continue;
++		}
++		enemies++;
++		if (cg_entities[list[i].id].currentState.aiState == AISTATE_COMBAT)
++		{
++			seen++;
++		}
++		if (fabsf(list[i].meters - (float)meters) < bestOff
++		    && ( group || !list[i].name[0] || strstr(said, list[i].name) ))
++		{
++			bestOff = fabsf(list[i].meters - (float)meters);
++			best    = i;
++		}
++	}
++	if (best < 0)
++	{
++		return;
++	}
++	if (group)
++	{
++		Q_strcat(said, size, seen == 0 ? ", none has seen you" : seen >= enemies ? ", all have seen you"
++		         : va(", %d %s seen you", seen, seen == 1 ? "has" : "have"));
++		return;
++	}
++	Q_strcat(said, size, va(", %s", ETA_AwareWords(list[best].id)));
++}
++
++/*
++ * The moment an enemy sees the player, after a calm: "Soldier has seen
++ * you, ahead left, 20 meters". Only the first, so a fight already going
++ * does not say it of each enemy as they join.
++ */
++#define ETA_SEEN_CALM_MS 15000
++
++static void ETA_AwareSeenWatch(void)
++{
++	static int known[MAX_CLIENTS];   /* aiState + 1, or 0 not known */
++	static int combatAt;
++	int        i, first = -1;
++	float      firstFar = 1.0e9f;
++	qboolean   calm = (qboolean)( !combatAt || cg.time < combatAt || cg.time - combatAt > ETA_SEEN_CALM_MS );
++
++	for (i = 0; i < MAX_CLIENTS; i++)
++	{
++		const centity_t     *cent = &cg_entities[i];
++		const entityState_t *es   = &cent->currentState;
++		int                 was   = known[i];
++
++		if (!cent->currentValid || i == cg.snap->ps.clientNum || !es->aiChar || (es->eFlags & EF_DEAD)
++		    || !ETA_SeenAsEnemy(es))
++		{
++			known[i] = 0;
++			continue;
++		}
++		known[i] = es->aiState + 1;
++		if (es->aiState != AISTATE_COMBAT)
++		{
++			continue;
++		}
++		if (was && was != AISTATE_COMBAT + 1
++		    && Distance(cent->lerpOrigin, cg.snap->ps.origin) < firstFar)
++		{
++			firstFar = Distance(cent->lerpOrigin, cg.snap->ps.origin);
++			first    = i;
++		}
++	}
++
++	if (first >= 0 && calm)
++	{
++		int meters = (int)(firstFar * ETA_QU_TO_METERS + 0.5f);
++
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("%s has seen you, %s, %d %s", ETA_CharacterKind(&cg_entities[first].currentState),
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cg_entities[first].lerpOrigin)),
++		                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++	}
++	for (i = 0; i < MAX_CLIENTS; i++)
++	{
++		if (known[i] == AISTATE_COMBAT + 1)
++		{
++			combatAt = cg.time;
++			break;
++		}
++	}
++}
++
+ static void ETA_NarrateAwareness(qboolean held)
+ {
+ 	static int     lastSerial = -1;
+@@ -3108,6 +3248,11 @@ static void ETA_NarrateAwareness(qboolean held)
+ 		return;
+ 	}
+ 
++	if (eta_playerCallouts.integer)
++	{
++		ETA_AwareSeenWatch();
++	}
++
+ 	if (held)
+ 	{
+ 		return;
+@@ -3124,6 +3269,7 @@ static void ETA_NarrateAwareness(qboolean held)
+ 	if (ETA_HudNarrator_UpdateAwareness(list, count, cg.time, quiet, building ? 0 : 1,
+ 	                                    said, sizeof(said)))
+ 	{
++		ETA_AwareAddSeen(said, sizeof(said), list, count);
+ 		ETA_HudNarrator_SpeakAwareness(said);
+ 	}
+ }

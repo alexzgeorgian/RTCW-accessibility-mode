@@ -3616,3 +3616,16 @@ progress is forgotten too, so no "Fight over" is said for it. The
 player's own waypoints and the waypoint on top stay. Tested: a fight
 waypoint and a P waypoint, then dying - only the P one was left, as
 waypoint 1.
+
+### 0209 Who has seen you, said by itself
+
+In the forest, where a sounded alarm fails the mission, the tester wanted
+most to know which enemies had not seen them yet, without a key. The
+callout for an enemy coming into sight now ends with what the game sends
+of its alert state (entityState_t aiState): "Enemy Soldier, ahead, 19
+meters, has not seen you" - or heard something, alert and searching, has
+seen you; several arriving together, "none has seen you" or how many
+have. And the moment the first enemy turns to fighting the player after
+fifteen calm seconds: "Soldier has seen you, ahead, 19 meters" - only the
+first, so a fight already going does not say it of each enemy joining.
+Tested in the forest with notarget on, then off.
