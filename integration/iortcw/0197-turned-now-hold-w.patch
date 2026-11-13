@@ -1,0 +1,73 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index a3a6ee3d..0e4183d5 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3885,6 +3885,7 @@ static struct
+ 	qboolean              jumpHeld;
+ 	qboolean              walked;      /* step 3: W pressed, off the wall */
+ 	qboolean              airborne;    /* off the ground since the jump or walk */
++	qboolean              saidTurned;  /* "Turned" said for this step */
+ 	const etaSecretJump_t *leadTo;     /* O leading to the start: armed on arrival */
+ 	int                   at;          /* when armed, or jumped */
+ 	int                   pulseAt;
+@@ -4005,9 +4006,23 @@ static void ETA_SecretJumpStep(int step, float yaw)
+ 	eta_sj.step   = step;
+ 	eta_sj.yaw    = yaw;
+ 	eta_sj.jumped = qfalse;
+-	eta_sj.walked   = qfalse;
+-	eta_sj.airborne = qfalse;
+-	eta_sj.at       = cg.time;
++	eta_sj.walked     = qfalse;
++	eta_sj.airborne   = qfalse;
++	eta_sj.saidTurned = qfalse;
++	eta_sj.at         = cg.time;
++}
++
++/* The turn done, said: the tester could not tell when the mode had
++   finished turning them, and turned by themselves meanwhile. */
++static void ETA_SecretJumpTurnedSay(void)
++{
++	if (eta_sj.saidTurned)
++	{
++		return;
++	}
++	eta_sj.saidTurned = qtrue;
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say("Turned. Now hold W");
+ }
+ 
+ /* At the start of the run: armed, the line taken from where the player
+@@ -4164,7 +4179,8 @@ static qboolean ETA_SecretJumpTurn(void)
+ 		eta_sj.pulseAt = cg.time;
+ 		trap_SendConsoleCommand(va("+%s %s 1000\n-%s %s %d\n", turn, key, turn, key, 1000 + ms));
+ 	}
+-	return qfalse;
++	/* Within a degree and a half: turned, for the words and for W. */
++	return (qboolean)( fabsf(err) <= 1.5f );
+ }
+ 
+ /*
+@@ -4349,7 +4365,10 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 		if (cmd->forwardmove <= 0)
+ 		{
+ 			eta_sj.yaw = vectoyaw(to);
+-			ETA_SecretJumpTurn();
++			if (ETA_SecretJumpTurn())
++			{
++				ETA_SecretJumpTurnedSay();
++			}
+ 			return qfalse;
+ 		}
+ 		if (fabsf(AngleSubtract(eta_sj.yaw, ps->viewangles[YAW])) > 3.0f)
+@@ -4361,7 +4380,10 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 	}
+ 	if (cmd->forwardmove <= 0)
+ 	{
+-		ETA_SecretJumpTurn();
++		if (ETA_SecretJumpTurn())
++		{
++			ETA_SecretJumpTurnedSay();
++		}
+ 		return qtrue;
+ 	}
+ 	if (!onGround)

@@ -3467,3 +3467,15 @@ player's at the start of the run stopped the steps and the view stayed
 where they turned it; the player who does as told still reached the
 gallery twice from the tester's save, with no false stop from the
 mode's own turning.
+
+### 0197 "Turned. Now hold W"
+
+The tester's turns, on top of the wall, mostly ended facing the east
+wall, not the beam: the steps said "stand still while you are turned"
+but never when the turn was done, so they turned by themselves
+meanwhile, against the mode's turn. The mode's own turn lands right at
+20, 30, 60 and 76 frames a second. Now each step says "Turned. Now hold
+W" the moment its turn is done (within a degree and a half). Tested
+from the tester's save with a player who holds W only after hearing
+"Turned", at 76 and 30 frames a second: each reached the secret
+gallery.
