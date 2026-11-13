@@ -1,0 +1,105 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 8d4887f4..3423edeb 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -570,6 +570,18 @@ const char *CG_AccessibilityObjectiveText( int n ) {
+ 	return eta.objectiveText[n - 1];
+ }
+ 
++/* The first objective not met, from 1, or 0 with none left. */
++int CG_AccessibilityFirstObjectiveLeft( void ) {
++	int i, count = CG_AccessibilityObjectiveCount(), bits = CG_AccessibilityObjectiveBits();
++
++	for ( i = 0; i < count && i < ETA_MAX_OBJECTIVES; i++ ) {
++		if ( !( bits & ( 1 << i ) ) ) {
++			return i + 1;
++		}
++	}
++	return 0;
++}
++
+ static int CG_AccessibilityObjectiveBits( void ) {
+ 	char value[16];
+ 	int i, bits = 0;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 26416599..1dea4305 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -205,7 +205,8 @@ static void ETA_TurnStopStep(qboolean arrived)
+  */
+ #define ETA_AIM_KEY_UP      "996"
+ #define ETA_AIM_KEY_DOWN    "995"
+-static void ETA_EnemiesElsewhereSay(void);
++static qboolean ETA_EnemiesElsewhere(const char *first);
++#define ETA_EnemiesElsewhereSay() ETA_EnemiesElsewhere(NULL)
+ #define ETA_AIM_PULSE_LEFT  "989"
+ #define ETA_AIM_PULSE_RIGHT "988"
+ #define ETA_AIM_PULSE_UP    "987"
+@@ -1230,7 +1231,7 @@ void CG_AccessibilityEnemyPrev_f(void)
+  * not leave the church, its last objective counting twenty Elite guards
+  * dead, with four still alive in rooms left behind.
+  */
+-static void ETA_EnemiesElsewhereSay(void)
++static qboolean ETA_EnemiesElsewhere(const char *first)
+ {
+ 	const char *list = CG_ConfigString(CS_ETA_ENEMIES);
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -1273,13 +1274,17 @@ static void ETA_EnemiesElsewhereSay(void)
+ 			list++;
+ 		}
+ 	}
+-	ETA_HudNarrator_HoldPassive(cg.time);
+ 	if (!total)
+ 	{
+-		ETA_Speech_Say("No enemy in sight, and none left alive that the level has brought in yet");
+-		return;
++		if (!first)
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("No enemy in sight, and none left alive that the level has brought in yet");
++		}
++		return qfalse;
+ 	}
+-	Q_strncpyz(text, "No enemy in sight. Still alive in the level: ", sizeof(text));
++	ETA_HudNarrator_HoldPassive(cg.time);
++	Q_strncpyz(text, first ? first : "No enemy in sight. Still alive in the level: ", sizeof(text));
+ 	for (i = 0; i < nk; i++)
+ 	{
+ 		const char *name = CG_AccessibilityAiCharName(kinds[i]);
+@@ -1302,6 +1307,7 @@ static void ETA_EnemiesElsewhereSay(void)
+ 		CG_AccessibilityChoose(nearAt, va("the nearest %s still alive", CG_AccessibilityAiCharName(nearChar)));
+ 	}
+ 	ETA_Speech_Say(text);
++	return qtrue;
+ }
+ 
+ static void ETA_AimStartSnap(const etaAimTarget_t *target, const char *label)
+@@ -6221,6 +6227,16 @@ static void ETA_FaceTheWayUnreachable(void)
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(place))));
+ 				return;
+ 			}
++			/* No objective left that is a place - the church's last
++			   counts the Elite guards killed: on to the nearest enemy
++			   still alive. The tester was not led to it. */
++			if (CG_AccessibilityFirstObjectiveLeft()
++			    && ETA_EnemiesElsewhere(va("Everything open is explored. Your next objective%s%s. Still alive in "
++			                               "the level: ", CG_AccessibilityObjectiveText(CG_AccessibilityFirstObjectiveLeft())[0]
++			                               ? ": " : "", CG_AccessibilityObjectiveText(CG_AccessibilityFirstObjectiveLeft()))))
++			{
++				return;
++			}
+ 		}
+ 		/* First the openings not yet explored, as X's; only when
+ 		   none is left, the rooms where things are still to be
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0789d7b7..0b89007f 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2320,6 +2320,7 @@ char CG_AccessibilityDoorLive( int model );
+ void CG_AccessibilityAreasNoWayForget( void );
+ qboolean CG_AccessibilityObjectiveDone( int n );
+ const char *CG_AccessibilityObjectiveText( int n );
++int CG_AccessibilityFirstObjectiveLeft( void );
+ qboolean CG_AccessibilityObjectivePlace( const vec3_t from, vec3_t out, int *objective );
+ qboolean CG_AccessibilityGateSwitch( int gate, const vec3_t from, vec3_t out );
+ int CG_AccessibilityGateInWay( const vec3_t from, const vec3_t toward, float within, vec3_t switchAt );

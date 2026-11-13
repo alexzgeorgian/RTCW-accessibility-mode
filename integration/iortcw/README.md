@@ -3504,3 +3504,17 @@ knew only which secret was found as it was found, not after a load.
 Now when the game's own count says every secret of the level is found,
 none is listed. Tested: secret found, saved, loaded - the landing's
 area said "No things left here".
+
+### 0200 O on to the enemies left
+
+O, with everything open explored and the way out not open, led to an
+objective only where the level's script meets it at a place; the
+church's last objective counts the Elite guards killed, and O did not
+lead to it. Now, with no objective place left and an objective not
+met, O says the next objective in the notebook's words and leads to
+the nearest enemy still alive: "Everything open is explored. Your next
+objective: Eliminate all of von Bulow's personal Elite guards. Still
+alive in the level: 4 Elite guards. The nearest...". U's own answer
+with no enemy in sight is unchanged and was tested again; this O path
+was not walked end to end in a test, as it needs the whole level
+explored first.
