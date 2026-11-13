@@ -1,0 +1,41 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 04de250b..a3a6ee3d 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -4124,6 +4124,7 @@ static void ETA_SecretJumpHoldTurn(int way)
+ 	{
+ 		trap_SendConsoleCommand(va("-%s %s\n", eta_sjHeldTurn > 0 ? "left" : "right",
+ 		                           eta_sjHeldTurn > 0 ? ETA_SJ_KEY_LEFT : ETA_SJ_KEY_RIGHT));
++		eta_sj.pulseAt = cg.time;   /* the turn's last frames are the mode's, not the player's */
+ 	}
+ 	if (way)
+ 	{
+@@ -4225,6 +4226,28 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 	}
+ 
+ 	/* Down again after a jump, or a walk off: where to. */
++	/* The player turning by themselves - not the mode's own turn keys or
++	   nudges - lets the steps go: the tester, on top of the wall four
++	   metres from the secret, could not turn, the mode turning them back
++	   each time. Their keys are theirs again; O starts the steps anew. */
++	{
++		static float lastYaw;
++		static int   lastAt;
++		float        yawNow = ps->viewangles[YAW];
++
++		if (!eta_sj.jumped && !eta_sj.walked && !eta_sjHeldTurn && cg.time - eta_sj.pulseAt > 200
++		    && cg.time - lastAt < 200 && cg.time >= lastAt && fabsf(AngleSubtract(yawNow, lastYaw)) > 1.5f)
++		{
++			ETA_SecretJumpDisarm();
++			eta_sj.leadTo = NULL;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("You turned, so the steps are stopped, and your keys are yours. O starts them again");
++			lastAt = 0;
++			return qfalse;
++		}
++		lastYaw = yawNow;
++		lastAt  = cg.time;
++	}
+ 	if (( eta_sj.jumped || eta_sj.walked ) && !onGround)
+ 	{
+ 		eta_sj.airborne = qtrue;

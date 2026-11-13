@@ -3454,3 +3454,16 @@ mid-way. Tested from the tester's save with a player that does only
 what is said - stand still while turned, then hold W until the next
 step is said - at 76 and 60 frames a second and three times more:
 each reached the secret gallery.
+
+### 0196 Your turn wins
+
+On top of the wall, four metres from the church's secret, the tester
+could not turn: while the steps of the way up ran, the mode turned
+them back to the step's heading each time. Now the player turning by
+themselves - any turn that is not the mode's own held turn or nudge -
+stops the steps at once: "You turned, so the steps are stopped, and
+your keys are yours. O starts them again". Tested: a turn of the
+player's at the start of the run stopped the steps and the view stayed
+where they turned it; the player who does as told still reached the
+gallery twice from the tester's save, with no false stop from the
+mode's own turning.
