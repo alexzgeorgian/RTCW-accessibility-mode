@@ -1,0 +1,89 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 11be6b9a..4a6caeaa 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -146,6 +146,14 @@ static struct
+ 	vec3_t      fightFrom;
+ } eta_things;
+ 
++/* A game loaded: a fight going on before it is undone, and no "Fight
++   over" is said for it, nor a waypoint kept where it began. */
++void CG_AccessibilityThingsFightForget(void)
++{
++	eta_things.fighting    = qfalse;
++	eta_things.lastEnemyAt = 0;
++}
++
+ static qboolean ETA_ThingNear(const vec3_t a, const vec3_t b, float near)
+ {
+ 	float dx = a[0] - b[0], dy = a[1] - b[1];
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 0d6891a7..0bedbe26 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8342,6 +8342,44 @@ static void ETA_OrderReset(qboolean say)
+  * tester, back from dying, took the puzzle to be lost. Forgotten, without
+  * a word, and each learnt again as it is seen.
+  */
++/* The waypoints kept by themselves where a fight began: a game loaded,
++   those fights are undone. The tester, back from dying, still had them
++   on K for fights that had not happened. The player's own, and the
++   waypoint on top, stay: the places are there still. */
++static void ETA_WaypointsForgetFights(void)
++{
++	vec3_t at[ETA_MAX_WAYPOINTS];
++	char   names[ETA_MAX_WAYPOINTS][48];
++	int    kept = 0, i, first;
++
++	first = eta_waypointCount < ETA_MAX_WAYPOINTS ? 0 : eta_waypointNext;
++	for (i = 0; i < eta_waypointCount; i++)
++	{
++		int k = (first + i) % ETA_MAX_WAYPOINTS;
++
++		if (!Q_stricmp(eta_waypointNames[k], "where the fight began"))
++		{
++			continue;
++		}
++		VectorCopy(eta_waypoints[k], at[kept]);
++		Q_strncpyz(names[kept], eta_waypointNames[k], sizeof(names[0]));
++		kept++;
++	}
++	if (kept == eta_waypointCount)
++	{
++		return;
++	}
++	for (i = 0; i < kept; i++)
++	{
++		VectorCopy(at[i], eta_waypoints[i]);
++		Q_strncpyz(eta_waypointNames[i], names[i], sizeof(eta_waypointNames[0]));
++	}
++	eta_waypointCount    = kept;
++	eta_waypointNext     = kept % ETA_MAX_WAYPOINTS;
++	eta_destination      = -1;
++	eta_trail.waypointAt = 0;
++}
++
+ static void ETA_LoadedForget(void)
+ {
+ 	static int lastStart;
+@@ -8352,6 +8390,8 @@ static void ETA_LoadedForget(void)
+ 		return;
+ 	}
+ 	lastStart = cgs.levelStartTime;
++	ETA_WaypointsForgetFights();
++	CG_AccessibilityThingsFightForget();
+ 	for (m = 0; m < MAX_MODELS; m++)
+ 	{
+ 		eta_switchSeen[m]     = qfalse;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 860b0d67..3e1c7fff 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2232,6 +2232,7 @@ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ qboolean CG_AccessibilityLeadBusy( void );
++void CG_AccessibilityThingsFightForget( void );
+ int CG_AccessibilityWaysList( int *stamp );
+ qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );

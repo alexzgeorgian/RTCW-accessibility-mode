@@ -354,7 +354,10 @@ back to the menu you came from.
 - "Fight over. Waypoint 2 is where it began. T finds what is left, O
   leads on", when no enemy has been in sight for a few seconds after a
   fight that took you away from where you were. Where it began is kept
-  as a waypoint, so K can lead you back there; O still leads on.
+  as a waypoint, so K can lead you back there; O still leads on. When
+  you die or load a save, those fights are undone, and their waypoints
+  are forgotten; the waypoints you set yourself, and the one on top,
+  stay.
 - "Mission complete", with the same figures, as the screen fades out
   at the end of a mission.
 - Each secret area and each piece of treasure as you find it, with how

@@ -3604,3 +3604,15 @@ chooses the waypoint on top and leads there at once, as O does with a
 choice (CG_AccessibilityWayOut): "Facing the way. The waypoint on top,
 ammo and health, 31 meters, 2 meters below you". L or O again turns
 toward it. Tested in the arena with U locked on a zombie between.
+
+### 0208 Fight waypoints forgotten when a game is loaded
+
+The tester, back from dying, still had "where the fight began" waypoints
+on K for fights the reload had undone: the cgame lives on through a
+load, and so did the waypoints. When a game is loaded (ETA_LoadedForget,
+on a new level start time), the waypoints kept by themselves where a
+fight began are dropped and the rest renumbered in order; a fight in
+progress is forgotten too, so no "Fight over" is said for it. The
+player's own waypoints and the waypoint on top stay. Tested: a fight
+waypoint and a P waypoint, then dying - only the P one was left, as
+waypoint 1.
