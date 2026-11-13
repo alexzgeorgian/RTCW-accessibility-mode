@@ -1,0 +1,156 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1a6262f1..04de250b 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3871,6 +3871,8 @@ static const etaSecretJump_t eta_secretJumps[] =
+ #define ETA_SJ_KEY_JUMP      "984"
+ #define ETA_SJ_KEY_LEFT      "983"
+ #define ETA_SJ_KEY_RIGHT     "982"
++#define ETA_SJ_KEY_SPRINT    "979"
++#define ETA_SJ_SPEED         330.0f   /* a sprint at the jump, as tested: 352 */
+ 
+ enum { ETA_SJ_RUN = 1, ETA_SJ_RAIL, ETA_SJ_WALL, ETA_SJ_TOSTART };
+ 
+@@ -3923,8 +3925,8 @@ static const char *ETA_SecretJumpStepWords(void)
+ 		return "On the way up to the secret area. Stand still while you are turned to the start of the run; then hold W, "
+ 		       "and you are stopped there";
+ 	case ETA_SJ_RUN:
+-		return "At the start of the run. Stand still while you are turned; then hold Shift and W together: the jump onto "
+-		       "the rail is made for you";
++		return "At the start of the run. Stand still while you are turned; then hold W: the sprint and the jump onto the "
++		       "rail are made for you";
+ 	case ETA_SJ_RAIL:
+ 		return "On the rail, over the drop. Stand still while you are turned to the top of the wall; then hold W: the hop "
+ 		       "up is made for you";
+@@ -3971,11 +3973,27 @@ static void ETA_SecretJumpKey(qboolean down)
+ 	eta_sj.jumpHeld = down;
+ }
+ 
++/* The sprint, held for the player through the run: Shift is the walk
++   key on some keyboards' set-ups, and pressed a moment after W the run
++   is too slow - the tester fell short each time. */
++static qboolean eta_sjSprintHeld;
++
++static void ETA_SecretJumpSprint(qboolean down)
++{
++	if (down == eta_sjSprintHeld)
++	{
++		return;
++	}
++	trap_SendConsoleCommand(va("%ssprint " ETA_SJ_KEY_SPRINT "\n", down ? "+" : "-"));
++	eta_sjSprintHeld = down;
++}
++
+ static void ETA_SecretJumpHoldTurn(int way);
+ 
+ static void ETA_SecretJumpDisarm(void)
+ {
+ 	ETA_SecretJumpKey(qfalse);
++	ETA_SecretJumpSprint(qfalse);
+ 	ETA_SecretJumpHoldTurn(0);
+ 	eta_sj.armed  = qfalse;
+ 	eta_sj.jumped = qfalse;
+@@ -4021,8 +4039,7 @@ static void ETA_SecretJumpArm(const etaSecretJump_t *j)
+ 	VectorSubtract(eta_sj.corner, ps->origin, line);
+ 	ETA_SecretJumpStep(ETA_SJ_RUN, vectoyaw(line));
+ 	ETA_Speech_Say("At the way up to the secret area: three short steps, each turned for you. Stand still while you "
+-	               "are turned. Then hold Shift and W together, and keep them held: the running jump onto the low rail "
+-	               "is made for you at the edge");
++	               "are turned. Then hold W, and keep it held: the sprint and the jump onto the low rail are made for you");
+ }
+ 
+ /* accessibilitySecretJumpTest: for testing, armed where the player
+@@ -4197,6 +4214,10 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 	{
+ 		ETA_SecretJumpHoldTurn(0);   /* turning only while standing */
+ 	}
++	else
++	{
++		ETA_SecretJumpSprint(qfalse);
++	}
+ 	if (ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0 || cg.cameraMode)
+ 	{
+ 		ETA_SecretJumpDisarm();
+@@ -4298,8 +4319,8 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 			VectorSubtract(eta_sj.corner, ps->origin, line);
+ 			ETA_SecretJumpStep(ETA_SJ_RUN, vectoyaw(line));
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("At the start. Stand still while you are turned. Then hold Shift and W together, and keep "
+-			               "them held: the running jump onto the low rail is made for you at the edge");
++			ETA_Speech_Say("At the start. Stand still while you are turned. Then hold W, and keep it held: the sprint and "
++			               "the jump onto the low rail are made for you");
+ 			return qtrue;
+ 		}
+ 		if (cmd->forwardmove <= 0)
+@@ -4333,23 +4354,26 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 		return qfalse;
+ 	}
+ 
+-	if (eta_sj.step == ETA_SJ_RUN && ( !( cmd->buttons & BUTTON_SPRINT ) || ps->sprintTime <= 2000 ))
++	if (eta_sj.step == ETA_SJ_RUN && ps->sprintTime <= 2000)
+ 	{
+-		/* Without Shift, or without breath for a sprint, the jump falls
+-		   short, into a pocket below the beam: not begun. */
++		/* Without breath for a sprint the jump falls short, into a
++		   pocket below the beam: not begun. */
+ 		static int saidAt;
+ 
+ 		trap_SendConsoleCommand("-forward\n");
++		ETA_SecretJumpSprint(qfalse);
+ 		if (cg.time - saidAt > 3000 || cg.time < saidAt)
+ 		{
+ 			saidAt = cg.time;
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(( cmd->buttons & BUTTON_SPRINT )
+-			               ? "Out of breath for the run. Wait a few seconds, then Shift and W again"
+-			               : "Shift and W together: without Shift the jump falls short. Not begun");
++			ETA_Speech_Say("Out of breath for the run. Wait a few seconds, then W again");
+ 		}
+ 		return qfalse;
+ 	}
++	if (eta_sj.step == ETA_SJ_RUN)
++	{
++		ETA_SecretJumpSprint(qtrue);
++	}
+ 
+ 	switch (eta_sj.step)
+ 	{
+@@ -4360,7 +4384,19 @@ static qboolean ETA_SecretJumpFrame(const usercmd_t *cmd)
+ 		toCorner[2] = 0.0f;
+ 		if (DotProduct(toCorner, dir) <= eta_sj.jumpLeft)
+ 		{
++			if (sqrtf(ps->velocity[0] * ps->velocity[0] + ps->velocity[1] * ps->velocity[1]) < ETA_SJ_SPEED)
++			{
++				/* Too slow to clear the rail: no jump, and the rail
++				   stops the run. */
++				trap_SendConsoleCommand("-forward\n-back\n-moveleft\n-moveright\n");
++				ETA_SecretJumpSprint(qfalse);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say("Too slow for the jump, so it was not made. Stand still to be turned back to the start, then hold W");
++				ETA_SecretJumpStep(ETA_SJ_TOSTART, eta_sj.yaw);
++				return qtrue;
++			}
+ 			ETA_SecretJumpKey(qtrue);
++			ETA_SecretJumpSprint(qfalse);
+ 			eta_sj.jumped = qtrue;
+ 			eta_sj.at     = cg.time;
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 3bb3bc24..44da3e61 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2705,6 +2705,14 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = qfalse;
+ 	}
+ 
++	/* Not arrived while the way up to a secret is being taken: the
++	   church's secret is a few metres from the wall top on the way, and
++	   "Marker reached" there, mid-way, was taken for the end of it. */
++	if (arrived && CG_AccessibilitySecretJumpActive())
++	{
++		arrived = qfalse;
++	}
++
+ 	if (arrived)
+ 	{
+ 		char name[32];

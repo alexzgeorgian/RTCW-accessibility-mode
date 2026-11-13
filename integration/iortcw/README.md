@@ -3437,3 +3437,20 @@ any other way is let go of, with "Stopped: on the rail that way is the
 drop" - the edge guard had seen rail ahead and let the walk along it
 go. Tested: T on the rail lists only the secret; walking south along
 it and south-west were stopped; east stepped down onto the landing.
+
+### 0195 The sprint made for you
+
+The tester, following the steps, fell short every time after "Marker
+reached". Here the steps worked at 40, 60, 76 and 125 frames a second,
+with the sprint pressed together with W; pressed a moment after W, or
+with Shift set to walk, the run is too slow and the jump falls short.
+So the mode now holds the sprint for the player through the run, as it
+already made the jump: only W is held. The speed at the jump is
+checked (352 when it works; at least 330 is asked), and too slow, the
+jump is not made, W is let go of, and they are turned back to the
+start. "Marker reached" is not said while the steps are under way: the
+secret is a few metres from the wall top, and it was said there,
+mid-way. Tested from the tester's save with a player that does only
+what is said - stand still while turned, then hold W until the next
+step is said - at 76 and 60 frames a second and three times more:
+each reached the secret gallery.
