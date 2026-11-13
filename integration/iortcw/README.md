@@ -3584,3 +3584,15 @@ seen you. U then locks on to the one chosen. Tested: "Locked, Olaric,
 ahead, 23 meters" with zombies nearer; in the forest, "Soldier, 1 of 1,
 behind right, 89 meters, 17 meters above you. Alert, searching. U locks
 on".
+
+### 0206 The way the player chose keeps O
+
+The tester, going down to the ammo with L and O in the boss fight, was
+led to the zombies instead. Two things took O away from the waypoint: O
+pressed again on the way led to the boss (0204), and U with no enemy in
+sight chose the nearest enemy left for O (0198). CG_AccessibilityLeadBusy
+says when O leads, or is about to lead, somewhere the player chose - not
+the way out, the boss or the nearest enemy left - and then neither takes
+it: O again turns toward the waypoint, and U says the enemies left
+without "O leads there". Tested in the arena: L, O, U, U, O, O stayed on
+the waypoint on top with Olaric and the zombies about.

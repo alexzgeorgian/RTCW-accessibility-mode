@@ -1,0 +1,102 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 036879da..c566da70 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1325,12 +1325,21 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 		VectorSubtract(nearAt, ps->origin, to);
+ 		meters = (int)( nearDist * ETA_QU_TO_METERS + 0.5f );
+ 		below  = (int)( -to[2] * ETA_QU_TO_METERS + ( to[2] < 0 ? 0.5f : -0.5f ) );
+-		Q_strcat(text, sizeof(text), va(". The nearest, %s, %d meters, %s%s. O leads there",
++		/* O is taken to them only where it leads nowhere the player
++		   chose: the tester, on the way down to the ammo with L, pressed
++		   U, and O led to the zombies. */
++		qboolean lead = first || !CG_AccessibilityLeadBusy();
++
++		Q_strcat(text, sizeof(text), va(". The nearest, %s, %d meters, %s%s%s",
+ 		                                 CG_AccessibilityAiCharName(nearChar), meters,
+ 		                                 ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(nearAt)),
+ 		                                 below >= 2 ? va(", %d meters below you", below)
+-		                                 : below <= -2 ? va(", %d meters above you", -below) : ""));
+-		CG_AccessibilityChoose(nearAt, va("the nearest %s still alive", CG_AccessibilityAiCharName(nearChar)));
++		                                 : below <= -2 ? va(", %d meters above you", -below) : "",
++		                                 lead ? ". O leads there" : ""));
++		if (lead)
++		{
++			CG_AccessibilityChoose(nearAt, va("the nearest %s still alive", CG_AccessibilityAiCharName(nearChar)));
++		}
+ 
+ 		/* Near, and out of sight - behind a pillar, round a corner -
+ 		   on U: turned toward them, so they are faced as they come into
+@@ -2617,7 +2626,7 @@ static void ETA_EnemyShiftU(void)
+ 		VectorCopy(boss, aim.point);
+ 		aim.point[2] += 20.0f;
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say(va("%s out of sight, %d meters, %s. Turned toward him. O leads there", who, meters,
++		ETA_Speech_Say(va("%s out of sight, %d meters, %s. Turned toward him", who, meters,
+ 		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(boss))));
+ 		ETA_AimStartSnap(&aim, NULL);
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 01e6d749..6b64b6ae 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6729,7 +6729,11 @@ void CG_AccessibilityWayOut(void)
+ 	/* A boss alive - Olaric, Heinrich: O leads to the boss, the way on
+ 	   being through it, and again turns toward where the boss is now.
+ 	   The tester, in the tomb, wanted O on the boss, U on the zombies
+-	   about them, and L on the waypoint back to the ammo. */
++	   about them, and L on the waypoint back to the ammo. Not while O
++	   leads somewhere the player chose - the waypoint on top first: the
++	   tester, on the way down to the ammo, pressed O again and was led
++	   back to the fight. */
++	if (!CG_AccessibilityLeadBusy())
+ 	{
+ 		int         bossChar;
+ 		const char *ledTo = NULL;
+@@ -7253,6 +7257,34 @@ void CG_AccessibilityWaypointNext(void)
+ 	ETA_DestinationStep(1);
+ }
+ 
++/* O leads, or is about to lead, somewhere the player chose - with L, K,
++   T, X or the like - rather than its own way out or boss: nothing found
++   by itself, a boss or the nearest enemy left, takes O away from it. */
++qboolean CG_AccessibilityLeadBusy(void)
++{
++	vec3_t      at;
++	const char *name = NULL;
++
++	if (eta_chosenSet)
++	{
++		return qtrue;
++	}
++	if (!ETA_MarkerIsO() || !CG_AccessibilityMarkerInfo(at, &name) || !name)
++	{
++		return qfalse;
++	}
++	if (!Q_stricmp(name, "the way out") || !Q_stricmpn(name, "the nearest ", 12))
++	{
++		return qfalse;
++	}
++	{
++		vec3_t boss;
++		int    bossChar;
++
++		return !( CG_AccessibilityBossAlive(boss, &bossChar) && !Q_stricmp(name, CG_AccessibilityAiCharName(bossChar)) );
++	}
++}
++
+ void CG_AccessibilityWaypointPrev(void)
+ {
+ 	ETA_DestinationStep(-1);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 685cf7a6..860b0d67 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2231,6 +2231,7 @@ void CG_AccessibilityWaypointPrev( void );
+ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
++qboolean CG_AccessibilityLeadBusy( void );
+ int CG_AccessibilityWaysList( int *stamp );
+ qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );
