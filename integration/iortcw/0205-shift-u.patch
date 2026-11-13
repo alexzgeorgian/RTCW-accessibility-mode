@@ -1,0 +1,128 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 185d5dd5..036879da 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -14,6 +14,7 @@
+ #ifdef FEATURE_ACCESSIBILITY
+ 
+ #include "cg_local.h"
++#include "../client/keycodes.h"
+ 
+ #include "hud/hud_narrator.h"
+ #include "speech/speech_manager.h"
+@@ -1166,6 +1167,27 @@ static qboolean ETA_AimAcquire(float maxMeters)
+ 	return qtrue;
+ }
+ 
++/* Whether an enemy has seen the player, from the state the game sends
++   with each (entityState_t aiState). */
++static const char *ETA_EnemyAware(int entityNum)
++{
++	if (entityNum < 0 || entityNum >= MAX_GENTITIES)
++	{
++		return "";
++	}
++	switch (cg_entities[entityNum].currentState.aiState)
++	{
++	case AISTATE_RELAXED:
++		return "Has not seen you";
++	case AISTATE_QUERY:
++		return "Heard something, looking round";
++	case AISTATE_ALERT:
++		return "Alert, searching";
++	default:
++		return "Has seen you";
++	}
++}
++
+ static void ETA_EnemyChooseStep(int step)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -1205,9 +1227,12 @@ static void ETA_EnemyChooseStep(int step)
+ 
+ 	/* Said with what turns to them, so that choosing is never taken for
+ 	   being turned: the tester heard where the enemy was, and waited to
+-	   be turned. */
++	   be turned. And whether they have seen the player, from the state
++	   the game sends with each of them: the tester, in the forest, must
++	   keep out of sight. */
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_AimSayThen(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point, "U turns to them");
++	ETA_AimSayThen(va("%s, %d of %d", list[index].name, index + 1, count), list[index].point,
++	               va("%s. U locks on", ETA_EnemyAware(list[index].entityNum)));
+ }
+ 
+ void CG_AccessibilityEnemyNext_f(void)
+@@ -2540,8 +2565,72 @@ void CG_AccessibilityAimLockUp_f(void)
+  * aim on them, on to the next when they fall; U again, or a turn with
+  * the arrows, lets go.
+  */
++/*
++ * Shift+U. While a boss is alive - Olaric, Heinrich - the lock on the
++ * boss, past the nearer zombies U takes; out of sight, turned toward
++ * them. With no boss, a step through the enemies in sight, each said
++ * with whether they have seen the player, for U to lock on to. The
++ * tester, in the tomb, could lock only on the nearest; and in the forest
++ * must keep checking which enemies can see them.
++ */
++static void ETA_EnemyShiftU(void)
++{
++	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
++	vec3_t         boss;
++	int            bossChar, count, i;
++
++	if (!CG_AccessibilityBossAlive(boss, &bossChar))
++	{
++		ETA_EnemyChooseStep(1);
++		return;
++	}
++
++	count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qtrue);
++	for (i = 0; i < count; i++)
++	{
++		int ent = list[i].entityNum;
++
++		if (ent >= 0 && ent < MAX_GENTITIES && cg_entities[ent].currentState.aiChar == bossChar)
++		{
++			eta_enemyChoose.held      = qtrue;
++			eta_enemyChoose.entityNum = ent;
++			eta_enemyChoose.at        = cg.time;
++			ETA_AimStop();
++			CG_AccessibilityAimLockDown_f();
++			if (eta_aim.mode == ETA_AIM_LOCK)
++			{
++				eta_aim.automatic = qfalse;
++				eta_aim.toggled   = qtrue;
++			}
++			return;
++		}
++	}
++
++	/* Out of sight: turned toward them, faced as they come into sight. */
++	{
++		etaAimTarget_t aim;
++		const char    *who = CG_AccessibilityAiCharName(bossChar);
++		int            meters = (int)(Distance(boss, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f);
++
++		memset(&aim, 0, sizeof(aim));
++		aim.entityNum = -1;
++		VectorCopy(boss, aim.point);
++		aim.point[2] += 20.0f;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("%s out of sight, %d meters, %s. Turned toward him. O leads there", who, meters,
++		                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(boss))));
++		ETA_AimStartSnap(&aim, NULL);
++	}
++}
++
+ void CG_AccessibilityEnemyLock_f(void)
+ {
++	if (trap_Key_IsDown(K_SHIFT))
++	{
++		ETA_EnemyShiftU();
++		return;
++	}
++
+ 	if (eta_aim.mode == ETA_AIM_LOCK && !eta_aim.automatic && eta_aim.toggled)
+ 	{
+ 		ETA_AimStop();

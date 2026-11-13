@@ -3569,3 +3569,18 @@ now and turns the player toward it. Something chosen - the waypoint on top
 with L - still comes first. Tested in the arena: "Olaric, 30 meters, ahead
 left", then O again "Facing the way. 18 meters, then left. Olaric, 27
 meters", while U locked on to a zombie 7 meters off.
+
+### 0205 Shift+U: the boss, or the enemies and whether they have seen you
+
+U locks on to the nearest enemy, and in the tomb the tester could not pick
+Olaric out from the nearer zombies; in the forest they must keep checking
+which enemies can see them. Shift+U (U's own command, Shift read with
+trap_Key_IsDown): while a boss is alive (CG_AccessibilityBossAlive),
+locks on to the boss if in sight, or turns toward the boss out of sight;
+with no boss, steps through the enemies in sight as the retired I did,
+each said with what the game sends of its alert state (entityState_t
+aiState): has not seen you, heard something, alert and searching, or has
+seen you. U then locks on to the one chosen. Tested: "Locked, Olaric,
+ahead, 23 meters" with zombies nearer; in the forest, "Soldier, 1 of 1,
+behind right, 89 meters, 17 meters above you. Alert, searching. U locks
+on".
