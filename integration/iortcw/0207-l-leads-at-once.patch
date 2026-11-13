@@ -1,0 +1,38 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6b64b6ae..0d6891a7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7046,14 +7046,12 @@ void CG_AccessibilityWaypointPlace(void)
+ }
+ 
+ /*
+- * L: straight to the waypoint on top - said with how far and where, and
+- * chosen, so O leads there, as a waypoint chosen from the list is.
++ * L: straight to the waypoint on top, led there at once.
+  */
+ void CG_AccessibilityWaypointTop(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t              delta;
+-	char                height[64];
+ 	int                 meters;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -7074,12 +7072,13 @@ void CG_AccessibilityWaypointTop(void)
+ 		               : "You are at the waypoint on top");
+ 		return;
+ 	}
+-	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-	ETA_Speech_Say(va("Waypoint on top%s%s, %d meters, %s%s%s. O leads there", eta_topName[0] ? ", " : "", eta_topName,
+-	                  meters, ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+-	                  height[0] ? ", " : "", height));
++	/* Led there at once, without O: the tester, in the fight, meant L
++	   alone to take them back to the ammo. Said as O says it - "Facing
++	   the way. The waypoint on top, ammo and health, 31 meters" - and L
++	   again turns toward the way. */
+ 	CG_AccessibilityChoose(eta_topPoint, eta_topName[0] ? va("the waypoint on top, %s", eta_topName)
+ 	                       : "the waypoint on top");
++	CG_AccessibilityWayOut();
+ }
+ 
+ /* How far a place is from the way out, in metres, a floor up or down

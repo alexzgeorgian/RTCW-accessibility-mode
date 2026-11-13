@@ -3596,3 +3596,11 @@ the way out, the boss or the nearest enemy left - and then neither takes
 it: O again turns toward the waypoint, and U says the enemies left
 without "O leads there". Tested in the arena: L, O, U, U, O, O stayed on
 the waypoint on top with Olaric and the zombies about.
+
+### 0207 L leads at once
+
+The tester meant L alone to take them back to the ammo, without O. L now
+chooses the waypoint on top and leads there at once, as O does with a
+choice (CG_AccessibilityWayOut): "Facing the way. The waypoint on top,
+ammo and health, 31 meters, 2 meters below you". L or O again turns
+toward it. Tested in the arena with U locked on a zombie between.
