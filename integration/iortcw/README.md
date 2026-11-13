@@ -3495,3 +3495,12 @@ left and of what kind, and where the nearest is, and chooses it for O:
 nearest, Elite guard, 21 meters, ahead, 12 meters below you. O leads
 there". Tested from the tester's save: from the wooden landing U said
 so and O led toward the nearest.
+
+### 0199 Found secrets stay found
+
+After emptying the church's secret room the tester still heard it on
+T's list. The list is made afresh when a save is loaded, and the mode
+knew only which secret was found as it was found, not after a load.
+Now when the game's own count says every secret of the level is found,
+none is listed. Tested: secret found, saved, loaded - the landing's
+area said "No things left here".
