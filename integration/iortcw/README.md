@@ -3629,3 +3629,16 @@ have. And the moment the first enemy turns to fighting the player after
 fifteen calm seconds: "Soldier has seen you, ahead, 19 meters" - only the
 first, so a fight already going does not say it of each enemy joining.
 Tested in the forest with notarget on, then off.
+
+### 0210 Fights undone on dying or a failed mission; U's list for bosses only
+
+The tester, failed by an alarm in the forest, still had the fight's
+waypoint after the load, and found the soldiers still alive somewhere in
+the level, said on U, of no use. Dying, or "Mission Failed" on the
+screen (the cp missionfail centerprint), now drops the fight waypoints at
+once, and no fight is counted - no "Fight over", no waypoint - until the
+player lives again or a game is loaded. U with no enemy in sight says
+just "No enemy in sight", unless a boss is alive: then the boss, where,
+and turned toward him, as before. O's lead to the enemies an objective
+counts is unchanged. Tested: the forest failed by being seen, then K, "No
+waypoints yet"; U in the forest and in the tomb's arena.

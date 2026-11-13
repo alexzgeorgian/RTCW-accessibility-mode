@@ -1,0 +1,140 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 12a1c06d..8e1254ef 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -992,6 +992,9 @@ void CG_AccessibilityCenterPrint( const char *text ) {
+ 		}
+ 	}
+ 	Q_CleanStr( clean );
++	if ( strstr( clean, "Mission Failed" ) ) {
++		CG_AccessibilityFightsUndone();
++	}
+ 	CG_AccessibilitySay( clean );
+ }
+ 
+@@ -1467,6 +1470,7 @@ void CG_AccessibilityFrame( void ) {
+ 	if ( health <= 0 ) {
+ 		if ( !eta.dead ) {
+ 			eta.dead = qtrue;
++			CG_AccessibilityFightsUndone();
+ 			CG_AccessibilitySay( "You died" );
+ 		}
+ 		eta.health = health;
+@@ -1474,6 +1478,7 @@ void CG_AccessibilityFrame( void ) {
+ 	}
+ 	if ( eta.dead ) {
+ 		eta.dead = qfalse;
++		CG_AccessibilityFightsGoOn();
+ 	}
+ 	if ( eta.health > 0 && health < eta.health ) {
+ 		static const int marks[] = { 75, 50, 25 };
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c566da70..f87b7bb9 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1267,12 +1267,28 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 	vec3_t      nearAt;
+ 	char        text[512];
+ 
++	/* On U, the enemies left only when a boss is among them: the tester
++	   found the soldiers still alive somewhere in the level of no use. */
++	if (!first)
++	{
++		vec3_t boss;
++		int    bossChar;
++
++		if (!CG_AccessibilityBossAlive(boss, &bossChar))
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("No enemy in sight");
++			return qfalse;
++		}
++	}
++
+ 	while (list && *list)
+ 	{
+ 		int    c;
+ 		vec3_t at;
+ 
+-		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4)
++		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4
++		    && ( first || c == AICHAR_HELGA || c == AICHAR_HEINRICH ))
+ 		{
+ 			for (i = 0; i < nk && kinds[i] != c; i++)
+ 			{
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 4a6caeaa..82c35460 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1404,7 +1404,11 @@ void CG_AccessibilityThingsFrame(void)
+ 		{
+ 			etaAimTarget_t enemies[4];
+ 
+-			if (CG_AccessibilityEnemyTargets(enemies, ARRAY_LEN(enemies), qtrue) > 0)
++			if (CG_AccessibilityFightsHeld())
++			{
++				eta_things.fighting = qfalse;
++			}
++			else if (CG_AccessibilityEnemyTargets(enemies, ARRAY_LEN(enemies), qtrue) > 0)
+ 			{
+ 				if (!eta_things.fighting
+ 				    && ( !eta_things.lastEnemyAt || cg.time - eta_things.lastEnemyAt >= ETA_FIGHT_CALM_MS ))
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 20d86394..c82551e9 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8526,6 +8526,32 @@ static void ETA_WaypointsForgetFights(void)
+ 	eta_trail.waypointAt = 0;
+ }
+ 
++/*
++ * Died, or the mission failed - an alarm sounded, someone not to be
++ * killed was: whatever happens next is undone by the load to come. The
++ * fights' waypoints go at once, and no fight is counted until the game
++ * goes on again. The tester, failed by an alarm in the forest, still had
++ * the fight's waypoint after the load.
++ */
++static qboolean eta_fightsHeld;
++
++void CG_AccessibilityFightsUndone(void)
++{
++	ETA_WaypointsForgetFights();
++	CG_AccessibilityThingsFightForget();
++	eta_fightsHeld = qtrue;
++}
++
++void CG_AccessibilityFightsGoOn(void)
++{
++	eta_fightsHeld = qfalse;
++}
++
++qboolean CG_AccessibilityFightsHeld(void)
++{
++	return eta_fightsHeld;
++}
++
+ static void ETA_LoadedForget(void)
+ {
+ 	static int lastStart;
+@@ -8538,6 +8564,7 @@ static void ETA_LoadedForget(void)
+ 	lastStart = cgs.levelStartTime;
+ 	ETA_WaypointsForgetFights();
+ 	CG_AccessibilityThingsFightForget();
++	eta_fightsHeld = qfalse;
+ 	for (m = 0; m < MAX_MODELS; m++)
+ 	{
+ 		eta_switchSeen[m]     = qfalse;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 3e1c7fff..06f5bfb0 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2233,6 +2233,9 @@ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ qboolean CG_AccessibilityLeadBusy( void );
+ void CG_AccessibilityThingsFightForget( void );
++void CG_AccessibilityFightsUndone( void );
++void CG_AccessibilityFightsGoOn( void );
++qboolean CG_AccessibilityFightsHeld( void );
+ int CG_AccessibilityWaysList( int *stamp );
+ qboolean CG_AccessibilityWayAt( int index, vec3_t lead, char *name, size_t nameSize, char *text, size_t textSize );
+ void CG_AccessibilityLoopAt( const vec3_t origin, sfxHandle_t sfx, int volume, float range );

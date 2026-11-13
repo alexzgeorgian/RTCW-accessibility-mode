@@ -355,8 +355,8 @@ back to the menu you came from.
   leads on", when no enemy has been in sight for a few seconds after a
   fight that took you away from where you were. Where it began is kept
   as a waypoint, so K can lead you back there; O still leads on. When
-  you die or load a save, those fights are undone, and their waypoints
-  are forgotten; the waypoints you set yourself, and the one on top,
+  you die, the mission fails or you load a save, those fights are
+  undone, and their waypoints are forgotten at once; the waypoints you set yourself, and the one on top,
   stay.
 - "Mission complete", with the same figures, as the screen fades out
   at the end of a mission.
