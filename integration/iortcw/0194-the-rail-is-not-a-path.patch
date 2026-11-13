@@ -1,0 +1,172 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 24eb5105..1a6262f1 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3689,14 +3689,17 @@ typedef struct
+ 	const char *map;
+ 	vec3_t      mins, maxs;
+ 	const char *text;
++	int         safeWays;     /* a perch: how many of safeYaw W may walk; 0 for any */
++	float       safeYaw[2];
+ } etaLandmark_t;
+ 
+ static const etaLandmark_t eta_landmarks[] =
+ {
+ 	/* Most particular first: the first that holds the player is said. */
+ 	{ "church", { 300.0f, 440.0f, 1138.0f }, { 340.0f, 504.0f, 1152.0f },
+-	  "On the low wooden rail at the landing's edge, over a drop of 13 meters into the hall, which kills. To the north, "
+-	  "right against you, the top of a stone wall, a short hop up" },
++	  "On the low wooden rail at the landing's edge, a hand wide, over a drop of 13 meters into the hall, which kills. "
++	  "Only two ways are safe: north, right against you, a short hop up onto the top of a stone wall; or east, a step "
++	  "down back onto the landing. Along the rail, or west, is the drop", 2, { 90.0f, 0.0f } },
+ 	{ "church", { 296.0f, 488.0f, 1168.0f }, { 480.0f, 540.0f, 1190.0f },
+ 	  "On top of the stone wall by the wooden landing, a narrow path a meter wide running east to west. Below it to the "
+ 	  "south, the landing; to the west and south-west, the hall's drop. At its west end, a step down and a little to the north-west, the narrow beam along the north side "
+@@ -3735,6 +3738,67 @@ const char *CG_AccessibilityLandmarkText(const vec3_t at)
+ 	return NULL;
+ }
+ 
++static const etaLandmark_t *ETA_LandmarkAt(const vec3_t at)
++{
++	const char *map = cgs.mapname;
++	int        i;
++
++	if (!Q_strncmp(map, "maps/", 5))
++	{
++		map += 5;
++	}
++	for (i = 0; i < (int)ARRAY_LEN(eta_landmarks); i++)
++	{
++		const etaLandmark_t *l = &eta_landmarks[i];
++
++		if (!Q_stricmpn(map, l->map, strlen(l->map)) && map[strlen(l->map)] == '.'
++		    && at[0] >= l->mins[0] && at[0] <= l->maxs[0] && at[1] >= l->mins[1] && at[1] <= l->maxs[1]
++		    && at[2] >= l->mins[2] && at[2] <= l->maxs[2])
++		{
++			return l;
++		}
++	}
++	return NULL;
++}
++
++/*
++ * On a perch - the church's rail, a hand wide over a drop that kills -
++ * W only the ways that are safe. Walked along the rail the edge guard
++ * saw rail ahead and let them go, and the tester, going along it to the
++ * breakable wood T named, fell to their death.
++ */
++static qboolean ETA_PerchGuard(const usercmd_t *cmd)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	const etaLandmark_t *l;
++	static int          saidAt;
++	float               moveYaw;
++	int                 k;
++
++	if (( !cmd->forwardmove && !cmd->rightmove ) || cmd->upmove > 0 || ps->groundEntityNum == ENTITYNUM_NONE
++	    || !( l = ETA_LandmarkAt(ps->origin) ) || !l->safeWays)
++	{
++		return qfalse;
++	}
++	moveYaw = ps->viewangles[YAW] + RAD2DEG(atan2f(-(float)cmd->rightmove, (float)cmd->forwardmove));
++	for (k = 0; k < l->safeWays; k++)
++	{
++		if (fabsf(AngleSubtract(moveYaw, l->safeYaw[k])) <= 50.0f)
++		{
++			return qfalse;
++		}
++	}
++	trap_SendConsoleCommand("-forward\n-back\n-moveleft\n-moveright\n");
++	if (cg.time - saidAt > 2500 || cg.time < saidAt)
++	{
++		saidAt = cg.time;
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("Stopped: on the rail that way is the drop. Safe: north, the hop up onto the wall; or east, back "
++		               "onto the landing");
++	}
++	return qtrue;
++}
++
+ /* Said once on first standing in each, on this level. */
+ static void ETA_LandmarkFrame(void)
+ {
+@@ -4343,6 +4407,10 @@ static void ETA_EdgeGuardFrame(void)
+ 		return;
+ 	}
+ 	ETA_LandmarkFrame();
++	if (!eta_sj.armed && ETA_PerchGuard(&cmd))
++	{
++		return;
++	}
+ 	if (ETA_SecretJumpFrame(&cmd))
+ 	{
+ 		return;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index dfb5f053..99f8988c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5307,9 +5307,14 @@ static void ETA_ReadMapEntities(void)
+ 		int    model;
+ 		char   target[48];
+ 		vec3_t at;
+-		int    kind;            /* 't' treasure, 'b' breakable, 0 other */
++		int    kind;            /* 't' treasure, 'b' breakable, 'd' a guard's death check, 0 other */
+ 	}        aimed[1024];
+-	int      namedCount = 0, userCount = 0, linkCount = 0, secretCount = 0, aimedCount = 0;
++	static struct
++	{
++		int  model;
++		char targetname[48];
++	}        brkNamed[256];
++	int      namedCount = 0, userCount = 0, linkCount = 0, secretCount = 0, aimedCount = 0, brkNamedCount = 0;
+ 
+ 	memset(eta_buttonModel, 0, sizeof(eta_buttonModel));
+ 	memset(eta_plateModel, 0, sizeof(eta_plateModel));
+@@ -5516,7 +5521,8 @@ static void ETA_ReadMapEntities(void)
+ 				sscanf(origin, "%f %f %f", &aimed[aimedCount].at[0], &aimed[aimedCount].at[1], &aimed[aimedCount].at[2]);
+ 			}
+ 			aimed[aimedCount].kind = !Q_stricmp(classname, "item_treasure") ? 't'
+-			                         : !Q_stricmp(classname, "func_explosive") ? 'b' : 0;
++			                         : !Q_stricmp(classname, "func_explosive") ? 'b'
++			                         : !Q_stricmp(classname, "trigger_deathCheck") ? 'd' : 0;
+ 			aimedCount++;
+ 		}
+ 
+@@ -5648,6 +5654,12 @@ static void ETA_ReadMapEntities(void)
+ 				                        : !Q_stricmp(material, "fabric") ? "Breakable cloth"
+ 				                        : !Q_stricmp(material, "gibs") ? "Breakable"
+ 				                        : "Breakable wood";
++				if (targetname[0] && brkNamedCount < (int)ARRAY_LEN(brkNamed))
++				{
++					brkNamed[brkNamedCount].model = index;
++					Q_strncpyz(brkNamed[brkNamedCount].targetname, targetname, sizeof(brkNamed[0].targetname));
++					brkNamedCount++;
++				}
+ 			}
+ 		}
+ 
+@@ -5694,6 +5706,24 @@ static void ETA_ReadMapEntities(void)
+ 		}
+ 	}
+ 
++	/* A breakable that a guard's body breaks as it falls - the church's
++	   low rail over the hall, where an Elite guard killed against it
++	   crashes through - is a part of a scripted scene, not one for the
++	   player: T listed it, and the tester, going to break it along the
++	   rail, fell to their death. */
++	for (i = 0; i < brkNamedCount; i++)
++	{
++		int j;
++
++		for (j = 0; j < aimedCount; j++)
++		{
++			if (aimed[j].kind == 'd' && !Q_stricmp(aimed[j].target, brkNamed[i].targetname))
++			{
++				eta_breakModel[brkNamed[i].model] = NULL;
++			}
++		}
++	}
++
+ 	/* An item not there yet: inside something to break, when that is what
+ 	   brings it. The tester walked to things T listed and found nothing. */
+ 	for (i = 0; i < eta_mapItemCount; i++)

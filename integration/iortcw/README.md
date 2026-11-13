@@ -3421,3 +3421,19 @@ you, a hop up. Its top goes on 1 meter"; on the wall top facing west,
 "The floor ends right in front of you: a drop of 14 meters, which
 kills"; on the landing facing west, "The floor ends 2 meters ahead: a
 drop of 13 meters, which kills"; on stairs, "A step up, 1 meter ahead".
+
+### 0194 The rail is not a path
+
+The tester got onto the church's low rail, heard J and T name a
+"Breakable wood" nearby, took it for the way to the secret, walked
+along the rail toward it, and fell to their death. The two pieces of
+wood are parts of the rail that an Elite guard's body breaks, killed
+against it, as it falls into the hall (trigger_deathCheck): a scripted
+scene, not something for the player. Breakables that a guard's death
+check breaks are now off T's list on every level. The rail's own
+words now say it is a hand wide, and that only north (the hop up onto
+the wall) and east (back onto the landing) are safe; and on it, W
+any other way is let go of, with "Stopped: on the rail that way is the
+drop" - the edge guard had seen rail ahead and let the walk along it
+go. Tested: T on the rail lists only the secret; walking south along
+it and south-west were stopped; east stepped down onto the landing.
