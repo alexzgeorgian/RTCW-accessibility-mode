@@ -3642,3 +3642,37 @@ just "No enemy in sight", unless a boss is alive: then the boss, where,
 and turned toward him, as before. O's lead to the enemies an objective
 counts is unchanged. Tested: the forest failed by being seen, then K, "No
 waypoints yet"; U in the forest and in the tomb's arena.
+
+### 0211 O across the forest, and outdoors
+
+The tester found O broken in the forest: it said the way out was not
+open, handed on to X, and X said "Not in an area here" - outdoors there
+is no room the map has - so O went round in a circle and never led to
+the objective. And the way itself was not found: the objective is 150
+metres off through the trees.
+
+- The search (src/accessibility/navigation) held 16384 squares, about a
+  hundred metres across; the forest's way needs more. It now holds
+  65536 (the hash 131072), and a way up to 2048 points - the forest's
+  is 748, and was cut short at 512. Toward a goal more than 3000 units
+  off it leans harder toward the goal (weight 3, not 1.5), and a far
+  search lets jumps in from the start rather than first failing on
+  foot through every square.
+- The route searches 4 ms a frame, not 2; a search still going is let
+  finish when a door changes somewhere (the soldiers' own doors started
+  it again and again); and O waits up to twenty seconds for a far way,
+  saying once "The way is far: still looking for it. Stand still a
+  moment", rather than "No way found" while it is being found.
+- With the way out not open and the player outdoors, in no area, O
+  leads on toward the next objective where the script meets one - "On
+  toward your next objective: Stowaway aboard supply truck bound for
+  rocket base, 151 meters, left" - or else the nearest way never tried.
+  X outdoors says "Outdoors, out of the buildings" and chooses the
+  nearest way not tried, instead of "Not in an area here".
+
+Checked in the forest: from the start, the search finds the way to the
+truck (755 points) in about five seconds standing still on this test
+machine, and from the far east of the map as well; O then faces the
+way. A walking bot that presses O at every turn did not reach the truck
+in six minutes, stopped again and again by the edge guard on the
+forest's slopes - the guard is kept.

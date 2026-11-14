@@ -122,8 +122,8 @@ typedef enum ETA_PathKind
    when they cannot, and sets to[2] to the height they land at. */
 typedef int (*ETA_PathMoveFn)(void *context, const float from[3], float to[3]);
 
-#define ETA_PATH_MAX_NODES   16384
-#define ETA_PATH_MAX_POINTS  512
+#define ETA_PATH_MAX_NODES   65536
+#define ETA_PATH_MAX_POINTS  2048
 #define ETA_PATH_MAX_LINKS   256
 
 typedef enum ETA_PathState

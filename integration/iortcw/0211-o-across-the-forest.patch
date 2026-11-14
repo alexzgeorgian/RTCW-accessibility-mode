@@ -1,0 +1,184 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 1f5bb728..2735b899 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1729,7 +1729,21 @@ void CG_AccessibilityAreaExits(void)
+ 	area = CG_AccessibilityAreaHere();
+ 	if (area < 0)
+ 	{
+-		ETA_Speech_Say("Not in an area here. O leads to the way out");
++		/* Outdoors - the forest, a courtyard: in no room the map has, so
++		   no doors out of one. The nearest way not tried instead; the
++		   tester, in the forest, was told they were in no area. */
++		vec3_t lead;
++		char   name[64], text[128];
++
++		if (CG_AccessibilityNewWayNearest(lead, name, sizeof(name), text, sizeof(text)))
++		{
++			CG_AccessibilityChoose(lead, name);
++			ETA_Speech_Say(va("Outdoors, out of the buildings. %s. O leads there", text));
++		}
++		else
++		{
++			ETA_Speech_Say("Outdoors, out of the buildings. O leads on");
++		}
+ 		return;
+ 	}
+ 	if (!eta_areas.number[area])
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f87b7bb9..d158d6da 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6061,6 +6061,27 @@ static void ETA_FacePendingFrame(void)
+ 		vec3_t      origin;
+ 		const char *name = NULL;
+ 
++		/* Still looking, for a way far off - the objective across the
++		   forest, 150 metres of trees: waited for, up to twenty seconds,
++		   said once, rather than "no way found" while it is being found.
++		   The tester found O broken in the forest. */
++		{
++			static int waitedFrom;
++
++			if (CG_AccessibilityRouteSearching() && cg.time >= eta_facePendingAt
++			    && ( !waitedFrom || cg.time < waitedFrom || cg.time - waitedFrom < 20000 ))
++			{
++				if (!waitedFrom || cg.time < waitedFrom || cg.time - waitedFrom > 30000)
++				{
++					waitedFrom = cg.time;
++					ETA_HudNarrator_HoldPassive(cg.time);
++					ETA_Speech_Say("The way is far: still looking for it. Stand still a moment");
++				}
++				eta_facePendingAt = cg.time;
++				return;
++			}
++			waitedFrom = 0;
++		}
+ 		eta_facePendingAt = 0;
+ 		/* Still searching, but a gate with a switch is shut across the
+ 		   way: said now, not "no way found". */
+@@ -6404,6 +6425,38 @@ static void ETA_FaceTheWayUnreachable(void)
+ 				return;
+ 			}
+ 		}
++		/* Outdoors - the forest, a courtyard - in no room the map has,
++		   so X has no doors out to give: on toward the next objective,
++		   where the script meets it; else the nearest way never tried.
++		   The tester, in the forest, heard "Not in an area here", and O
++		   went round in a circle and never to the objective. */
++		if (CG_AccessibilityAreaHere() < 0)
++		{
++			vec3_t place, lead;
++			int    objective = 0;
++			char   name[64], text[128];
++
++			if (CG_AccessibilityObjectivePlace(cg.predictedPlayerState.origin, place, &objective))
++			{
++				const char *words = CG_AccessibilityObjectiveText(objective);
++				vec3_t      toPlace;
++				int         meters;
++
++				VectorSubtract(place, cg.predictedPlayerState.origin, toPlace);
++				meters = (int)( VectorLength(toPlace) * ETA_QU_TO_METERS + 0.5f );
++				CG_AccessibilityChoose(place, "the way to your next objective");
++				ETA_Speech_Say(va("On toward your next objective%s%s, %d %s, %s. O again leads there",
++				                  words[0] ? ": " : "", words, meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(place))));
++				return;
++			}
++			if (CG_AccessibilityNewWayNearest(lead, name, sizeof(name), text, sizeof(text)))
++			{
++				CG_AccessibilityChoose(lead, name);
++				ETA_Speech_Say(va("%s. O again leads there", text));
++				return;
++			}
++		}
+ 		/* First the openings not yet explored, as X's; only when
+ 		   none is left, the rooms where things are still to be
+ 		   found. */
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 44da3e61..199d239f 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -152,7 +152,7 @@ static void ETA_MarkerEye(vec3_t eye)
+    the game hurts a landing past about six metres (delta 38.75). The tram
+    level's way out drops three metres into a duct and five out of it. */
+ #define ETA_ROUTE_SEARCH_DROP   200.0f
+-#define ETA_ROUTE_BUDGET_MS     2       /* searching per frame, at most */
++#define ETA_ROUTE_BUDGET_MS     4       /* searching per frame, at most: the forest's 150 metres took 0.7 s */
+ #define ETA_ROUTE_BUDGET_STEP   4       /* squares between looks at the clock */
+ #define ETA_ROUTE_REPLAN_MS     5000    /* the world changes: look again */
+ #define ETA_ROUTE_RETRY_MS      3000    /* after finding no way at all */
+@@ -1405,9 +1405,19 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 	eta_routeAvoidNew      = qfalse;
+ }
+ 
++/* Far: jumps let in from the first search. On foot first, then with
++   jumps if that fails, is right near; across the forest, 150 metres off,
++   the search on foot went through every square it may hold before it
++   failed for want of a hop onto a ledge, and the way was looked for for
++   twenty seconds and more. */
++#define ETA_ROUTE_FAR_JUMPS 3000.0f
++
+ static void ETA_RoutePlan(void)
+ {
+-	ETA_RoutePlanWith(qfalse);
++	vec3_t marker;
++
++	VectorCopy(eta_marker.origin, marker);
++	ETA_RoutePlanWith((qboolean)( Distance(cg.predictedPlayerState.origin, marker) > ETA_ROUTE_FAR_JUMPS ));
+ }
+ 
+ /**
+@@ -1462,8 +1472,9 @@ void CG_AccessibilityNavSweep_f(void)
+ 		}
+ 		while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
+ 		count = ETA_PathFinder_PointCount();
+-		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d\n", state,
+-		          start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables, ETA_PathFinder_AllTried());
++		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d ms %d\n", state,
++		          start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables, ETA_PathFinder_AllTried(),
++		          trap_Milliseconds() - began);
+ 		for (k = 0; k < count; k++)
+ 		{
+ 			ETA_PathFinder_Point(k, point);
+@@ -2973,6 +2984,13 @@ qboolean CG_AccessibilityMarkerInfo(vec3_t origin, const char **name)
+  * @brief Whether the way round the walls is known yet: until it is, the
+  * ping points straight at the marker, through whatever is between.
+  */
++/* The way to the marker still being looked for: a far one, across the
++   forest, takes some seconds of the search's share of each frame. */
++qboolean CG_AccessibilityRouteSearching(void)
++{
++	return (qboolean)(eta_marker.active && !eta_route.done && ETA_PathFinder_State() == ETA_PATH_SEARCHING);
++}
++
+ qboolean CG_AccessibilityMarkerWayKnown(void)
+ {
+ 	return (qboolean)(eta_marker.active && eta_route.done);
+@@ -3063,7 +3081,12 @@ qboolean CG_AccessibilityMarkerCrouchNow(void)
+ void CG_AccessibilityRouteDoorsChanged(void)
+ {
+ 	eta_routeBlockedCount = eta_routeBlockedNext = 0;
+-	if (eta_marker.active)
++	/* A search still going is let finish: a far one, across the forest,
++	   takes seconds, and the soldiers' own doors opening and shutting
++	   started it again and again, so it never did. The way found is
++	   looked at again within ETA_ROUTE_REPLAN_MS anyway. */
++	if (eta_marker.active && !( eta_route.planned && !eta_route.done
++	                            && ETA_PathFinder_State() == ETA_PATH_SEARCHING ))
+ 	{
+ 		ETA_RouteForget();
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 06f5bfb0..b5be9d69 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2232,6 +2232,7 @@ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ qboolean CG_AccessibilityLeadBusy( void );
++qboolean CG_AccessibilityRouteSearching( void );
+ void CG_AccessibilityThingsFightForget( void );
+ void CG_AccessibilityFightsUndone( void );
+ void CG_AccessibilityFightsGoOn( void );

@@ -361,8 +361,16 @@ static int ETA_Path_Floor(float v)
 /* A little greedy: it finds a good way sooner and rarely a much worse
    one, and the search has a frame budget to live within. */
 #define ETA_PATH_HEURISTIC_WEIGHT 1.5f
+/* Far - across a forest, 150 metres of trees and slopes - a little
+   greedy was not enough: the search spent all its squares on the
+   hollows nearest the player and never reached the goal. Leaning harder
+   toward the goal there finds a way in a fraction of the squares; near,
+   where the best way matters more, the weight is the usual one. */
+#define ETA_PATH_FAR_DISTANCE     3000.0f
+#define ETA_PATH_FAR_WEIGHT       3.0f
+static float gPathWeight = ETA_PATH_HEURISTIC_WEIGHT;
 
-#define ETA_PATH_HASH_SIZE 32768
+#define ETA_PATH_HASH_SIZE 131072
 
 /* A jump or a climb costs as much as walking four more squares, two
    metres: for a player who cannot see the edge, stairs a little out of
@@ -725,7 +733,7 @@ static int ETA_Path_Reach(int current, const float to[3], int ix, int iy,
     }
 
     gPathNodes[next].g      = g;
-    gPathNodes[next].f      = g + gPathNodes[next].h * ETA_PATH_HEURISTIC_WEIGHT;
+    gPathNodes[next].f      = g + gPathNodes[next].h * gPathWeight;
     gPathNodes[next].parent = current;
     gPathNodes[next].via    = kind;
 
@@ -823,7 +831,9 @@ void ETA_PathFinder_Begin(const float start[3], const float goal[3],
     gPathFlatGoal   = flatGoal;
 
     first                   = ETA_Path_NewNode(start, 0, 0, 0);
-    gPathNodes[first].f     = gPathNodes[first].h * ETA_PATH_HEURISTIC_WEIGHT;
+    gPathWeight = ETA_Path_FlatDistance(gPathOrigin, gPathGoal) > ETA_PATH_FAR_DISTANCE && !gPathGoalFn
+                  ? ETA_PATH_FAR_WEIGHT : ETA_PATH_HEURISTIC_WEIGHT;
+    gPathNodes[first].f     = gPathNodes[first].h * gPathWeight;
     gPathBest               = first;
     ETA_Path_HeapPush(first);
 
