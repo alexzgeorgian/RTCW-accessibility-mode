@@ -3862,3 +3862,32 @@ Checked from the tester's save: O on the Thompson said "Facing toward
 Thompson..." at once, then "Facing the way. 13 meters, then right..."
 when the way was found; three more presses, each "Facing the way.
 Thompson..." straight away.
+
+### 0222 The tunnel named; semicolon lists only places with things left
+
+The tester, following O through the forest, never knew the tunnel north
+of the farmhouse for the one they remembered, and was stuck in it: the
+areas called it "the corridor with a ladder up", with "No ways out" -
+its way on is its ladder up, onto the hill.
+
+- On a level that begins under the open sky (the trace up from
+  info_player_start meets the sky), an area named a corridor with no
+  door is named a tunnel: "New area: the tunnel with a ladder up".
+  CG_AccessibilityInTunnel: in such an area, or in no area with a roof
+  within 320 units overhead, not the sky.
+- An area with no doors out but a ladder in its name says the ladder is
+  the way on: "The ladder up is the way on", not "No ways out".
+- J says "In the tunnel..." (or "In a tunnel, outdoors" in no area); M
+  begins "In a tunnel".
+- Along the way, twice a second: "A tunnel ahead, N meters: the way goes
+  through it" within 30 points (about 24 metres), once for each tunnel;
+  "In the tunnel" going in, "Out of the tunnel" coming out.
+
+Semicolon, back through the places explored, said place after place
+with nothing left to take or do, and not the Colt's drop with its health
+still there: it is outdoors, in no area. It now lists only the explored
+areas with things left, and the places outdoors with things left too
+(CG_AccessibilityThingsOutdoors: the known things in no area, grouped
+within 15 metres, by the first one's name): "1 place explored with
+things left, 1 of 1, outdoors, Med Health, 4 things left, right, 123
+meters". With none: "Nothing left in the places explored".

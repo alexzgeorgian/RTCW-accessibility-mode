@@ -1,0 +1,451 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 735e9440..9f1383c2 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -77,7 +77,7 @@ static struct
+ 	unsigned char  hasSpot[ETA_AREAS_MAX];
+ 	/* Semicolon's list: the areas explored. */
+ 	int            backPressedAt, backArea, backPos, backCount;
+-	int            back[ETA_AREAS_MAX];
++	int            back[ETA_AREAS_MAX];   /* an area, or -1 - n for the nth place outdoors */
+ 	qboolean       bots;    /* the areas are the bots' rooms */
+ } eta_areas;
+ 
+@@ -683,11 +683,34 @@ static char eta_areaLookKind[ETA_AREAS_MAX][24];
+ static char eta_areaLookMark[ETA_AREAS_MAX][32];
+ static char eta_areaNameCache[ETA_AREAS_MAX][96];   /* each area's name, once said */
+ 
++/* Whether the level begins under the open sky - the forest, the village -
++   where a corridor with no door is a tunnel; -1 not looked yet. */
++static int eta_outdoorMap = -1;
++
++static qboolean ETA_OutdoorMap(void)
++{
++	if (eta_outdoorMap < 0)
++	{
++		vec3_t  start, up;
++		trace_t trace;
++
++		eta_outdoorMap = 0;
++		if (CG_AccessibilityLevelStart(start))
++		{
++			VectorSet(up, start[0], start[1], start[2] + 8192.0f);
++			trap_CM_BoxTrace(&trace, start, up, NULL, NULL, 0, MASK_SOLID);
++			eta_outdoorMap = ( trace.fraction < 1.0f && ( trace.surfaceFlags & SURF_SKY ) ) ? 1 : 0;
++		}
++	}
++	return (qboolean)eta_outdoorMap;
++}
++
+ void CG_AccessibilityAreasLoaded(int count, qboolean bots)
+ {
+ 	memset(&eta_areas, 0, sizeof(eta_areas));
+ 	memset(eta_areaLookDone, 0, sizeof(eta_areaLookDone));
+ 	memset(eta_areaNameCache, 0, sizeof(eta_areaNameCache));
++	eta_outdoorMap = -1;
+ 	eta_areaNoWayCount = 0;
+ 	eta_areas.current = eta_areas.pending = -1;
+ 	eta_areas.bots    = bots;
+@@ -925,7 +948,15 @@ static void ETA_AreaDoorsText(int area, char *out, size_t size)
+ 
+ 	if (!count)
+ 	{
+-		Q_strncpyz(out, "No ways out", size);
++		char name[128];
++
++		/* A ladder is a way out the doors' count does not hold: in the
++		   forest's tunnel, "No ways out" was said of a corridor whose
++		   way on is its ladder up, and the tester was stuck there. */
++		ETA_AreaName(area, name, sizeof(name));
++		Q_strncpyz(out, Q_stristr(name, "ladder up") ? "The ladder up is the way on"
++		           : Q_stristr(name, "ladder down") ? "The ladder down is the way on"
++		           : Q_stristr(name, "ladder") ? "The ladder is the way on" : "No ways out", size);
+ 	}
+ 	else if (!toNew)
+ 	{
+@@ -1092,6 +1123,29 @@ static void ETA_AreaNameBase(int area, char *out, size_t size)
+ 		return;
+ 	}
+ 	ETA_AreaNameWork(area, out, size);
++	/* A corridor with no door, on a level out under the sky: a tunnel.
++	   The forest's tunnel north of the farmhouse was "the corridor with
++	   a ladder up", and the tester, in it, did not know it for the
++	   tunnel they were looking for. */
++	if (area >= 0 && !Q_stricmpn(out, "the corridor", 12) && ETA_OutdoorMap())
++	{
++		int i, doors = 0;
++
++		for (i = 0; i < eta_areas.exitCount; i++)
++		{
++			if (( eta_areas.exits[i].area[0] == area || eta_areas.exits[i].area[1] == area ) && eta_areas.exits[i].model > 0)
++			{
++				doors++;
++			}
++		}
++		if (!doors)
++		{
++			char rest[96];
++
++			Q_strncpyz(rest, out + 12, sizeof(rest));
++			Com_sprintf(out, size, "the tunnel%s", rest);
++		}
++	}
+ 	if (area >= 0 && area < ETA_AREAS_MAX && out[0])
+ 	{
+ 		Q_strncpyz(eta_areaNameCache[area], out, sizeof(eta_areaNameCache[area]));
+@@ -1392,6 +1446,36 @@ static void ETA_AreaLike(int area, char *out, size_t size)
+ }
+ 
+ /* For F1 and J: "In the hall, ground floor. 2 doors out, 1 to a new area". */
++/*
++ * A tunnel: outdoors - in no room the map has - with a roof straight
++ * overhead, not the sky. The tester was led through the forest's tunnel
++ * north of the farmhouse and never knew it: nothing named it, and M told
++ * of trees. Said by J and M, and by the way as it goes into one.
++ */
++#define ETA_TUNNEL_ROOF 320.0f
++
++qboolean CG_AccessibilityInTunnel(const vec3_t at)
++{
++	trace_t trace;
++	vec3_t  up;
++	int     area = CG_AccessibilityAreaOf(at);
++
++	if (!ETA_OutdoorMap())
++	{
++		return qfalse;
++	}
++	if (area >= 0)
++	{
++		char name[128];
++
++		ETA_AreaName(area, name, sizeof(name));
++		return (qboolean)( !Q_stricmpn(name, "the tunnel", 10) );
++	}
++	VectorSet(up, at[0], at[1], at[2] + ETA_TUNNEL_ROOF);
++	trap_CM_BoxTrace(&trace, at, up, NULL, NULL, 0, MASK_SOLID);
++	return (qboolean)( !trace.startsolid && trace.fraction < 1.0f && !( trace.surfaceFlags & SURF_SKY ) );
++}
++
+ void CG_AccessibilityAreaText(char *out, size_t size)
+ {
+ 	int  area = CG_AccessibilityAreaHere();
+@@ -1403,7 +1487,8 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 	   heard "0 areas explored" and took it to mean they were nowhere. */
+ 	if (area < 0)
+ 	{
+-		Q_strncpyz(out, "Outdoors, out of the buildings", size);
++		Q_strncpyz(out, CG_AccessibilityInTunnel(cg.predictedPlayerState.origin) ? "In a tunnel, outdoors"
++		           : "Outdoors, out of the buildings", size);
+ 		return;
+ 	}
+ 	if (!eta_areas.number[area])
+@@ -2321,14 +2406,24 @@ static qboolean ETA_AreaSpot(int area, vec3_t out)
+  * each chosen for O to lead back to. The tester came to the last area of
+  * the first level with a rifle still left behind, and no key that went
+  * back through the areas already seen.
++ *
++ * Only those with things left, now, and the places outdoors with things
++ * left too, which are in no area. The tester, in the forest, heard place
++ * after place with nothing left to take or do, and not the Colt's drop
++ * with its health still lying there.
+  */
++#define ETA_BACK_OUTDOORS 16
++
++static vec3_t eta_backOutAt[ETA_BACK_OUTDOORS];
++static char   eta_backOutWhat[ETA_BACK_OUTDOORS][48];
++static int    eta_backOutCount[ETA_BACK_OUTDOORS];
+ void CG_AccessibilityAreasBack(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 here, i, j, count = 0, withThings = 0, meters, left, area;
++	int                 here, i, j, count = 0, meters, left, area;
+ 	float               far[ETA_AREAS_MAX];
+ 	vec3_t              at, delta;
+-	char                height[64], name[32], things[48];
++	char                height[64], name[64], things[48];
+ 	qboolean            fresh;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -2347,8 +2442,12 @@ void CG_AccessibilityAreasBack(void)
+ 
+ 	if (fresh)
+ 	{
+-		/* Those with things left, then the rest. */
+-		for (j = 0; j < 2; j++)
++		/* Those with things left, and the places outdoors with things
++		   left, nearest first. */
++		int outdoors = CG_AccessibilityThingsOutdoors(eta_backOutAt, eta_backOutWhat, eta_backOutCount,
++		                                              ETA_BACK_OUTDOORS);
++
++		for (j = 0; j < 1; j++)
+ 		{
+ 			int start = count;
+ 
+@@ -2365,9 +2464,10 @@ void CG_AccessibilityAreasBack(void)
+ 				far[count]              = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
+ 				eta_areas.back[count++] = i;
+ 			}
+-			if (!j)
++			for (i = 0; i < outdoors && count < ETA_AREAS_MAX; i++)
+ 			{
+-				withThings = count;
++				far[count]              = Distance(ps->origin, eta_backOutAt[i]) + fabsf(eta_backOutAt[i][2] - ps->origin[2]);
++				eta_areas.back[count++] = -1 - i;
+ 			}
+ 			/* Nearest first within each part. */
+ 			for (i = start; i < count; i++)
+@@ -2394,15 +2494,25 @@ void CG_AccessibilityAreasBack(void)
+ 		eta_areas.backPos   = -1;
+ 		if (!count)
+ 		{
+-			ETA_Speech_Say("No other area explored yet. X finds the doors out");
++			ETA_Speech_Say("Nothing left in the places explored. X finds the doors out");
+ 			return;
+ 		}
+ 	}
+ 
+ 	eta_areas.backPos = ( eta_areas.backPos + 1 ) % eta_areas.backCount;
+ 	area              = eta_areas.back[eta_areas.backPos];
+-	ETA_AreaSpot(area, at);
+-	left = CG_AccessibilityThingsLeftIn(area);
++	if (area < 0)
++	{
++		int out = -1 - area;
++
++		VectorCopy(eta_backOutAt[out], at);
++		left = eta_backOutCount[out];
++	}
++	else
++	{
++		ETA_AreaSpot(area, at);
++		left = CG_AccessibilityThingsLeftIn(area);
++	}
+ 	if (left)
+ 	{
+ 		Com_sprintf(things, sizeof(things), ", %d %s left", left, left == 1 ? "thing" : "things");
+@@ -2420,11 +2530,14 @@ void CG_AccessibilityAreasBack(void)
+ 	ETA_Speech_BeginReport();
+ 	if (fresh)
+ 	{
+-		ETA_Speech_Say(withThings ? va("%d other %s explored, %d with things left", eta_areas.backCount,
+-		                               eta_areas.backCount == 1 ? "area" : "areas", withThings)
+-		               : va("%d other %s explored, nothing left in them", eta_areas.backCount,
+-		                    eta_areas.backCount == 1 ? "area" : "areas"));
++		ETA_Speech_Say(va("%d %s explored with things left", eta_areas.backCount,
++		                  eta_areas.backCount == 1 ? "place" : "places"));
++	}
++	if (area < 0)
++	{
++		Com_sprintf(name, sizeof(name), "outdoors, %s", eta_backOutWhat[-1 - area]);
+ 	}
++	else
+ 	{
+ 		char bname[128];
+ 
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index a4533354..5452ed6d 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7778,6 +7778,10 @@ void CG_AccessibilityAhead_f(void)
+ 		Q_strcat(text, sizeof(text), "Open floor ahead, 13 meters or more");
+ 	}
+ 	ETA_HudNarrator_HoldPassive(cg.time);
++	if (CG_AccessibilityInTunnel(cg.predictedPlayerState.origin))
++	{
++		ETA_Speech_Say("In a tunnel");
++	}
+ 	ETA_Speech_Say(text);
+ 	/* Then what a sighted player would see: the tester asked M to
+ 	   describe the place as one sees it. Said on its own, each part
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index f48835eb..0d6d9792 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2097,6 +2097,83 @@ static void ETA_RouteSayStairs(int nearest, int special, const vec3_t here)
+ 	ETA_Speech_EndReport();
+ }
+ 
++/*
++ * A tunnel on the way (CG_AccessibilityInTunnel): said as the way comes
++ * to it, within 25 metres, and as the player goes in and comes out. The
++ * tester, led to the Snooper rifle through the forest's tunnel, did not
++ * know there was one, nor where it was. Looked at twice a second.
++ */
++#define ETA_ROUTE_TUNNEL_AHEAD 30      /* points of the way looked along, 32 units each */
++#define ETA_ROUTE_TUNNEL_AGAIN 1500.0f /* this far from the last said: another tunnel */
++
++static struct
++{
++	int      lookAt;
++	qboolean in;
++	qboolean said;
++	vec3_t   saidAt;
++} eta_routeTunnel;
++
++static void ETA_RouteTunnel(ETA_PathState state, const vec3_t here)
++{
++	int    count = ETA_PathFinder_PointCount(), i;
++	vec3_t point;
++
++	if (( state != ETA_PATH_FOUND && state != ETA_PATH_PARTIAL ) || cg.time < eta_routeTunnel.lookAt
++	    || cg.time - eta_routeTunnel.lookAt < 500)
++	{
++		if (cg.time < eta_routeTunnel.lookAt)
++		{
++			eta_routeTunnel.lookAt = cg.time;
++		}
++		return;
++	}
++	eta_routeTunnel.lookAt = cg.time;
++
++	if (CG_AccessibilityInTunnel(here))
++	{
++		if (!eta_routeTunnel.in)
++		{
++			eta_routeTunnel.in = qtrue;
++			ETA_Speech_BeginReport();
++			ETA_Speech_Say("In the tunnel");
++			ETA_Speech_EndReport();
++		}
++		return;
++	}
++	if (eta_routeTunnel.in)
++	{
++		eta_routeTunnel.in = qfalse;
++		ETA_Speech_BeginReport();
++		ETA_Speech_Say("Out of the tunnel");
++		ETA_Speech_EndReport();
++		return;
++	}
++	for (i = eta_route.along + 1; i < count && i <= eta_route.along + ETA_ROUTE_TUNNEL_AHEAD; i++)
++	{
++		ETA_PathFinder_Point(i, point);
++		if (!CG_AccessibilityInTunnel(point))
++		{
++			continue;
++		}
++		if (eta_routeTunnel.said && Distance(point, eta_routeTunnel.saidAt) < ETA_ROUTE_TUNNEL_AGAIN)
++		{
++			return;
++		}
++		eta_routeTunnel.said = qtrue;
++		VectorCopy(point, eta_routeTunnel.saidAt);
++		{
++			int meters = (int)( Distance(here, point) * ETA_QU_TO_METERS + 0.5f );
++
++			ETA_Speech_BeginReport();
++			ETA_Speech_Say(va("A tunnel ahead, %d %s: the way goes through it", meters < 1 ? 1 : meters,
++			                  meters == 1 ? "meter" : "meters"));
++			ETA_Speech_EndReport();
++		}
++		return;
++	}
++}
++
+ /**
+  * @brief Follows the way found, if there is one: sets eta_route.steer.
+  */
+@@ -2385,6 +2462,7 @@ static void ETA_RouteFrame(void)
+ 	VectorCopy(cg.predictedPlayerState.origin, here);
+ 
+ 	ETA_RouteFollow(state, here);
++	ETA_RouteTunnel(state, here);
+ 
+ 	/* Where the ping wants to be: along the way, or straight at the
+ 	   marker. */
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 0b5bfca0..54715ea6 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -680,6 +680,47 @@ int CG_AccessibilityThingsLeftIn(int area)
+ 	return left;
+ }
+ 
++/*
++ * For the explored places' list: the things left outdoors, in no area,
++ * grouped where they lie within 15 metres of each other - the first one's
++ * name, where it lies, and how many. The tester, back through the places
++ * explored with semicolon, did not find the Colt's drop in the forest,
++ * health still lying there: it is in no area. qfalse groups past max.
++ */
++#define ETA_THINGS_OUTDOOR_GROUP 600.0f
++
++int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int max)
++{
++	int i, g, n = 0;
++
++	ETA_ThingsRecord();
++	for (i = 0; i < eta_things.count; i++)
++	{
++		const eta_thing_t *thing = &eta_things.things[i];
++
++		if (thing->done || thing->pressed || thing->ride || !thing->known
++		    || CG_AccessibilityAreaOf(thing->point) >= 0)
++		{
++			continue;
++		}
++		for (g = 0; g < n; g++)
++		{
++			if (Distance(at[g], thing->point) < ETA_THINGS_OUTDOOR_GROUP)
++			{
++				count[g]++;
++				break;
++			}
++		}
++		if (g == n && n < max)
++		{
++			VectorCopy(thing->point, at[n]);
++			Q_strncpyz(what[n], thing->name, sizeof(what[0]));
++			count[n++] = 1;
++		}
++	}
++	return n;
++}
++
+ /* For an area come into: "4 things left here: 2 items, 1 switch". */
+ void CG_AccessibilityThingsInArea(int area, char *out, size_t size)
+ {
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6db674f4..6459084f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4675,6 +4675,17 @@ static qboolean ETA_ByTramWay(const vec3_t at)
+ static vec3_t   eta_levelStart;
+ static qboolean eta_levelStartSet;
+ 
++/* Where the level begins, if the map says. */
++qboolean CG_AccessibilityLevelStart(vec3_t out)
++{
++	ETA_WorldRead();
++	if (eta_levelStartSet)
++	{
++		VectorCopy(eta_levelStart, out);
++	}
++	return eta_levelStartSet;
++}
++
+ #define ETA_MAX_TRAM_STATIONS 4
+ static vec3_t eta_tramStations[ETA_MAX_TRAM_STATIONS];
+ static int    eta_tramStationCount = -1;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 039ad48a..78aebd5c 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2305,6 +2305,8 @@ void CG_AccessibilityAreasLoaded( int count, qboolean bots );
+ qboolean CG_AccessibilityAreasOn( void );
+ int CG_AccessibilityAreaOf( const vec3_t at );
+ int CG_AccessibilityAreaHere( void );
++qboolean CG_AccessibilityInTunnel( const vec3_t at );
++qboolean CG_AccessibilityLevelStart( vec3_t out );
+ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
+ void CG_AccessibilityAreaText( char *out, size_t size );
+@@ -2313,6 +2315,7 @@ qboolean CG_AccessibilityAreasSomethingNew( void );
+ void CG_AccessibilityAreasNoWay( const vec3_t point );
+ void CG_AccessibilityAreasBack( void );
+ int CG_AccessibilityThingsLeftIn( int area );
++int CG_AccessibilityThingsOutdoors( vec3_t *at, char ( *what )[48], int *count, int max );
+ void CG_AccessibilityHealth_f( void );
+ void CG_AccessibilityAmmo_f( void );
+ qboolean CG_AccessibilityDoorBox( int model, vec3_t mins, vec3_t maxs, qboolean *opens );
