@@ -1,0 +1,123 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 199d239f..36f01fd0 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -427,12 +427,72 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+    the village's walkway to the rifle, a wall's top 1.8 metres wide with
+    a five metre drop beside it, the way ran along the very edge, and the
+    test player stepped off it again and again. */
++/*
++ * The soldiers alive in the level as the way is planned, from the server
++ * (CS_ETA_ENEMIES): the way keeps its distance from them. The tester, in
++ * the forest, was led to the Snooper rifle the long way round, past five
++ * soldiers, and remembered a quieter way. A square within ETA_ROUTE_ENEMY_
++ * NEAR of one costs up to ETA_ROUTE_ENEMY_SQUARES more, the more the
++ * nearer, however many are near - enough to take a way round worth the
++ * walk, never to leave the player with none. In the forest, with the
++ * farmhouse's soldiers in, the way to the rifle turns north short of the
++ * house and goes round along the low ground instead of through it.
++ */
++#define ETA_ROUTE_ENEMY_MAX      40
++#define ETA_ROUTE_ENEMY_NEAR     768.0f   /* about 20 metres */
++#define ETA_ROUTE_ENEMY_SQUARES  16.0f
++
++static vec3_t eta_routeEnemies[ETA_ROUTE_ENEMY_MAX];
++static int    eta_routeEnemyCount;
++
++static void ETA_RouteEnemiesRead(void)
++{
++	const char *list = CG_ConfigString(CS_ETA_ENEMIES);
++
++	eta_routeEnemyCount = 0;
++	while (list && *list && eta_routeEnemyCount < ETA_ROUTE_ENEMY_MAX)
++	{
++		int    c;
++		vec3_t at;
++
++		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4)
++		{
++			VectorCopy(at, eta_routeEnemies[eta_routeEnemyCount]);
++			eta_routeEnemyCount++;
++		}
++		list = strchr(list, ';');
++		if (list)
++		{
++			list++;
++		}
++	}
++}
++
++static float ETA_RouteEnemyExtra(const float at[3])
++{
++	float extra = 0.0f;
++	int   i;
++
++	for (i = 0; i < eta_routeEnemyCount; i++)
++	{
++		float dx = at[0] - eta_routeEnemies[i][0], dy = at[1] - eta_routeEnemies[i][1];
++		float d  = sqrtf(dx * dx + dy * dy);
++
++		if (d < ETA_ROUTE_ENEMY_NEAR && fabsf(at[2] - eta_routeEnemies[i][2]) < 512.0f)
++		{
++			extra += ETA_ROUTE_ENEMY_SQUARES * ( 1.0f - d / ETA_ROUTE_ENEMY_NEAR );
++		}
++	}
++	return extra < ETA_ROUTE_ENEMY_SQUARES ? extra : ETA_ROUTE_ENEMY_SQUARES;
++}
++
+ static float ETA_RouteEdgeExtra(const float at[3])
+ {
+ 	static const float near[5][2] = { { 0, 0 }, { 16, 0 }, { -16, 0 }, { 0, 16 }, { 0, -16 } };
+ 	trace_t            trace;
+ 	vec3_t             top, bottom;
+ 	int                i;
++	float              enemies = ETA_RouteEnemyExtra(at);
+ 
+ 	/* The middle, and half a square to each side: an edge that near is
+ 	   one a step to the side goes over. */
+@@ -443,10 +503,10 @@ static float ETA_RouteEdgeExtra(const float at[3])
+ 		trap_CM_BoxTrace(&trace, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
+ 		if (!trace.startsolid && trace.fraction >= 1.0f)
+ 		{
+-			return 3.0f;
++			return 3.0f + enemies;
+ 		}
+ 	}
+-	return 0.0f;
++	return enemies;
+ }
+ 
+ /**
+@@ -1383,6 +1443,7 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 		eta_routeOpenBreakables = qfalse;
+ 	}
+ 	ETA_RouteLockedDoors();
++	ETA_RouteEnemiesRead();
+ 	ETA_RouteStartAt(cg.predictedPlayerState.origin, start);
+ 	goal[0]  = eta_marker.origin[0];
+ 	goal[1]  = eta_marker.origin[1];
+@@ -1462,19 +1523,21 @@ void CG_AccessibilityNavSweep_f(void)
+ 			goal[k] = (float)atof(num);
+ 		}
+ 		ETA_RouteLockedDoors();
++		ETA_RouteEnemiesRead();
+ 		ETA_RouteStartAt(from, start);
+ 		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS, qfalse);
+ 		began = trap_Milliseconds();
+ 		do
+ 		{
+ 			ETA_PathFinder_SetLeap(ETA_RouteLeap);
++			ETA_PathFinder_SetExtra(ETA_RouteEdgeExtra);
+ 			state = ETA_PathFinder_Step(ETA_ROUTE_BUDGET_STEP, ETA_RouteMove, NULL);
+ 		}
+ 		while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
+ 		count = ETA_PathFinder_PointCount();
+-		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d ms %d\n", state,
+-		          start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables, ETA_PathFinder_AllTried(),
+-		          trap_Milliseconds() - began);
++		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d ms %d enemies %d\n",
++		          state, start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables,
++		          ETA_PathFinder_AllTried(), trap_Milliseconds() - began, eta_routeEnemyCount);
+ 		for (k = 0; k < count; k++)
+ 		{
+ 			ETA_PathFinder_Point(k, point);

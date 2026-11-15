@@ -3780,3 +3780,20 @@ The tester also found VoiceOver louder than the game. A game cannot set
 VoiceOver's volume, so the game is turned up instead: Accessibility,
 Volumes gains "The game's sounds" (s_volume) and "The game's music"
 (s_musicvolume), Full down to Off, as on the game's System page.
+
+### 0218 The way keeps clear of soldiers
+
+The tester, in the forest, was led to the Snooper rifle past the
+farmhouse's soldiers, and remembered a way round unseen. The route now
+reads the soldiers alive in the level as it is planned (CS_ETA_ENEMIES,
+from the server) and a square within 768 units (about 20 metres) of one
+costs up to 16 squares more, the nearer the more, capped at 16 however
+many are near: a way round is taken when it is worth the walk, and the
+way through is kept when there is no other. With the farmhouse's
+soldiers in (placed for the test), the way to the rifle turns north
+short of the house at about (-40 3640), runs along the low ground to
+(-136 4920) and west along y 4984 before climbing toward the barn,
+instead of through the house along y 3672. At the start, with only two
+soldiers in, O still leads to the rifle as before. The test command
+(accessibilityNavSweep route) uses the same costs and prints how many
+soldiers it kept clear of.
