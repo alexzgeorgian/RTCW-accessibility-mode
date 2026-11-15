@@ -3686,3 +3686,18 @@ is: outdoors - in no room the map has - "Outdoors, out of the
 buildings"; in an area, "In the room with the way out, low down in the
 level. 1 way out, 1 to a new area", with no count. Checked in the forest,
 at the start and in the room with the way out.
+
+### 0213 M says what a sighted player would see
+
+The tester asked for M to describe the place as a sighted player sees it.
+After the ground ahead - steps, ledges, drops, gaps, as before - M now
+says, as a second line, what the eye meets to the left, ahead left,
+ahead, ahead right and right, within forty metres, named as the
+binoculars name it, with how far: "Left: grass ground, 37 meters; ahead
+left: grass ground, 38 meters; ahead: open; ahead right: grass wall, 32
+meters; right: grass wall, 20 meters." Then, where there are any, the
+things to use and the people in view, in front and not behind a wall,
+up to four: "In view: Button for a door, ahead left, 9 meters". Each line
+is said on its own, within what one line of speech may hold (512
+characters: one report of both was too long, and nothing was said).
+Checked in the forest and the tomb's arena, with the command itself.

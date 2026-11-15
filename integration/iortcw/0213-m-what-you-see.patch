@@ -1,0 +1,139 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index d158d6da..44ca9dfb 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7689,6 +7689,18 @@ void CG_AccessibilityAhead_f(void)
+ 	}
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_Speech_Say(text);
++	/* Then what a sighted player would see: the tester asked M to
++	   describe the place as one sees it. Said on its own, each part
++	   within what one line of speech may hold. */
++	{
++		char view[480];
++
++		CG_AccessibilityViewText(view, sizeof(view));
++		if (view[0])
++		{
++			ETA_Speech_Say(view);
++		}
++	}
+ }
+ 
+ #endif
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index c82551e9..4151805c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -369,6 +369,99 @@ static void ETA_DescribeTraceHit(const trace_t *trace, char *out, size_t outSize
+ 	ETA_DescribeSurface(trace, out, outSize);
+ }
+ 
++/*
++ * For M: what a sighted player would see, after the ground ahead - to the
++ * left, ahead and to the right, what the eye meets and how far, the way
++ * the binoculars name a thing; then what is to use and who is in view,
++ * with where and how far. The tester asked for M to describe the place as
++ * a sighted player sees it.
++ */
++#define ETA_VIEW_RANGE 1600.0f   /* about forty metres */
++
++static void ETA_ViewLook(const vec3_t eye, float yaw, char *out, size_t size)
++{
++	vec3_t  dir, end;
++	trace_t tr;
++	int     meters;
++
++	VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++	VectorMA(eye, ETA_VIEW_RANGE, dir, end);
++	CG_Trace(&tr, eye, NULL, NULL, end, cg.snap->ps.clientNum, MASK_SHOT);
++	if (tr.fraction >= 1.0f || ( tr.surfaceFlags & SURF_SKY ))
++	{
++		Q_strncpyz(out, "open", size);
++		return;
++	}
++	meters = (int)( Distance(eye, tr.endpos) * ETA_QU_TO_METERS + 0.5f );
++	ETA_DescribeTraceHit(&tr, out, size);
++	out[0] = (char)tolower((unsigned char)out[0]);
++	Q_strcat(out, size, va(", %d %s", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++}
++
++void CG_AccessibilityViewText(char *out, size_t size)
++{
++	static const struct
++	{
++		float       off;
++		const char *where;
++	} looks[] = {
++		{ 60.0f, "Left" }, { 30.0f, "ahead left" }, { 0.0f, "ahead" },
++		{ -30.0f, "ahead right" }, { -60.0f, "right" },
++	};
++	const playerState_t *ps = &cg.predictedPlayerState;
++	etaAimTarget_t       list[16];
++	vec3_t               eye;
++	char                 seen[5][96];
++	int                  i, count, said = 0;
++
++	out[0] = '\0';
++	if (!cg.snap)
++	{
++		return;
++	}
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++
++	/* Left to right, a look each way, the same thing said once. */
++	for (i = 0; i < (int)ARRAY_LEN(looks); i++)
++	{
++		ETA_ViewLook(eye, ps->viewangles[YAW] + looks[i].off, seen[i], sizeof(seen[i]));
++	}
++	for (i = 0; i < (int)ARRAY_LEN(looks); i++)
++	{
++		Q_strcat(out, size, va("%s%s: %s", i ? "; " : "", looks[i].where, seen[i]));
++	}
++	Q_strcat(out, size, ".");
++
++	/* Things to use, and people, in view: in front, and not behind a wall. */
++	count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list));
++	count += CG_AccessibilityEnemyTargets(list + count, ARRAY_LEN(list) - count, qfalse);
++	for (i = 0; i < count && said < 4; i++)
++	{
++		float   left = CG_AccessibilityLeftOfView(list[i].point);
++		trace_t tr;
++
++		if (fabsf(left) > 50.0f || list[i].meters > 40.0f || !list[i].name[0])
++		{
++			continue;
++		}
++		CG_Trace(&tr, eye, NULL, NULL, list[i].point, ps->clientNum, MASK_SOLID);
++		if (tr.fraction < 0.97f)
++		{
++			continue;
++		}
++		Q_strcat(out, size, va("%s%s, %s, %d %s", said ? "; " : " In view: ", list[i].name,
++		                       ETA_HudNarrator_RelativeDirection(left),
++		                       (int)( list[i].meters + 0.5f ) < 1 ? 1 : (int)( list[i].meters + 0.5f ),
++		                       (int)( list[i].meters + 0.5f ) <= 1 ? "meter" : "meters"));
++		said++;
++	}
++	if (said)
++	{
++		Q_strcat(out, size, ".");
++	}
++}
++
+ static qboolean ETA_DescribeLookAhead(char *out, size_t outSize, int *distanceMeters, float range, trace_t *outTrace)
+ {
+ 	trace_t trace;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index b5be9d69..c57aff46 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2233,6 +2233,7 @@ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ qboolean CG_AccessibilityLeadBusy( void );
+ qboolean CG_AccessibilityRouteSearching( void );
++void CG_AccessibilityViewText( char *out, size_t size );
+ void CG_AccessibilityThingsFightForget( void );
+ void CG_AccessibilityFightsUndone( void );
+ void CG_AccessibilityFightsGoOn( void );
