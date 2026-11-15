@@ -3758,3 +3758,25 @@ one the level brings in later is left out; once carried, it is gone from
 the list. Checked in the forest with only the starting weapons: K gives
 the Sniper Scope, the Colt, the Snooper Rifle and the Thompson, and O
 finds the way to the scope.
+
+### 0217 The Load menu in categories; the game's volumes on Volumes
+
+The tester found the Load menu not set out in categories as Options is:
+the autosaves were behind the game's own switch, a button with no words
+on it. ui/accessibility_tabs.menu gains a second kind of line, "item
+MENU AFTER itemDef { name ... }", an item of the mode's own kept under its
+own name (UI_AccessibilityAddItem; put in once however often the menus
+are read). The Load menu and the paused game's Load page each get two,
+before the list: "Saved games" and "Autosaves". Each is said as a
+category, with ", showing now" on the one the list shows; Enter shows it
+and says how many saves it holds - "Autosaves, 6 saves" (uiScript
+etaSavesSay). The game's wordless switch is passed by. The menu opens
+with "Load game. Saved games, 9 saves", and the list is named after the
+category it shows. Checked on the paused game's Load page: Tab gives
+"Saved games, category, showing now", "Autosaves, category"; Enter on it
+"Autosaves, 6 saves", and the list then reads the autosaves.
+
+The tester also found VoiceOver louder than the game. A game cannot set
+VoiceOver's volume, so the game is turned up instead: Accessibility,
+Volumes gains "The game's sounds" (s_volume) and "The game's music"
+(s_musicvolume), Full down to Off, as on the game's System page.

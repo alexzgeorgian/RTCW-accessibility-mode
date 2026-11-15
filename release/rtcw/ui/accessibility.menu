@@ -83,6 +83,25 @@
 		visible 1 \
 	}
 
+/* The game's own volumes, 0 to 1, as on its System page: here too, as
+   the tester found VoiceOver louder than the game, and turns the game up
+   from where the mode's volumes are. */
+#define ETA_GAME_VOLUME(Y, TEXT, CVAR) itemDef { \
+		type ITEM_TYPE_MULTI \
+		text TEXT \
+		cvar CVAR \
+		cvarFloatList { "Full" 1 "90 percent" 0.9 "80 percent" 0.8 "70 percent" 0.7 "60 percent" 0.6 "50 percent" 0.5 "40 percent" 0.4 "30 percent" 0.3 "25 percent" 0.25 "20 percent" 0.2 "10 percent" 0.1 "Off" 0 } \
+		rect 32 Y 379 14 \
+		textalign ITEM_ALIGN_RIGHT \
+		textalignx 250 \
+		textaligny 11 \
+		textscale .22 \
+		style WINDOW_STYLE_FILLED \
+		backcolor 1 1 1 .07 \
+		forecolor 1 1 1 1 \
+		visible 1 \
+	}
+
 #define ETA_VOLUME(Y, TEXT, CVAR) itemDef { \
 		type ITEM_TYPE_MULTI \
 		text TEXT \
@@ -195,7 +214,9 @@ menuDef {
 	ETA_VOLUME(104, "Bump volume", "eta_bumpVolume")
 	ETA_VOLUME(122, "Marker volume", "eta_markerVolume")
 	ETA_VOLUME(140, "The game's alarm volume", "eta_alarmVolume")
-	ETA_BUTTON(168, "BACK", close eta_acc_volumes ; open eta_accessibility)
+	ETA_GAME_VOLUME(158, "The game's sounds", "s_volume")
+	ETA_GAME_VOLUME(176, "The game's music", "s_musicvolume")
+	ETA_BUTTON(204, "BACK", close eta_acc_volumes ; open eta_accessibility)
 }
 
 // Moving and aiming: the help with turning, walking and aiming.

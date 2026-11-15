@@ -1,0 +1,155 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 88a5fcd9..46f7befe 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -185,6 +185,8 @@ static void UI_AccessibilityMenuOpened( menuDef_t *menu );
+ static void UI_AccessibilityMenus( void );
+ static void UI_AccessibilityCloseMenus( void );
+ static void UI_AccessibilityLeave( void );
++static const char *UI_AccessibilitySavesText( void );
++static void UI_AccessibilitySay( const char *text );
+ static qboolean UI_AccessibilitySetupPage( const char *name );
+ static qboolean UI_AccessibilityIngamePage( const char *name );
+ static const char *UI_AccessibilityFeederRow( int feederID, int index );
+@@ -4664,6 +4666,10 @@ static void UI_RunMenuScript( char **args ) {
+ 			UI_AccessibilityLeave();
+ 			return;
+ 		}
++		if ( Q_stricmp( name, "etaSavesSay" ) == 0 ) {
++			UI_AccessibilitySay( UI_AccessibilitySavesText() );
++			return;
++		}
+ #endif
+ 		if ( Q_stricmp( name, "StartServer" ) == 0 ) {
+ 			float skill;
+@@ -8152,6 +8158,60 @@ static void UI_AccessibilitySkipBlock( int handle ) {
+ 	}
+ }
+ 
++/*
++ * An item of the mode's own put into one of the game's menus, under its
++ * own name, after the item it follows: "item" in the tabs file, where
++ * "tab" is the Accessibility button. Read again when the menus are, it is
++ * not put in twice.
++ *
++ * The Load menu's two categories, "Saved games" and "Autosaves", are
++ * these: the tester found the Load menu not set out in categories as
++ * Options is, with the autosaves behind a switch with no words on it.
++ */
++static void UI_AccessibilityAddItem( menuDef_t *menu, const char *after, int handle ) {
++	itemDef_t *added;
++	int i, at = -1;
++
++	if ( !MenuParse_itemDef( (itemDef_t*)menu, handle ) || menu->itemCount <= 0 ) {
++		return;
++	}
++	added = menu->items[menu->itemCount - 1];
++	for ( i = 0; i < menu->itemCount - 1; i++ ) {
++		if ( added->window.name && menu->items[i]->window.name
++			 && !Q_stricmp( menu->items[i]->window.name, added->window.name ) ) {
++			menu->itemCount--;
++			return;
++		}
++	}
++	Item_UpdatePosition( added );
++	for ( i = 0; i < menu->itemCount - 1; i++ ) {
++		if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, after ) ) {
++			at = i + 1;
++		}
++		/* The game's switch with no words on it: the categories do
++		   what it did, and the arrows pass it by. */
++		if ( menu->items[i]->window.name && !Q_stricmp( menu->items[i]->window.name, "autosave" )
++			 && menu->items[i]->type == ITEM_TYPE_MULTI ) {
++			menu->items[i]->window.flags |= WINDOW_DECORATION;
++		}
++	}
++	if ( at >= 0 ) {
++		for ( i = menu->itemCount - 1; i > at; i-- ) {
++			menu->items[i] = menu->items[i - 1];
++		}
++		menu->items[at] = added;
++	}
++}
++
++/* Which saves the Load menu shows, and how many: said as a category is
++   chosen, and as the menu opens. */
++static const char *UI_AccessibilitySavesText( void ) {
++	int n = uiInfo.savegameCount;
++
++	return va( "%s, %s", trap_Cvar_VariableValue( "ui_savegameListAutosave" ) ? "Autosaves" : "Saved games",
++			   n == 0 ? "none" : n == 1 ? "1 save" : va( "%d saves", n ) );
++}
++
+ static void UI_AccessibilityAddTab( menuDef_t *menu, const char *after, int handle ) {
+ 	itemDef_t *tab;
+ 	int i, at = -1;
+@@ -8240,13 +8300,15 @@ static void UI_AccessibilityMenus( void ) {
+ 	while ( trap_PC_ReadToken( handle, &token ) ) {
+ 		char name[64], after[64];
+ 		menuDef_t *menu;
++		qboolean own;
+ 
+ 		if ( token.string[0] == '{' ) {
+ 			continue;
+ 		}
+-		if ( token.string[0] == '}' || Q_stricmp( token.string, "tab" ) ) {
++		if ( token.string[0] == '}' || ( Q_stricmp( token.string, "tab" ) && Q_stricmp( token.string, "item" ) ) ) {
+ 			break;
+ 		}
++		own = !Q_stricmp( token.string, "item" );
+ 		if ( !trap_PC_ReadToken( handle, &token ) ) {
+ 			break;
+ 		}
+@@ -8260,6 +8322,14 @@ static void UI_AccessibilityMenus( void ) {
+ 		}
+ 
+ 		menu = Menus_FindByName( name );
++		if ( own ) {
++			if ( menu ) {
++				UI_AccessibilityAddItem( menu, after, handle );
++			} else {
++				UI_AccessibilitySkipBlock( handle );
++			}
++			continue;
++		}
+ 		if ( !menu || Menu_FindItemByName( menu, ETA_ACCESSIBILITY_TAB ) ) {
+ 			UI_AccessibilitySkipBlock( handle );
+ 			continue;
+@@ -8302,6 +8372,8 @@ static void UI_AccessibilityMenuOpened( menuDef_t *menu ) {
+ 			if ( eta_menus[i].read && ETA_MenuScreenText( menu, text, sizeof( text ) ) ) {
+ 				/* The name and the page as one line, for VoiceOver. */
+ 				ETA_Speech_SayLong( va( "%s. %s", eta_menus[i].name, text ) );
++			} else if ( !Q_stricmp( name, "load_menu" ) || !Q_stricmp( name, "ingame_load" ) ) {
++				UI_AccessibilitySay( va( "%s. %s", eta_menus[i].name, UI_AccessibilitySavesText() ) );
+ 			} else {
+ 				UI_AccessibilitySay( eta_menus[i].name );
+ 			}
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index b4f9b9c2..47b12197 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -1924,6 +1924,15 @@ const char *ETA_MenuItem_Label( itemDef_t *item ) {
+ 	if ( !item ) {
+ 		return NULL;
+ 	}
++	/* The Load menu's categories (ui/accessibility_tabs.menu): which one
++	   the list shows now is said with it. */
++	if ( item->window.name && ( !Q_stricmp( item->window.name, "eta_saves_manual" )
++								|| !Q_stricmp( item->window.name, "eta_saves_auto" ) ) ) {
++		qboolean autos = (qboolean)!Q_stricmp( item->window.name, "eta_saves_auto" );
++		qboolean shown = (qboolean)( ( DC->getCVarValue( "ui_savegameListAutosave" ) != 0.0f ) == autos );
++
++		return va( "%s, category%s", autos ? "Autosaves" : "Saved games", shown ? ", showing now" : "" );
++	}
+ 	if ( item->text && item->text[0] ) {
+ 		/* Without the colon and the spaces the screen puts between a
+ 		   label and its value: "Lookup:  , Page Down" read as it is. */
+@@ -1988,7 +1997,7 @@ const char *ETA_MenuItem_Label( itemDef_t *item ) {
+ 	if ( item->type == ITEM_TYPE_LISTBOX ) {
+ 		switch ( (int)item->special ) {
+ 		case FEEDER_SAVEGAMES:
+-			return "Saved games";
++			return DC->getCVarValue( "ui_savegameListAutosave" ) ? "Autosaves" : "Saved games";
+ 		case FEEDER_MODS:
+ 			return "Mods";
+ 		case FEEDER_CINEMATICS:

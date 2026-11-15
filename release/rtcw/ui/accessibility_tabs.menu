@@ -6,9 +6,13 @@
 // there. Not among the Setup tabs that OPTIONS opens: that screen gives
 // the keyboard to its Controls page at once, and the tabs above it are
 // out of the arrows' reach. The game's menu files are the game's, and are
-// not shipped; this is the one item added to each.
+// not shipped; this is the one tab added to each, and the Load menus
+// get their two categories (below).
 //
 //   tab <menu it goes in> <item it follows> itemDef { ... }
+//   item <menu it goes in> <item it follows> itemDef { name ... }
+//
+// "item" is any other item of the mode's own, kept under its own name.
 //
 // The two names bare, not quoted: the menu reader joins quoted strings
 // side by side into one.
@@ -53,5 +57,87 @@
 			close ingame_leave ;
 			uiScript etaAccessibilityClose ;
 			open eta_accessibility }
+	}
+
+	// The Load menu's two categories, as Options has its pages: the saved
+	// games, and the autosaves. The game's own switch between them has no
+	// words on it; the arrows pass it by once these are in. Put second
+	// after the first, each after the last of the menu's frames ("window2"),
+	// so they come before the list.
+
+	item load_menu window2 itemDef {
+		name eta_saves_auto
+		text "AUTOSAVES"
+		type ITEM_TYPE_BUTTON
+		style 0
+		textstyle 6
+		rect 400 170 150 14
+		textalign 0
+		textscale .23
+		textalignx 2
+		textaligny 12
+		forecolor .9 .9 .9 1
+		visible 1
+		textfont UI_FONT_NORMAL
+		action { setcvar ui_savegameListAutosave 1 ;
+			uiScript update "ui_savegameListAutosave" ;
+			uiScript etaSavesSay }
+	}
+
+	item load_menu window2 itemDef {
+		name eta_saves_manual
+		text "SAVED GAMES"
+		type ITEM_TYPE_BUTTON
+		style 0
+		textstyle 6
+		rect 400 152 150 14
+		textalign 0
+		textscale .23
+		textalignx 2
+		textaligny 12
+		forecolor .9 .9 .9 1
+		visible 1
+		textfont UI_FONT_NORMAL
+		action { setcvar ui_savegameListAutosave 0 ;
+			uiScript update "ui_savegameListAutosave" ;
+			uiScript etaSavesSay }
+	}
+
+	item ingame_load window2 itemDef {
+		name eta_saves_auto
+		text "AUTOSAVES"
+		type ITEM_TYPE_BUTTON
+		style 0
+		textstyle 6
+		rect 310 68 150 14
+		textalign 0
+		textscale .23
+		textalignx 2
+		textaligny 12
+		forecolor .9 .9 .9 1
+		visible 1
+		textfont UI_FONT_NORMAL
+		action { setcvar ui_savegameListAutosave 1 ;
+			uiScript update "ui_savegameListAutosave" ;
+			uiScript etaSavesSay }
+	}
+
+	item ingame_load window2 itemDef {
+		name eta_saves_manual
+		text "SAVED GAMES"
+		type ITEM_TYPE_BUTTON
+		style 0
+		textstyle 6
+		rect 310 50 150 14
+		textalign 0
+		textscale .23
+		textalignx 2
+		textaligny 12
+		forecolor .9 .9 .9 1
+		visible 1
+		textfont UI_FONT_NORMAL
+		action { setcvar ui_savegameListAutosave 0 ;
+			uiScript update "ui_savegameListAutosave" ;
+			uiScript etaSavesSay }
 	}
 }
