@@ -3815,3 +3815,19 @@ forest's start, with all 22 soldiers counted, the way to the rifle now
 goes north past the farmhouse's corner to (-136 4952), west through the
 tunnel along y 4984 to (-1416 4984), then up and on to the barn, where
 it went through the farmhouse along y 3672 before.
+
+### 0220 Out of the soldiers' sight
+
+Past the farmhouse, with the Colt, the tester was led out onto a street
+in the open where everyone could see them, crouched or not: 0218 kept
+the way 20 metres from a soldier, and in the open that is no cover. A
+square that a soldier within 2048 units (about 50 metres) has a clear
+line to - from his eyes, 40 units over where he stands, to a crouching
+player's head, 16 units over the square, through what is solid or opaque
+- costs 4 squares more for each soldier who sees it, within the same cap
+of 16 as the nearness. Each square's lines are looked along once and
+kept, in a cache by square cleared as each way is planned. From the
+Colt's drop to the Snooper rifle the way now keeps to the east and north
+edges, through the tunnel, and over the high ground north of the barn's
+soldiers before coming down to the drop; it took 2.2 seconds to find,
+1.6 before. From the start, O still leads to the rifle as before.

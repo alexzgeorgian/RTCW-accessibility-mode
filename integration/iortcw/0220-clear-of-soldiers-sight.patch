@@ -1,0 +1,89 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 36f01fd0..d2dc0ef6 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -445,10 +445,13 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ static vec3_t eta_routeEnemies[ETA_ROUTE_ENEMY_MAX];
+ static int    eta_routeEnemyCount;
+ 
++static void ETA_RouteSeenClear(void);
++
+ static void ETA_RouteEnemiesRead(void)
+ {
+ 	const char *list = CG_ConfigString(CS_ETA_ENEMIES);
+ 
++	ETA_RouteSeenClear();
+ 	eta_routeEnemyCount = 0;
+ 	while (list && *list && eta_routeEnemyCount < ETA_ROUTE_ENEMY_MAX)
+ 	{
+@@ -468,9 +471,69 @@ static void ETA_RouteEnemiesRead(void)
+ 	}
+ }
+ 
++/*
++ * In a soldier's sight, too, not only near one. The tester, past the
++ * farmhouse, came out on a street in the open where the soldiers by the
++ * barn and the one up in the tower could all see them, crouched or not:
++ * 20 metres away is no cover in the open. A square a soldier within
++ * ETA_ROUTE_SEEN_FAR has a clear line to, from his eyes to a crouching
++ * player's head, costs ETA_ROUTE_SEEN_SQUARES more for each who does.
++ * The lines are looked along once a square, and kept (a cache by square,
++ * cleared as each way is planned).
++ */
++#define ETA_ROUTE_SEEN_FAR      2048.0f   /* about 50 metres */
++#define ETA_ROUTE_SEEN_SQUARES  4.0f
++#define ETA_ROUTE_SEEN_CACHE    65536
++
++static struct
++{
++	int   key;      /* the square, packed; 0 for none */
++	float extra;
++} eta_routeSeen[ETA_ROUTE_SEEN_CACHE];
++
++static float ETA_RouteSeenExtra(const float at[3])
++{
++	int          sx = (int)floorf(at[0] / 32.0f), sy = (int)floorf(at[1] / 32.0f), sz = (int)floorf(at[2] / 64.0f);
++	int          key = ( ( sx & 0x3ff ) | ( ( sy & 0x3ff ) << 10 ) | ( ( sz & 0x7f ) << 20 ) ) + 1;
++	unsigned int slot = ( (unsigned int)key * 2654435761u ) & ( ETA_ROUTE_SEEN_CACHE - 1 );
++	float        extra = 0.0f;
++	vec3_t       head;
++	int          i;
++
++	if (eta_routeSeen[slot].key == key)
++	{
++		return eta_routeSeen[slot].extra;
++	}
++	VectorSet(head, at[0], at[1], at[2] + 16.0f);
++	for (i = 0; i < eta_routeEnemyCount; i++)
++	{
++		vec3_t  eye;
++		trace_t trace;
++
++		if (Distance(head, eta_routeEnemies[i]) > ETA_ROUTE_SEEN_FAR)
++		{
++			continue;
++		}
++		VectorSet(eye, eta_routeEnemies[i][0], eta_routeEnemies[i][1], eta_routeEnemies[i][2] + 40.0f);
++		trap_CM_BoxTrace(&trace, eye, head, NULL, NULL, 0, MASK_OPAQUE | CONTENTS_SOLID);
++		if (trace.fraction >= 1.0f)
++		{
++			extra += ETA_ROUTE_SEEN_SQUARES;
++		}
++	}
++	eta_routeSeen[slot].key   = key;
++	eta_routeSeen[slot].extra = extra;
++	return extra;
++}
++
++static void ETA_RouteSeenClear(void)
++{
++	memset(eta_routeSeen, 0, sizeof(eta_routeSeen));
++}
++
+ static float ETA_RouteEnemyExtra(const float at[3])
+ {
+-	float extra = 0.0f;
++	float extra = ETA_RouteSeenExtra(at);
+ 	int   i;
+ 
+ 	for (i = 0; i < eta_routeEnemyCount; i++)
