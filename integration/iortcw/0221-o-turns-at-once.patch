@@ -1,0 +1,217 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 66f08d1c..a4533354 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -5206,6 +5206,68 @@ static int eta_facePendingAt;
+ 
+ static void ETA_FaceTheWayNow(void);
+ static void ETA_FaceTheWayUnreachable(void);
++static qboolean ETA_OpeningToward(float wanted, float *yaw);
++
++/*
++ * Turned at once, before the way is known. The tester, after the forest
++ * had them stand still to hear "Finding the way. A moment" and "The way
++ * is far: still looking for it", asked for it gone: in the ET mode the
++ * marker is never waited for, and a game should not stop for its guide.
++ * So O turns straight away to the opening nearest the line to where it
++ * leads, and says so as it would the way - "Facing toward the Thompson,
++ * 268 meters" - while the way round the walls is looked for out of
++ * earshot. Once it is known it is only said if it goes another way than
++ * the player was turned (ETA_FacePendingFrame), and not at all once they
++ * are walking: the ping follows the way by then.
++ */
++#define ETA_FACE_GUESS_TURN   40.0f    /* the way this far off the first turn: turned again */
++#define ETA_FACE_GUESS_MOVED  96.0f    /* walked this far since: left to the ping */
++
++static qboolean eta_faceGuessed;
++static float    eta_faceGuessYaw;
++static vec3_t   eta_faceGuessFrom;
++
++static void ETA_FaceTheWayGuess(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t              origin, toward;
++	const char          *name = NULL;
++	char                what[48], height[48];
++	float               yaw;
++	int                 meters;
++
++	eta_faceGuessed = qfalse;
++	if (!CG_AccessibilityMarkerInfo(origin, &name))
++	{
++		return;
++	}
++	VectorSubtract(origin, ps->origin, toward);
++	meters = (int)( VectorLength(toward) * ETA_QU_TO_METERS + 0.5f );
++	ETA_HudNarrator_HeightText(toward[2] * ETA_QU_TO_METERS, height, sizeof(height));
++	Q_strncpyz(what, name ? name : "the marker", sizeof(what));
++	if (Q_stricmpn(what, "the ", 4) && Q_stricmpn(what, "waypoint", 8))
++	{
++		what[0] = (char)toupper((unsigned char)what[0]);
++	}
++	toward[2] = 0.0f;
++	if (VectorLength(toward) >= 16.0f && ETA_OpeningToward(vectoyaw(toward), &yaw))
++	{
++		etaAimTarget_t way;
++		vec3_t         dir;
++
++		memset(&way, 0, sizeof(way));
++		way.entityNum = -1;
++		VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++		VectorMA(ps->origin, 256.0f, dir, way.point);
++		way.point[2] = ps->origin[2] + ps->viewheight;
++		ETA_AimStartSnap(&way, NULL);
++		eta_faceGuessed  = qtrue;
++		eta_faceGuessYaw = yaw;
++		VectorCopy(ps->origin, eta_faceGuessFrom);
++	}
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("Facing toward %s, %d meters%s%s", what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++}
+ 
+ void CG_AccessibilityFaceTheWay(void)
+ {
+@@ -5294,12 +5356,12 @@ void CG_AccessibilityFaceTheWay(void)
+ 	if (!CG_AccessibilityMarkerWayKnown())
+ 	{
+ 		eta_facePendingAt = cg.time;
+-		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say("Finding the way. A moment");
++		ETA_FaceTheWayGuess();
+ 		return;
+ 	}
+ 
+ 	eta_facePendingAt = 0;
++	eta_faceGuessed   = qfalse;
+ 	ETA_FaceTheWayNow();
+ }
+ 
+@@ -6069,13 +6131,15 @@ static void ETA_FacePendingFrame(void)
+ 			static int waitedFrom;
+ 
+ 			if (CG_AccessibilityRouteSearching() && cg.time >= eta_facePendingAt
+-			    && ( !waitedFrom || cg.time < waitedFrom || cg.time - waitedFrom < 20000 ))
++			    && ( !waitedFrom || cg.time < waitedFrom || cg.time - waitedFrom < 60000 ))
+ 			{
++				/* Looked for out of earshot, for up to a minute on a
++				   slow machine: the player was turned toward it already
++				   (ETA_FaceTheWayGuess), and "no way found" is said only
++				   once the search has found there is none. */
+ 				if (!waitedFrom || cg.time < waitedFrom || cg.time - waitedFrom > 30000)
+ 				{
+ 					waitedFrom = cg.time;
+-					ETA_HudNarrator_HoldPassive(cg.time);
+-					ETA_Speech_Say("The way is far: still looking for it. Stand still a moment");
+ 				}
+ 				eta_facePendingAt = cg.time;
+ 				return;
+@@ -6120,6 +6184,32 @@ static void ETA_FacePendingFrame(void)
+ 	if (CG_AccessibilityMarkerWayKnown())
+ 	{
+ 		eta_facePendingAt = 0;
++		/* Turned already: again only if the way goes otherwise, and
++		   only while the player still stands where they were turned. */
++		if (eta_faceGuessed)
++		{
++			vec3_t   steer, delta, moved;
++			qboolean other = qtrue;
++
++			eta_faceGuessed = qfalse;
++			VectorSubtract(cg.predictedPlayerState.origin, eta_faceGuessFrom, moved);
++			moved[2] = 0.0f;
++			if (VectorLength(moved) > ETA_FACE_GUESS_MOVED)
++			{
++				return;
++			}
++			if (CG_AccessibilityMarkerSteerPoint(steer))
++			{
++				VectorSubtract(steer, cg.predictedPlayerState.origin, delta);
++				delta[2] = 0.0f;
++				other = (qboolean)( VectorLength(delta) >= 16.0f
++				                    && fabsf(AngleSubtract(vectoyaw(delta), eta_faceGuessYaw)) > ETA_FACE_GUESS_TURN );
++			}
++			if (!other)
++			{
++				return;
++			}
++		}
+ 		ETA_FaceTheWayNow();
+ 	}
+ }
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index d2dc0ef6..f48835eb 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -152,7 +152,8 @@ static void ETA_MarkerEye(vec3_t eye)
+    the game hurts a landing past about six metres (delta 38.75). The tram
+    level's way out drops three metres into a duct and five out of it. */
+ #define ETA_ROUTE_SEARCH_DROP   200.0f
+-#define ETA_ROUTE_BUDGET_MS     4       /* searching per frame, at most: the forest's 150 metres took 0.7 s */
++#define ETA_ROUTE_BUDGET_MS     8       /* searching per frame, at most: the forest's 150 metres took 0.7 s; twice that
++                                           since the way keeps clear of soldiers, so twice the share */
+ #define ETA_ROUTE_BUDGET_STEP   4       /* squares between looks at the clock */
+ #define ETA_ROUTE_REPLAN_MS     5000    /* the world changes: look again */
+ #define ETA_ROUTE_RETRY_MS      3000    /* after finding no way at all */
+@@ -170,6 +171,7 @@ typedef struct
+ 	qboolean planned;     /* a search has been started for this marker */
+ 	int      startedAt;
+ 	qboolean done;        /* the current search has finished */
++	qboolean known;       /* a search for this marker has finished: kept while the next looks again */
+ 	int      doneAt;
+ 	vec3_t   steer;       /* the point along the way */
+ 	int      steerIndex;  /* which of the way's points it is */
+@@ -478,8 +480,9 @@ static void ETA_RouteEnemiesRead(void)
+  * 20 metres away is no cover in the open. A square a soldier within
+  * ETA_ROUTE_SEEN_FAR has a clear line to, from his eyes to a crouching
+  * player's head, costs ETA_ROUTE_SEEN_SQUARES more for each who does.
+- * The lines are looked along once a square, and kept (a cache by square,
+- * cleared as each way is planned).
++ * The lines are looked along once for each four squares (a 64-unit cell
++ * holds four), and kept (a cache by cell, cleared as each way is
++ * planned): looked along for every square, they doubled the search.
+  */
+ #define ETA_ROUTE_SEEN_FAR      2048.0f   /* about 50 metres */
+ #define ETA_ROUTE_SEEN_SQUARES  4.0f
+@@ -493,7 +496,7 @@ static struct
+ 
+ static float ETA_RouteSeenExtra(const float at[3])
+ {
+-	int          sx = (int)floorf(at[0] / 32.0f), sy = (int)floorf(at[1] / 32.0f), sz = (int)floorf(at[2] / 64.0f);
++	int          sx = (int)floorf(at[0] / 64.0f), sy = (int)floorf(at[1] / 64.0f), sz = (int)floorf(at[2] / 64.0f);
+ 	int          key = ( ( sx & 0x3ff ) | ( ( sy & 0x3ff ) << 10 ) | ( ( sz & 0x7f ) << 20 ) ) + 1;
+ 	unsigned int slot = ( (unsigned int)key * 2654435761u ) & ( ETA_ROUTE_SEEN_CACHE - 1 );
+ 	float        extra = 0.0f;
+@@ -2124,6 +2127,7 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ 		   when the search began: a long search must not be thrown away
+ 		   the moment it finishes. */
+ 		eta_route.done   = qtrue;
++		eta_route.known  = qtrue;
+ 		eta_route.doneAt = cg.time;
+ 	}
+ 
+@@ -3114,12 +3118,23 @@ qboolean CG_AccessibilityMarkerInfo(vec3_t origin, const char **name)
+    forest, takes some seconds of the search's share of each frame. */
+ qboolean CG_AccessibilityRouteSearching(void)
+ {
+-	return (qboolean)(eta_marker.active && !eta_route.done && ETA_PathFinder_State() == ETA_PATH_SEARCHING);
++	/* Or about to be: a marker just set is looked for from the next
++	   frame, and meanwhile the finder still holds the last search's
++	   state. O, pressed toward the objective, said "No way found" while
++	   its search had not begun. */
++	ETA_PathState state = ETA_PathFinder_State();
++
++	return (qboolean)(eta_marker.active && !eta_route.done
++	                  && ( !eta_route.planned || state == ETA_PATH_SEARCHING || state == ETA_PATH_IDLE ));
+ }
+ 
++/* Known, too, while it is looked for again from where the player has
++   got to - every five seconds, and when they stray: O, pressed then, said
++   "Finding the way" every few presses on a way it already had. The point
++   it steers by is kept until the new way is ready. */
+ qboolean CG_AccessibilityMarkerWayKnown(void)
+ {
+-	return (qboolean)(eta_marker.active && eta_route.done);
++	return (qboolean)(eta_marker.active && ( eta_route.done || ( eta_route.known && eta_route.steering ) ));
+ }
+ 
+ /*

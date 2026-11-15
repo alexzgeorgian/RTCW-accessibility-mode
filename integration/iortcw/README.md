@@ -3831,3 +3831,34 @@ Colt's drop to the Snooper rifle the way now keeps to the east and north
 edges, through the tunnel, and over the high ground north of the barn's
 soldiers before coming down to the drop; it took 2.2 seconds to find,
 1.6 before. From the start, O still leads to the rifle as before.
+
+### 0221 O turns at once; the way is looked for out of earshot
+
+The tester asked for "Finding the way. A moment" and "The way is far:
+still looking for it. Stand still a moment" gone: the ET mode's marker is
+never waited for, and a game should not stop for its guide. With the way
+keeping clear of soldiers and out of their sight, a far search costs
+more - from the tester's own save, east of the forest's middle, to the
+Thompson: 2.5 seconds of search, 1.2 without the sight lines.
+
+- O with the way not known yet turns at once to the opening nearest the
+  line to where it leads (ETA_OpeningToward), and says so as it says the
+  way: "Facing toward Thompson, not found yet, 268 meters, 8 meters above
+  you". The search goes on unheard - up to a minute on a slow machine,
+  "no way found" only once it has found there is none.
+- Once the way is known, it is said only if it goes more than 40 degrees
+  from where the player was turned, and only while they still stand
+  within 96 units of where they were: "Facing the way. 13 meters, then
+  right. Thompson...". Walking by then, the ping leads.
+- The way counts as known while it is looked for again (every five
+  seconds, and on straying): the point it steers by is kept until the
+  new way is ready. O pressed during those searches said "Finding the
+  way" on a way it already had.
+- A marker just set counts as searched for before its search begins.
+- The search's share of a frame is 8 ms, not 4; the sight lines are
+  looked along once per 64-unit cell, not per 32-unit square.
+
+Checked from the tester's save: O on the Thompson said "Facing toward
+Thompson..." at once, then "Facing the way. 13 meters, then right..."
+when the way was found; three more presses, each "Facing the way.
+Thompson..." straight away.
