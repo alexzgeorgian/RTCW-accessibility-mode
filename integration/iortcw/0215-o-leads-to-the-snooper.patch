@@ -1,0 +1,182 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 82c35460..0b5bfca0 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -101,9 +101,10 @@ static qboolean ETA_ThingInSight(const eta_thing_t *thing)
+ /*
+  * What a soldier drops is taken out of the game 30 seconds after it fell
+  * (LaunchItem). T kept it on the list, out of sight, and the tester went
+- * to a weapon that was no longer there. It is let go of then, and said
+- * with the time it has left. It was first seen at most as long ago as it
+- * fell.
++ * to a weapon that was no longer there. It is let go of then. It was
++ * first seen at most as long ago as it fell. The time it has left was
++ * said once; the tester found the countdown of no use and asked for it
++ * gone.
+  */
+ #define ETA_THINGS_DROPPED_MS 30000
+ 
+@@ -1084,10 +1085,6 @@ static void ETA_ThingsStep(int step)
+ 	{
+ 		Q_strncpyz(why, ", get in the tram first and press it from inside: the tram leaves a moment after", sizeof(why));
+ 	}
+-	if (!why[0] && thing->goneAt && thing->goneAt > cg.time)
+-	{
+-		Com_sprintf(why, sizeof(why), ", dropped, gone in %d seconds", ( thing->goneAt - cg.time + 999 ) / 1000);
+-	}
+ 	if (!why[0] && ETA_ThingNoWay(thing, area))
+ 	{
+ 		Q_strncpyz(why, ", O found no way there from this area: it may be up high, behind a locked door, or reached "
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index dc26365c..c2aec1b9 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -43,6 +43,8 @@ typedef struct
+ 	char ainame[32];
+ 	int  lock;          /* a door's "key" -1 */
+ 	int  startOff;      /* an ai_trigger the script must wake first */
++	int  placed;        /* a thing set down at a point: at is its place */
++	vec3_t at;
+ } eta_unlockRecord_t;
+ 
+ /* A script line that sets something going: "alertentity NAME", or
+@@ -157,7 +159,8 @@ static qboolean ETA_UnlockNamed(const char *name)
+ /* Each entity the map lays out, from ETA_ReadMapEntities: only those
+    aimed at something or named matter. */
+ void CG_AccessibilityUnlockEntity(const char *classname, const char *model, const char *targetname,
+-                                  const char *target, const char *ainame, const char *lock, const char *spawnflags)
++                                  const char *target, const char *ainame, const char *lock, const char *spawnflags,
++                                  const char *origin)
+ {
+ 	eta_unlockRecord_t *r;
+ 
+@@ -173,6 +176,38 @@ void CG_AccessibilityUnlockEntity(const char *classname, const char *model, cons
+ 	Q_strncpyz(r->ainame, ainame, sizeof(r->ainame));
+ 	r->lock     = lock[0] && atoi(lock) == -1;
+ 	r->startOff = !Q_stricmp(classname, "ai_trigger") && ( atoi(spawnflags) & 1 );
++	r->placed   = !r->model && origin[0] && sscanf(origin, "%f %f %f", &r->at[0], &r->at[1], &r->at[2]) == 3;
++}
++
++/*
++ * An objective met by picking something up: the forest's Snooper rifle,
++ * whose pickup fires the script that meets it. It is no brush, so O never
++ * knew of it, and the tester searched the whole forest for it - and for
++ * the Thompson, dropped beside it. Led to where it lies.
++ */
++static qboolean ETA_UnlockPickedUp(const eta_unlockRecord_t *r)
++{
++	return (qboolean)( r->placed && ( !Q_stricmpn(r->classname, "weapon_", 7) || !Q_stricmpn(r->classname, "item_", 5)
++	                                  || !Q_stricmpn(r->classname, "holdable_", 9) ) );
++}
++
++static void ETA_UnlockObjectiveAt(const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (eta_objectivePlaces[i].objective == eta_unlockObjective && Distance(eta_objectivePlaces[i].at, at) < 64.0f)
++		{
++			return;
++		}
++	}
++	if (eta_objectivePlaceCount < ETA_OBJECTIVE_PLACES)
++	{
++		VectorCopy(at, eta_objectivePlaces[eta_objectivePlaceCount].at);
++		eta_objectivePlaces[eta_objectivePlaceCount].objective = eta_unlockObjective;
++		eta_objectivePlaceCount++;
++	}
+ }
+ 
+ /* The script's lines that set things going, owner and event kept. A
+@@ -503,6 +538,10 @@ static void ETA_UnlockFired(const char *name, int depth)
+ 		{
+ 			ETA_UnlockAddSpot(r, "");
+ 		}
++		else if (eta_unlockObjective && ETA_UnlockPickedUp(r))
++		{
++			ETA_UnlockObjectiveAt(r->at);
++		}
+ 		else if (!r->model && r->targetname[0])
+ 		{
+ 			/* A relay, a delay, a script trigger: whatever fires it. */
+@@ -782,21 +821,49 @@ int CG_AccessibilityGateInWay(const vec3_t from, const vec3_t toward, float with
+ 	return best;
+ }
+ 
++/* A place that meets two objectives at once: the forest's supply truck,
++   boarded at the end, meets "stowaway" and "no alarms" together. */
++static qboolean ETA_ObjectivePlaceShared(int index)
++{
++	int i;
++
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (eta_objectivePlaces[i].objective != eta_objectivePlaces[index].objective
++		    && Distance(eta_objectivePlaces[i].at, eta_objectivePlaces[index].at) < 64.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* The nearest place that meets an objective not met yet: qfalse with
+-   none known. */
++   none known. One that meets two at once ends the level, so it is left
++   for last: the forest's truck was nearer than the Snooper rifle, and
++   boarding it first would leave the rifle behind. */
+ qboolean CG_AccessibilityObjectivePlace(const vec3_t from, vec3_t out, int *objective)
+ {
+-	float best = 0.0f;
+-	int   i, found = 0;
++	float    best = 0.0f;
++	int      i, found = 0;
++	qboolean bestLast = qfalse;
+ 
+ 	for (i = 0; i < eta_objectivePlaceCount; i++)
+ 	{
++		qboolean last;
++
+ 		if (CG_AccessibilityObjectiveDone(eta_objectivePlaces[i].objective))
+ 		{
+ 			continue;
+ 		}
+-		if (!found || Distance(from, eta_objectivePlaces[i].at) < best)
++		last = ETA_ObjectivePlaceShared(i);
++		if (found && last && !bestLast)
++		{
++			continue;
++		}
++		if (!found || ( bestLast && !last ) || Distance(from, eta_objectivePlaces[i].at) < best)
+ 		{
++			bestLast   = last;
+ 			best = Distance(from, eta_objectivePlaces[i].at);
+ 			VectorCopy(eta_objectivePlaces[i].at, out);
+ 			*objective = eta_objectivePlaces[i].objective;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index bd6e63fe..481583d0 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5816,7 +5816,7 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
+-		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags);
++		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags, origin);
+ 
+ 		/* A thing placed as a model of its own: a tree, a wagon. */
+ 		if (( !Q_stricmp(classname, "misc_gamemodel") || !Q_stricmp(classname, "misc_model") ) && model[0]
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c57aff46..039ad48a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2319,7 +2319,7 @@ qboolean CG_AccessibilityDoorBox( int model, vec3_t mins, vec3_t maxs, qboolean
+ void CG_AccessibilityUnlockReset( void );
+ void CG_AccessibilityUnlockEntity( const char *classname, const char *model, const char *targetname,
+ 								   const char *target, const char *ainame, const char *lock,
+-								   const char *spawnflags );
++								   const char *spawnflags, const char *origin );
+ void CG_AccessibilityUnlockResolve( void );
+ int CG_AccessibilityUnlockCount( void );
+ qboolean CG_AccessibilityDoorNeverOpens( int model );

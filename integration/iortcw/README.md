@@ -3722,3 +3722,26 @@ wall seen from outdoors with a room behind it is said as "a building".
 Checked in the forest: "Left: open; ahead left: open; ahead: tree, 23
 meters; ahead right: open; right: open. You see: 4 trees, nearest ahead,
 23 meters."
+
+### 0215 O leads to the Snooper rifle; no dropped-weapon countdown
+
+The tester searched the whole forest for the Snooper rifle, the
+Thompson and the Colt, and never found them. The rifle meets the fourth
+objective, "Recover OSA M1S Snooper rifle": picking it up fires a script
+trigger (t158, got_objective3) that meets it. O follows each objective
+back to where the player sets it going, but only kept brushes - a place
+walked into, a thing to break, a switch - so the rifle, a point entity,
+was never among them. Entities now keep their origin, and a weapon_,
+item_ or holdable_ on the way back to an objective is its place: the
+forest gains objective 4 at the rifle's drop (-5720 4720 576), where the
+Thompson lies too. The supply truck meets objectives 2 and 3 at once and
+is nearer, and boarding it first would leave the rifle behind, so a place
+that meets two objectives together is left until no other is open.
+Checked in the forest, compound done: O says "On toward your next
+objective: Recover OSA M1S "SNOOPER" rifle, 201 meters, ahead". The
+notebook's objectives are read in the game's order: the four lines match
+objectivemet 1 to 4.
+
+A dropped weapon on T's list no longer says ", dropped, gone in N
+seconds": the tester asked for the countdown gone. It is still let go of
+when the game takes it away.
