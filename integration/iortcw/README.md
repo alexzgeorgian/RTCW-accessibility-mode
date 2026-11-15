@@ -3745,3 +3745,16 @@ objectivemet 1 to 4.
 A dropped weapon on T's list no longer says ", dropped, gone in N
 seconds": the tester asked for the countdown gone. It is still let go of
 when the game takes it away.
+
+### 0216 K lists the gear not found yet
+
+The tester then asked for the Mauser's scope and the Colt to be pointed
+out: the forest drops them far apart, and nothing said where. After the
+waypoints, K now lists each weapon the map lays out that the player does
+not carry, the nearest of each kind, nearest first - "Sniper Scope, not
+found yet, 150 meters, ahead left, 5 meters below you. O leads there" -
+and O leads to the one chosen. One inside something to break says so;
+one the level brings in later is left out; once carried, it is gone from
+the list. Checked in the forest with only the starting weapons: K gives
+the Sniper Scope, the Colt, the Snooper Rifle and the Thompson, and O
+finds the way to the scope.
