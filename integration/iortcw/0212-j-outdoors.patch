@@ -1,0 +1,45 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 2735b899..735e9440 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1391,15 +1391,27 @@ static void ETA_AreaLike(int area, char *out, size_t size)
+ 	}
+ }
+ 
+-/* For F1: "In area 3, of 5 explored. 2 doors out, 1 to a new area". */
++/* For F1 and J: "In the hall, ground floor. 2 doors out, 1 to a new area". */
+ void CG_AccessibilityAreaText(char *out, size_t size)
+ {
+ 	int  area = CG_AccessibilityAreaHere();
+ 	char doors[96], like[128];
+ 
+-	if (area < 0 || !eta_areas.number[area])
++	/* Where the player is, and nothing of how many areas are explored:
++	   semicolon says that. Outdoors - the forest, a courtyard - in no
++	   room the map has, said as outdoors; the tester, in the forest,
++	   heard "0 areas explored" and took it to mean they were nowhere. */
++	if (area < 0)
++	{
++		Q_strncpyz(out, "Outdoors, out of the buildings", size);
++		return;
++	}
++	if (!eta_areas.number[area])
+ 	{
+-		Com_sprintf(out, size, "%d %s explored", eta_areas.numbered, eta_areas.numbered == 1 ? "area" : "areas");
++		char name[128];
++
++		ETA_AreaName(area, name, sizeof(name));
++		Com_sprintf(out, size, "In %s", name);
+ 		return;
+ 	}
+ 	ETA_AreaDoorsText(area, doors, sizeof(doors));
+@@ -1421,8 +1433,7 @@ void CG_AccessibilityAreaText(char *out, size_t size)
+ 		{
+ 			*cut = '\0';
+ 		}
+-		Com_sprintf(out, size, "In %s%s, of %d %s explored. %s", name, height, eta_areas.numbered,
+-		            eta_areas.numbered == 1 ? "area" : "areas", doors);
++		Com_sprintf(out, size, "In %s%s. %s", name, height, doors);
+ 	}
+ }
+ 

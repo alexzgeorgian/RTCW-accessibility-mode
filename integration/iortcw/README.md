@@ -3676,3 +3676,13 @@ machine, and from the far east of the map as well; O then faces the
 way. A walking bot that presses O at every turn did not reach the truck
 in six minutes, stopped again and again by the edge guard on the
 forest's slopes - the guard is kept.
+
+### 0212 J says where you are, outdoors too
+
+In the forest J began "0 areas explored", and the tester took it to mean
+they were nowhere; and how many areas are explored is semicolon's to say,
+as it does ("4 other areas explored"). J now says only where the player
+is: outdoors - in no room the map has - "Outdoors, out of the
+buildings"; in an area, "In the room with the way out, low down in the
+level. 1 way out, 1 to a new area", with no count. Checked in the forest,
+at the start and in the room with the way out.
