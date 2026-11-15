@@ -3701,3 +3701,24 @@ up to four: "In view: Button for a door, ahead left, 9 meters". Each line
 is said on its own, within what one line of speech may hold (512
 characters: one report of both was too long, and nothing was said).
 Checked in the forest and the tomb's arena, with the command itself.
+
+### 0214 M names what is seen as it looks
+
+The tester asked for the things M describes to be named as they look.
+The forest's trees were not among the things the mode knew: 160 of them
+are placed as models of their own (misc_gamemodel, misc_model), not
+painted on the rooms' surfaces where the props are read. Those models are
+now read with the map's entities, named by their model path as surfaces
+are by their shader (ETA_BspProp_Kind), and added to the things in the
+rooms - a tree a box 80 units across and 256 high, anything else 48 by
+72. (The entity reader's model buffer was 16 characters, enough for a
+brush model's "*12" and not for a model path; it is now MAX_QPATH.) The
+kinds learn "mapobjects/tree", "/trunck" (the forest's own spelling),
+"/trunk" and "/fence". M then says, after the five looks, the kinds of
+thing in view, up to four, with how many and the nearest - "You see: 9
+trees, nearest ahead left, 10 meters" - a tree seen when the eye's line
+to it ends within 160 units of its middle, its own trunk counting; and a
+wall seen from outdoors with a room behind it is said as "a building".
+Checked in the forest: "Left: open; ahead left: open; ahead: tree, 23
+meters; ahead right: open; right: open. You see: 4 trees, nearest ahead,
+23 meters."

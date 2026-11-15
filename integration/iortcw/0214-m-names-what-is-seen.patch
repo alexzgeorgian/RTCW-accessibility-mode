@@ -1,0 +1,203 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 4151805c..bd6e63fe 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -394,6 +394,19 @@ static void ETA_ViewLook(const vec3_t eye, float yaw, char *out, size_t size)
+ 	}
+ 	meters = (int)( Distance(eye, tr.endpos) * ETA_QU_TO_METERS + 0.5f );
+ 	ETA_DescribeTraceHit(&tr, out, size);
++	/* A wall, seen from outdoors, with a room the map has behind it: a
++	   building, as a sighted player takes it at a glance. */
++	if (tr.entityNum == ENTITYNUM_WORLD && fabsf(tr.plane.normal[2]) < 0.3f
++	    && CG_AccessibilityAreaOf(eye) < 0)
++	{
++		vec3_t behind;
++
++		VectorMA(tr.endpos, -48.0f, tr.plane.normal, behind);
++		if (CG_AccessibilityAreaOf(behind) >= 0)
++		{
++			Q_strncpyz(out, "a building", size);
++		}
++	}
+ 	out[0] = (char)tolower((unsigned char)out[0]);
+ 	Q_strcat(out, size, va(", %d %s", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
+ }
+@@ -433,6 +446,89 @@ void CG_AccessibilityViewText(char *out, size_t size)
+ 	}
+ 	Q_strcat(out, size, ".");
+ 
++	/* The things the map is furnished with, as they look - trees, a
++	   truck, crates - in view, each kind once, with how many and the
++	   nearest: "2 trees, nearest ahead left, 8 meters". */
++	{
++		struct
++		{
++			const char *name;
++			int         count;
++			float       near, left;
++		} kinds[8];
++		int nk = 0, k, p;
++
++		int props = CG_AccessibilityPropCount();
++
++		for (p = 0; p < props; p++)
++		{
++			vec3_t      center;
++			float       far, left;
++			trace_t     tr;
++			const char *pname = CG_AccessibilityPropGet(p, center);
++
++			if (!pname)
++			{
++				continue;
++			}
++			far = Distance(eye, center);
++			if (far > ETA_VIEW_RANGE || fabsf(center[2] - eye[2]) > 256.0f)
++			{
++				continue;
++			}
++			left = CG_AccessibilityLeftOfView(center);
++			if (fabsf(left) > 60.0f || !Q_stricmp(pname, "Window"))
++			{
++				continue;
++			}
++			/* Seen: the eye's line to it meets nothing short of it - a
++			   tree's own trunk stops the line, and counts. */
++			CG_Trace(&tr, eye, NULL, NULL, center, ps->clientNum, MASK_SOLID);
++			if (tr.fraction < 1.0f && Distance(tr.endpos, center) > 160.0f)
++			{
++				continue;
++			}
++			for (k = 0; k < nk && Q_stricmp(kinds[k].name, pname); k++)
++			{
++			}
++			if (k == nk)
++			{
++				if (nk == (int)ARRAY_LEN(kinds))
++				{
++					continue;
++				}
++				kinds[nk].name  = pname;
++				kinds[nk].count = 0;
++				kinds[nk].near  = 1.0e9f;
++				nk++;
++			}
++			kinds[k].count++;
++			if (far < kinds[k].near)
++			{
++				kinds[k].near = far;
++				kinds[k].left = left;
++			}
++		}
++		for (k = 0; k < nk && k < 4; k++)
++		{
++			int  m = (int)( kinds[k].near * ETA_QU_TO_METERS + 0.5f );
++			char name[64];
++
++			Q_strncpyz(name, kinds[k].name, sizeof(name));
++			name[0] = (char)tolower((unsigned char)name[0]);
++			Q_strcat(out, size, kinds[k].count > 1
++			         ? va("%s%d %s%s, nearest %s, %d %s", k ? "; " : " You see: ", kinds[k].count, name,
++			              name[strlen(name) - 1] == 's' ? "" : "s", ETA_HudNarrator_RelativeDirection(kinds[k].left),
++			              m < 1 ? 1 : m, m == 1 ? "meter" : "meters")
++			         : va("%sa %s, %s, %d %s", k ? "; " : " You see: ", name,
++			              ETA_HudNarrator_RelativeDirection(kinds[k].left), m < 1 ? 1 : m, m == 1 ? "meter" : "meters"));
++		}
++		if (nk)
++		{
++			Q_strcat(out, size, ".");
++		}
++	}
++
+ 	/* Things to use, and people, in view: in front, and not behind a wall. */
+ 	count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list));
+ 	count += CG_AccessibilityEnemyTargets(list + count, ARRAY_LEN(list) - count, qfalse);
+@@ -1772,6 +1868,8 @@ static ETA_BspProp   eta_mapProps[ETA_MAP_PROPS];
+ static int           eta_mapPropCount;
+ static unsigned char eta_mapPropSaid[ETA_MAP_PROPS];
+ 
++static void ETA_ModelPropsAdd(void);
++
+ void CG_AccessibilityLoadProps(void)
+ {
+ 	etaMapFile_t file;
+@@ -1791,9 +1889,41 @@ void CG_AccessibilityLoadProps(void)
+ 		trap_FS_FCloseFile(file.handle);
+ 	}
+ 
++	ETA_ModelPropsAdd();
+ 	CG_DPrintf("accessibility: %d thing(s) in the rooms of %s\n", eta_mapPropCount, cgs.mapname);
+ }
+ 
++/* The things the map places as models of their own - the forest's
++   trees, a wagon - not in its rooms' surfaces: read with the map's
++   entities, named by their model as the surfaces are by their shader,
++   and added to the things in the rooms. The tester asked M to name what
++   is seen as it looks, and the forest's 160 trees were not among them. */
++#define ETA_MODEL_PROPS 512
++static struct
++{
++	char   name[ETA_BSP_PROP_NAME];
++	vec3_t at;
++}          eta_modelProps[ETA_MODEL_PROPS];
++static int eta_modelPropCount;
++
++static void ETA_ModelPropsAdd(void)
++{
++	int i;
++
++	for (i = 0; i < eta_modelPropCount && eta_mapPropCount < ETA_MAP_PROPS; i++)
++	{
++		ETA_BspProp *prop = &eta_mapProps[eta_mapPropCount++];
++		qboolean     tree = (qboolean)!Q_stricmp(eta_modelProps[i].name, "Tree");
++		float        half = tree ? 40.0f : 24.0f;
++
++		Q_strncpyz(prop->name, eta_modelProps[i].name, sizeof(prop->name));
++		VectorSet(prop->mins, eta_modelProps[i].at[0] - half, eta_modelProps[i].at[1] - half,
++		          eta_modelProps[i].at[2] - 16.0f);
++		VectorSet(prop->maxs, eta_modelProps[i].at[0] + half, eta_modelProps[i].at[1] + half,
++		          eta_modelProps[i].at[2] + ( tree ? 256.0f : 56.0f ));
++	}
++}
++
+ static void ETA_WorldRead(void);
+ 
+ int CG_AccessibilityPropCount(void)
+@@ -5522,7 +5652,7 @@ static void ETA_ReadMapEntities(void)
+ {
+ 	char token[MAX_TOKEN_CHARS];
+ 	char key[MAX_TOKEN_CHARS];
+-	char classname[64], model[16], lock[16], origin[64], target[64], ainame[64], scriptname[64];
++	char classname[64], model[MAX_QPATH], lock[16], origin[64], target[64], ainame[64], scriptname[64];
+ 	char targetname[64], hint[32], health[16], spawnflags[16], material[16];
+ 	int  i;
+ 
+@@ -5610,6 +5740,7 @@ static void ETA_ReadMapEntities(void)
+ 		VectorClear(eta_doorOrigins[i]);
+ 	}
+ 	eta_exitCount       = 0;
++	eta_modelPropCount  = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
+@@ -5687,6 +5818,20 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags);
+ 
++		/* A thing placed as a model of its own: a tree, a wagon. */
++		if (( !Q_stricmp(classname, "misc_gamemodel") || !Q_stricmp(classname, "misc_model") ) && model[0]
++		    && origin[0] && eta_modelPropCount < ETA_MODEL_PROPS)
++		{
++			const char *kind = ETA_BspProp_Kind(model);
++
++			if (kind && sscanf(origin, "%f %f %f", &eta_modelProps[eta_modelPropCount].at[0],
++			                   &eta_modelProps[eta_modelPropCount].at[1], &eta_modelProps[eta_modelPropCount].at[2]) == 3)
++			{
++				Q_strncpyz(eta_modelProps[eta_modelPropCount].name, kind, sizeof(eta_modelProps[0].name));
++				eta_modelPropCount++;
++			}
++		}
++
+ 		/* Where the level begins, for "where the level began". */
+ 		if (!Q_stricmp(classname, "info_player_start") && origin[0] && !eta_levelStartSet)
+ 		{
