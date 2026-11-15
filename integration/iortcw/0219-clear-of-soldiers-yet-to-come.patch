@@ -1,0 +1,52 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 44ca9dfb..66f08d1c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1287,7 +1287,7 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 		int    c;
+ 		vec3_t at;
+ 
+-		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4
++		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4 && c >= 0
+ 		    && ( first || c == AICHAR_HELGA || c == AICHAR_HEINRICH ))
+ 		{
+ 			for (i = 0; i < nk && kinds[i] != c; i++)
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index 1bd2336b..ae3dbf95 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2526,19 +2526,30 @@ static void G_AccessibilityTriggers( void ) {
+ 	 * twenty Elite guards dead, and did not know four were still alive
+ 	 * in rooms they had left behind: the client knows only those in its
+ 	 * sight. Not the allies (team 1) nor the neutral (7).
++	 *
++	 * After them, those the level has yet to bring in, where they will
++	 * come in, with their kind as -(aichar + 1): the way keeps clear of
++	 * them too (cg_accessibility_route.c). The tester was led through the
++	 * forest's farmhouse, its soldiers brought in only as the player came
++	 * near, after the way was already planned. U and O's lists of the
++	 * living pass them by.
+ 	 */
+ 	{
+ 		char list[1024], one[48], was[1024];
+-		int  n = 0;
++		int  n = 0, waiting;
+ 
+ 		list[0] = '\0';
++		for ( waiting = 0; waiting < 2; waiting++ )
+ 		for ( i = 0, ent = g_entities; i < level.maxclients && n < 40; i++, ent++ ) {
+-			if ( !ent->inuse || !( ent->r.svFlags & SVF_CASTAI ) || !ent->r.linked || ent->health <= 0
++			if ( !ent->inuse || !( ent->r.svFlags & SVF_CASTAI ) || ent->health <= 0
+ 				 || ent->aiTeam == 1 || ent->aiTeam == 7 ) {
+ 				continue;
+ 			}
+-			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", ent->aiCharacter, (int)ent->r.currentOrigin[0],
+-						 (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
++			if ( waiting ? !ent->aiInactive : ( !ent->r.linked || ent->aiInactive ) ) {
++				continue;
++			}
++			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", waiting ? -( ent->aiCharacter + 1 ) : ent->aiCharacter,
++						 (int)ent->r.currentOrigin[0], (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
+ 			if ( strlen( list ) + strlen( one ) >= sizeof( list ) ) {
+ 				break;
+ 			}

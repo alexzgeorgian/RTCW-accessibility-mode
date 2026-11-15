@@ -3797,3 +3797,21 @@ instead of through the house along y 3672. At the start, with only two
 soldiers in, O still leads to the rifle as before. The test command
 (accessibilityNavSweep route) uses the same costs and prints how many
 soldiers it kept clear of.
+
+### 0219 Clear of soldiers yet to come in, too: the forest's tunnel
+
+0218 kept the way clear only of the soldiers already in the level. The
+tester found the way to the Snooper rifle unchanged: at the forest's
+start two soldiers are in, and the farmhouse's are brought in only as
+the player comes near, after the way is planned. The server's list
+(g_main.c) now goes on, after the living, with those the level has yet
+to bring in (aiInactive, a TriggerSpawn not yet alerted), where they will
+come in, their kind written -(aichar + 1); U's and O's lists of the
+living skip them, and the route keeps clear of them as of the others.
+The tunnel the tester remembered is in the map: a passage under a roof,
+x -1472 to -960 along y 5000 at the farmhouse's floor height (found by
+a scan for floors with a roof overhead outside the rooms). From the
+forest's start, with all 22 soldiers counted, the way to the rifle now
+goes north past the farmhouse's corner to (-136 4952), west through the
+tunnel along y 4984 to (-1416 4984), then up and on to the barn, where
+it went through the farmhouse along y 3672 before.
