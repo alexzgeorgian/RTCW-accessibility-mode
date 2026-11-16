@@ -3960,3 +3960,18 @@ once marked known - come across within 15 metres and in sight, looked
 for twice a second - and the Colt, picked up on the run, was taken
 before it was ever marked. Taken counts as come across now: the place
 is named by the Colt.
+
+### 0230 Places outdoors kept with what is explored, and with the save
+
+The tester still found nothing of the Colt's drop on semicolon's list: a
+fresh test game lists it - "outdoors, by the Colt, 3 things left" - but
+the things list knows only what has been seen since the level was last
+started, and the tester plays on from saves. The places outdoors are now
+written with the explored areas ("outdoor x y z left name" in
+accessibility_explored_<map>.txt and its _saved copy, as the game is
+saved) and read back with them from a save; one seen again since stands
+in for its kept copy. Checked: the Colt taken, the game saved, quit, the
+game started again and the save loaded - semicolon gives "1 of 1,
+outdoors, by the Colt, 3 things left, right, 123 meters". A save made
+before this build has no places outdoors in it: they come back once the
+place is gone near again.

@@ -1,0 +1,108 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 012e0f07..e2b3a8d8 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -266,6 +266,50 @@ void CG_AccessibilityExploredChanged(void)
+ 
+ static void ETA_ExploredWrite(const char *name);
+ 
++/*
++ * The places outdoors with things come across, kept with what is
++ * explored (see CG_AccessibilityAreasBack): what the things list knows is
++ * only what has been seen since the level was last started, and the
++ * tester, playing on from a save, found the Colt's drop gone from
++ * semicolon's list. Each kept with its name and how many things were left
++ * there when last saved; one seen again since stands in for its keeping.
++ */
++#define ETA_OUTDOOR_KEPT 16
++
++static struct
++{
++	vec3_t at;
++	char   what[48];
++	int    left;
++} eta_outdoorKept[ETA_OUTDOOR_KEPT];
++static int eta_outdoorKeptCount;
++
++/* The places outdoors as now known, then those kept from before that are
++   not among them. */
++static int ETA_OutdoorPlaces(vec3_t *at, char (*what)[48], int *left, int max)
++{
++	int n = CG_AccessibilityThingsOutdoors(at, what, left, max), i, j;
++
++	for (i = 0; i < eta_outdoorKeptCount && n < max; i++)
++	{
++		for (j = 0; j < n; j++)
++		{
++			if (Distance(at[j], eta_outdoorKept[i].at) < 600.0f)
++			{
++				break;
++			}
++		}
++		if (j < n)
++		{
++			continue;
++		}
++		VectorCopy(eta_outdoorKept[i].at, at[n]);
++		Q_strncpyz(what[n], eta_outdoorKept[i].what, sizeof(what[0]));
++		left[n++] = eta_outdoorKept[i].left;
++	}
++	return n;
++}
++
+ static void ETA_ExploredSave(void)
+ {
+ 	ETA_ExploredWrite(ETA_ExploredFile());
+@@ -475,6 +519,18 @@ static void ETA_ExploredWrite(const char *name)
+ 		            feature[0], feature[1], feature[2], lead[0], lead[1], lead[2]);
+ 		trap_FS_Write(line, strlen(line), f);
+ 	}
++	{
++		vec3_t places[ETA_OUTDOOR_KEPT];
++		char   what[ETA_OUTDOOR_KEPT][48];
++		int    left[ETA_OUTDOOR_KEPT], n = ETA_OutdoorPlaces(places, what, left, ETA_OUTDOOR_KEPT);
++
++		for (i = 0; i < n; i++)
++		{
++			Com_sprintf(line, sizeof(line), "outdoor %.0f %.0f %.0f %d %s\n", places[i][0], places[i][1], places[i][2],
++			            left[i], what[i]);
++			trap_FS_Write(line, strlen(line), f);
++		}
++	}
+ 	trap_FS_FCloseFile(f);
+ }
+ 
+@@ -486,7 +542,8 @@ static void ETA_ExploredLoad(qboolean fromSave)
+ 	int          length, i, j, order[ETA_AREAS_MAX];
+ 	qboolean     before, fromBefore = qfalse;
+ 
+-	eta_exploredDirty = qfalse;
++	eta_exploredDirty    = qfalse;
++	eta_outdoorKeptCount = 0;
+ 	/* Entered fresh, not from a save: explored anew. From a save: as it
+ 	   was when saved, or failing that, as last known. */
+ 	if (!fromSave)
+@@ -588,6 +645,13 @@ static void ETA_ExploredLoad(qboolean fromSave)
+ 		{
+ 			CG_AccessibilityFrontierPut(feature, lead, kind, (qboolean)(tried != 0));
+ 		}
++		else if (eta_outdoorKeptCount < ETA_OUTDOOR_KEPT
++		         && sscanf(line, "outdoor %f %f %f %d %47[^\n]", &feature[0], &feature[1], &feature[2],
++		                   &eta_outdoorKept[eta_outdoorKeptCount].left, eta_outdoorKept[eta_outdoorKeptCount].what) == 5)
++		{
++			VectorCopy(feature, eta_outdoorKept[eta_outdoorKeptCount].at);
++			eta_outdoorKeptCount++;
++		}
+ 	}
+ 
+ 	if (fromBefore)
+@@ -2443,8 +2507,7 @@ void CG_AccessibilityAreasBack(void)
+ 	{
+ 		/* Those with things left, the places outdoors with things left
+ 		   among them, then the rest; nearest first within each. */
+-		int outdoors = CG_AccessibilityThingsOutdoors(eta_backOutAt, eta_backOutWhat, eta_backOutCount,
+-		                                              ETA_BACK_OUTDOORS);
++		int outdoors = ETA_OutdoorPlaces(eta_backOutAt, eta_backOutWhat, eta_backOutCount, ETA_BACK_OUTDOORS);
+ 
+ 		for (j = 0; j < 2; j++)
+ 		{
