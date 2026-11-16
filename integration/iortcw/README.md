@@ -3951,3 +3951,12 @@ the chest is tried first; with its line blocked, the head, the belly,
 the legs, then a shoulder either side - round a corner, one shows - and
 the first in the open is aimed at. None in the open: the enemy is out
 of sight, as before. The east tower's soldier still locks at 108 metres.
+
+### 0229 Taken counts as come across, for the places outdoors
+
+The tester found the Colt's drop on semicolon's list named by the health
+beside it, not by the Colt. A thing counted for a place outdoors only
+once marked known - come across within 15 metres and in sight, looked
+for twice a second - and the Colt, picked up on the run, was taken
+before it was ever marked. Taken counts as come across now: the place
+is named by the Colt.

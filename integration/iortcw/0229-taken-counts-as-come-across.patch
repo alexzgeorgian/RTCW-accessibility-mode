@@ -1,0 +1,17 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 51e6d625..dcbd80a4 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -702,7 +702,11 @@ int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int
+ 
+ 		qboolean left;
+ 
+-		if (thing->ride || !thing->known || ( thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
++		/* Taken counts as come across: the Colt, picked up before it was
++		   marked as seen, was left out, and the tester heard the place
++		   named by the health beside it. */
++		if (thing->ride || ( !thing->known && !thing->done )
++		    || ( thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
+ 		    || CG_AccessibilityAreaOf(thing->point) >= 0)
+ 		{
+ 			continue;
