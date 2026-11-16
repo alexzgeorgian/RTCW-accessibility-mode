@@ -1,0 +1,88 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 5d82dad4..012e0f07 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2463,8 +2463,12 @@ void CG_AccessibilityAreasBack(void)
+ 				far[count]              = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
+ 				eta_areas.back[count++] = i;
+ 			}
+-			for (i = 0; !j && i < outdoors && count < ETA_AREAS_MAX; i++)
++			for (i = 0; i < outdoors && count < ETA_AREAS_MAX; i++)
+ 			{
++				if (( eta_backOutCount[i] > 0 ) != ( j == 0 ))
++				{
++					continue;
++				}
+ 				far[count]              = Distance(ps->origin, eta_backOutAt[i]) + fabsf(eta_backOutAt[i][2] - ps->origin[2]);
+ 				eta_areas.back[count++] = -1 - i;
+ 			}
+@@ -2540,7 +2544,7 @@ void CG_AccessibilityAreasBack(void)
+ 	}
+ 	if (area < 0)
+ 	{
+-		Com_sprintf(name, sizeof(name), "outdoors, %s", eta_backOutWhat[-1 - area]);
++		Com_sprintf(name, sizeof(name), "outdoors, by the %s", eta_backOutWhat[-1 - area]);
+ 	}
+ 	else
+ 	{
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 54715ea6..51e6d625 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -681,11 +681,13 @@ int CG_AccessibilityThingsLeftIn(int area)
+ }
+ 
+ /*
+- * For the explored places' list: the things left outdoors, in no area,
+- * grouped where they lie within 15 metres of each other - the first one's
+- * name, where it lies, and how many. The tester, back through the places
+- * explored with semicolon, did not find the Colt's drop in the forest,
+- * health still lying there: it is in no area. qfalse groups past max.
++ * For the explored places' list: the places outdoors, in no area, where
++ * things were come across - grouped where they lie within 15 metres of
++ * each other - with the first one's name, where it lies, and how many are
++ * left there, 0 when all were taken. The tester, back through the places
++ * explored with semicolon, did not find the Colt's drop in the forest:
++ * it is in no area. Then, with everything there taken, still not: a
++ * place been to is on the list, things left or none, as an area is.
+  */
+ #define ETA_THINGS_OUTDOOR_GROUP 600.0f
+ 
+@@ -698,16 +700,26 @@ int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int
+ 	{
+ 		const eta_thing_t *thing = &eta_things.things[i];
+ 
+-		if (thing->done || thing->pressed || thing->ride || !thing->known
++		qboolean left;
++
++		if (thing->ride || !thing->known || ( thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
+ 		    || CG_AccessibilityAreaOf(thing->point) >= 0)
+ 		{
+ 			continue;
+ 		}
++		left = (qboolean)( !thing->done && !thing->pressed );
+ 		for (g = 0; g < n; g++)
+ 		{
+ 			if (Distance(at[g], thing->point) < ETA_THINGS_OUTDOOR_GROUP)
+ 			{
+-				count[g]++;
++				count[g] += left;
++				/* Named by what marks it - the Colt, not the health
++				   beside it. */
++				if (( Q_stristr(what[g], "health") || Q_stristr(what[g], "ammo") )
++				    && !Q_stristr(thing->name, "health") && !Q_stristr(thing->name, "ammo"))
++				{
++					Q_strncpyz(what[g], thing->name, sizeof(what[0]));
++				}
+ 				break;
+ 			}
+ 		}
+@@ -715,7 +727,7 @@ int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int
+ 		{
+ 			VectorCopy(thing->point, at[n]);
+ 			Q_strncpyz(what[n], thing->name, sizeof(what[0]));
+-			count[n++] = 1;
++			count[n++] = left;
+ 		}
+ 	}
+ 	return n;

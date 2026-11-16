@@ -3912,3 +3912,12 @@ through each new search of it; O says so - "Facing the way. 13 meters,
 then right. Thompson, not found yet, 578 meters along the way" - where
 the first turn, before the way is known, still says the straight line:
 "Facing toward Thompson, not found yet, 268 meters".
+
+### 0225 Places outdoors stay on the list once emptied, named by what marks them
+
+The Colt's drop was on semicolon's list only while something was left
+there; with all of it taken, the tester found it gone. A place outdoors
+where items or treasure were come across is now on the list as an area
+is, things left or none - with things left among the first part, else
+among the rest - and named by what marks it, a weapon before the health
+and ammo beside it: "outdoors, by the Colt, 2 things left".
