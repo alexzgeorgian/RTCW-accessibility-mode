@@ -1,0 +1,82 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 9f1383c2..5d82dad4 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2407,10 +2407,9 @@ static qboolean ETA_AreaSpot(int area, vec3_t out)
+  * the first level with a rifle still left behind, and no key that went
+  * back through the areas already seen.
+  *
+- * Only those with things left, now, and the places outdoors with things
+- * left too, which are in no area. The tester, in the forest, heard place
+- * after place with nothing left to take or do, and not the Colt's drop
+- * with its health still lying there.
++ * And the places outdoors with things left too, which are in no area,
++ * among those with things left: the tester, in the forest, did not find
++ * the Colt's drop on the list, its health still lying there.
+  */
+ #define ETA_BACK_OUTDOORS 16
+ 
+@@ -2420,7 +2419,7 @@ static int    eta_backOutCount[ETA_BACK_OUTDOORS];
+ void CG_AccessibilityAreasBack(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+-	int                 here, i, j, count = 0, meters, left, area;
++	int                 here, i, j, count = 0, withThings = 0, meters, left, area;
+ 	float               far[ETA_AREAS_MAX];
+ 	vec3_t              at, delta;
+ 	char                height[64], name[64], things[48];
+@@ -2442,12 +2441,12 @@ void CG_AccessibilityAreasBack(void)
+ 
+ 	if (fresh)
+ 	{
+-		/* Those with things left, and the places outdoors with things
+-		   left, nearest first. */
++		/* Those with things left, the places outdoors with things left
++		   among them, then the rest; nearest first within each. */
+ 		int outdoors = CG_AccessibilityThingsOutdoors(eta_backOutAt, eta_backOutWhat, eta_backOutCount,
+ 		                                              ETA_BACK_OUTDOORS);
+ 
+-		for (j = 0; j < 1; j++)
++		for (j = 0; j < 2; j++)
+ 		{
+ 			int start = count;
+ 
+@@ -2464,11 +2463,15 @@ void CG_AccessibilityAreasBack(void)
+ 				far[count]              = Distance(ps->origin, at) + fabsf(at[2] - ps->origin[2]);
+ 				eta_areas.back[count++] = i;
+ 			}
+-			for (i = 0; i < outdoors && count < ETA_AREAS_MAX; i++)
++			for (i = 0; !j && i < outdoors && count < ETA_AREAS_MAX; i++)
+ 			{
+ 				far[count]              = Distance(ps->origin, eta_backOutAt[i]) + fabsf(eta_backOutAt[i][2] - ps->origin[2]);
+ 				eta_areas.back[count++] = -1 - i;
+ 			}
++			if (!j)
++			{
++				withThings = count;
++			}
+ 			/* Nearest first within each part. */
+ 			for (i = start; i < count; i++)
+ 			{
+@@ -2494,7 +2497,7 @@ void CG_AccessibilityAreasBack(void)
+ 		eta_areas.backPos   = -1;
+ 		if (!count)
+ 		{
+-			ETA_Speech_Say("Nothing left in the places explored. X finds the doors out");
++			ETA_Speech_Say("No other area explored yet. X finds the doors out");
+ 			return;
+ 		}
+ 	}
+@@ -2530,8 +2533,10 @@ void CG_AccessibilityAreasBack(void)
+ 	ETA_Speech_BeginReport();
+ 	if (fresh)
+ 	{
+-		ETA_Speech_Say(va("%d %s explored with things left", eta_areas.backCount,
+-		                  eta_areas.backCount == 1 ? "place" : "places"));
++		ETA_Speech_Say(withThings ? va("%d other %s explored, %d with things left", eta_areas.backCount,
++		                               eta_areas.backCount == 1 ? "place" : "places", withThings)
++		               : va("%d other %s explored, nothing left in them", eta_areas.backCount,
++		                    eta_areas.backCount == 1 ? "place" : "places"));
+ 	}
+ 	if (area < 0)
+ 	{

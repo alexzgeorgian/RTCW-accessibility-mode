@@ -3891,3 +3891,12 @@ areas with things left, and the places outdoors with things left too
 within 15 metres, by the first one's name): "1 place explored with
 things left, 1 of 1, outdoors, Med Health, 4 things left, right, 123
 meters". With none: "Nothing left in the places explored".
+
+### 0223 Semicolon: the full list again, with the places outdoors
+
+0222 read the tester wrongly: they wanted the Colt's drop on the list,
+not the places with nothing left taken off it. Semicolon is the list it
+was - the explored areas with things left first, nearest first, then the
+rest - with the places outdoors with things left (0222) among the first
+part: "1 other place explored, 1 with things left, 1 of 1, outdoors, Med
+Health, 4 things left, ...".
