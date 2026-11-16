@@ -1,0 +1,113 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 5452ed6d..de891f09 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6863,15 +6863,21 @@ static void ETA_FaceTheWayNow(void)
+ 
+ 				if (CG_AccessibilityMarkerInfo(origin, &name))
+ 				{
++					qboolean alongWay;
++
+ 					VectorSubtract(origin, ps->origin, toward);
+-					meters = (int)(VectorLength(toward) * ETA_QU_TO_METERS + 0.5f);
++					/* Along the way where it is known: as the crow flies,
++					   the number went up while the tester walked the way
++					   round by the forest's edges. */
++					meters = CG_AccessibilityMarkerSaidMeters(&alongWay);
+ 					ETA_HudNarrator_HeightText(toward[2] * ETA_QU_TO_METERS, height, sizeof(height));
+ 					Q_strncpyz(what, name, sizeof(what));
+ 					what[0] = (char)toupper((unsigned char)what[0]);
+-					ETA_Speech_Say(va("%s.%s %s, %d meters%s%s",
++					ETA_Speech_Say(va("%s.%s %s, %d meters%s%s%s",
+ 					                  fabsf(AngleSubtract(yaw, vectoyaw(delta))) > 15.0f
+ 					                  ? "Facing the opening nearest the way" : "Facing the way",
+-					                  ETA_TurnAheadText(), what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++					                  ETA_TurnAheadText(), what, meters < 1 ? 1 : meters,
++					                  alongWay ? " along the way" : "", height[0] ? ", " : "", height));
+ 				}
+ 				else
+ 				{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 0d6d9792..b566924f 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -172,6 +172,7 @@ typedef struct
+ 	int      startedAt;
+ 	qboolean done;        /* the current search has finished */
+ 	qboolean known;       /* a search for this marker has finished: kept while the next looks again */
++	float    leftKept;    /* metres along the way, as last known: said while the next search runs */
+ 	int      doneAt;
+ 	vec3_t   steer;       /* the point along the way */
+ 	int      steerIndex;  /* which of the way's points it is */
+@@ -2780,6 +2781,41 @@ static float ETA_MarkerWayLeft(qboolean *byWay)
+ 	return Distance(ps->origin, eta_marker.origin) * ETA_QU_TO_METERS;
+ }
+ 
++/*
++ * Metres to the marker as they are said: along the way where it is known,
++ * kept through each new search of it, else as the crow flies. The
++ * tester, following the way to the Snooper rifle round by the forest's
++ * edges, heard the metres go up as they walked: the way first leads away
++ * from the rifle, and the straight line grew.
++ */
++int CG_AccessibilityMarkerSaidMeters(qboolean *alongWay)
++{
++	qboolean byWay = qfalse;
++	float    left;
++
++	*alongWay = qfalse;
++	if (!eta_marker.active)
++	{
++		return 0;
++	}
++	if (eta_route.done)
++	{
++		left = ETA_MarkerWayLeft(&byWay);
++		if (byWay)
++		{
++			eta_route.leftKept = left;
++			*alongWay          = qtrue;
++			return (int)( left + 0.5f );
++		}
++	}
++	else if (eta_route.known && eta_route.leftKept > 0.0f)
++	{
++		*alongWay = qtrue;
++		return (int)( eta_route.leftKept + 0.5f );
++	}
++	return ETA_MarkerDistance();
++}
++
+ static void ETA_MarkerProgressFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -3014,6 +3050,8 @@ void CG_AccessibilityMarkerFrame(void)
+  */
+ void CG_AccessibilityMarkerApproach(void)
+ {
++	qboolean alongWay;
++
+ 	if (!eta_marker.active || !cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
+ 	{
+ 		return;
+@@ -3022,7 +3060,7 @@ void CG_AccessibilityMarkerApproach(void)
+ 	/* Up or down with each distance, as the objective's own callouts
+ 	   once said it: the closer, the more it matters. A square has no
+ 	   height of its own. */
+-	if (ETA_NavigationSystem_UpdateMarkerApproach(ETA_MarkerDistance()) && !eta_marker.square)
++	if (ETA_NavigationSystem_UpdateMarkerApproach(CG_AccessibilityMarkerSaidMeters(&alongWay)) && !eta_marker.square)
+ 	{
+ 		ETA_NavigationSystem_AnnounceMarkerHeight((eta_marker.origin[2] - cg.predictedPlayerState.origin[2]) * ETA_QU_TO_METERS);
+ 	}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 78aebd5c..84df1270 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2306,6 +2306,7 @@ qboolean CG_AccessibilityAreasOn( void );
+ int CG_AccessibilityAreaOf( const vec3_t at );
+ int CG_AccessibilityAreaHere( void );
+ qboolean CG_AccessibilityInTunnel( const vec3_t at );
++int CG_AccessibilityMarkerSaidMeters( qboolean *alongWay );
+ qboolean CG_AccessibilityLevelStart( vec3_t out );
+ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );

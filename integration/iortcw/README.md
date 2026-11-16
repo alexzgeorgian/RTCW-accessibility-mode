@@ -3900,3 +3900,15 @@ was - the explored areas with things left first, nearest first, then the
 rest - with the places outdoors with things left (0222) among the first
 part: "1 other place explored, 1 with things left, 1 of 1, outdoors, Med
 Health, 4 things left, ...".
+
+### 0224 Metres along the way, once it is known
+
+Following the way to the Snooper rifle, the tester heard the metres go
+up, not down: they were as the crow flies, and the way, keeping out of
+the soldiers' sight, first leads away from the rifle by the forest's
+edges. Once the way is known, the metres O says and the distance
+callouts count are along it (CG_AccessibilityMarkerSaidMeters), kept
+through each new search of it; O says so - "Facing the way. 13 meters,
+then right. Thompson, not found yet, 578 meters along the way" - where
+the first turn, before the way is known, still says the straight line:
+"Facing toward Thompson, not found yet, 268 meters".
