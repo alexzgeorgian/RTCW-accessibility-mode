@@ -1,0 +1,67 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index f47c1a3b..005919b7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -11575,7 +11575,6 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t aim, qboolean allRound)
+ {
+ 	const entityState_t *es = &cent->currentState;
+-	vec3_t              head;
+ 	float               meters, halfView;
+ 
+ 	if (es->eType != ET_PLAYER || (es->eFlags & EF_DEAD) || es->number == cg.snap->ps.clientNum
+@@ -11585,20 +11584,46 @@ static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t
+ 	}
+ 
+ 	ETA_PlayerAimPoint(cent, aim);
+-	VectorCopy(aim, head);
+-	head[2] += ( es->eFlags & EF_CROUCHING ) ? 18.0f : 16.0f;
+ 
++	/*
++	 * Whatever part of him is in the open, looked at again every frame
++	 * the lock holds: the chest first, then the head, the belly, the legs,
++	 * and either side of the chest - round a corner, a shoulder shows.
++	 * Aimed at the chest whatever showed, as it was, the shots went into
++	 * the cover: the tester, behind the forest's tower sniper, his body
++	 * behind the parapet and his head over it, kept missing him, and
++	 * asked that the lock go for another part as the moment changes.
++	 */
+ 	if (!ETA_ClearLine(eye, aim))
+ 	{
+-		/* The body behind cover - a parapet, a sandbag wall, a crate -
+-		   and the head over it: aimed at the head. Aimed at the body, as
+-		   it was, the shots went into the cover: the tester, behind the
+-		   forest's tower sniper, kept missing him. */
+-		if (!ETA_ClearLine(eye, head))
++		static const float parts[][2] = {
++			{ 0.0f, 16.0f },     /* the head */
++			{ 0.0f, -12.0f },    /* the belly */
++			{ 0.0f, -28.0f },    /* the legs */
++			{ 10.0f, 0.0f },     /* a shoulder */
++			{ -10.0f, 0.0f },    /* the other */
++		};
++		vec3_t to, side, part;
++		int    k;
++
++		VectorSubtract(aim, eye, to);
++		to[2] = 0.0f;
++		VectorNormalize(to);
++		VectorSet(side, -to[1], to[0], 0.0f);
++		for (k = 0; k < (int)ARRAY_LEN(parts); k++)
++		{
++			VectorMA(aim, parts[k][0], side, part);
++			part[2] += parts[k][1] + ( k == 0 && ( es->eFlags & EF_CROUCHING ) ? 2.0f : 0.0f );
++			if (ETA_ClearLine(eye, part))
++			{
++				break;
++			}
++		}
++		if (k == (int)ARRAY_LEN(parts))
+ 		{
+ 			return qfalse;
+ 		}
+-		VectorCopy(head, aim);
++		VectorCopy(part, aim);
+ 	}
+ 
+ 	meters   = Distance(cg.predictedPlayerState.origin, cent->lerpOrigin) * ETA_QU_TO_METERS;

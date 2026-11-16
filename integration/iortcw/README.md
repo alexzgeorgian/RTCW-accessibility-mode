@@ -3942,3 +3942,12 @@ into the parapet. Now, the body's line blocked and the head's clear, the
 lock aims at the head (16 units over the body's aim point, 18
 crouching). Checked that the lock still takes the east tower's soldier,
 108 metres off and 23 metres up.
+
+### 0228 The lock takes whatever part is in the open
+
+The tester asked that the lock go for another part of the enemy as the
+moment changes, not the head alone (0227). Every frame the lock holds,
+the chest is tried first; with its line blocked, the head, the belly,
+the legs, then a shoulder either side - round a corner, one shows - and
+the first in the open is aimed at. None in the open: the enemy is out
+of sight, as before. The east tower's soldier still locks at 108 metres.
