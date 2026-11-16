@@ -3975,3 +3975,16 @@ game started again and the save loaded - semicolon gives "1 of 1,
 outdoors, by the Colt, 3 things left, right, 123 meters". A save made
 before this build has no places outdoors in it: they come back once the
 place is gone near again.
+
+### 0231 A weapon carried marks the place it was taken from
+
+The tester, playing on from a save made before 0230, asked for the
+Colt's drop they had already emptied of the Colt to be on the list. A
+weapon the map lays out only once, and that the player carries, is taken
+as taken from there (ETA_ThingCarried): its place outdoors is on the
+list, and the things not seen yet beside it are counted as left there
+until the place is gone near again. One of several the map lays out, or
+one the player may have brought from the level before, says nothing of
+where they have been and is left out. Checked: the Colt given in a fresh
+game, nothing come across - semicolon gives "outdoors, by the Colt, 3
+things left, ahead, 252 meters".

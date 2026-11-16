@@ -1,0 +1,132 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index dcbd80a4..6a0fcf2b 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -691,47 +691,99 @@ int CG_AccessibilityThingsLeftIn(int area)
+  */
+ #define ETA_THINGS_OUTDOOR_GROUP 600.0f
+ 
+-int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int max)
++/* A weapon the map lays out, by its name, that the player carries: taken
++   already, even if never seen taken - a save from before this was kept,
++   or the level played on from one. Only a weapon the map lays out once:
++   one of several, or one the player may have brought from the level
++   before, says nothing of where they have been. */
++static qboolean ETA_ThingCarried(const eta_thing_t *thing)
+ {
+-	int i, g, n = 0;
++	int i, same = 0;
+ 
+-	ETA_ThingsRecord();
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+-		const eta_thing_t *thing = &eta_things.things[i];
++		same += !Q_stricmp(eta_things.things[i].name, thing->name);
++	}
++	if (same != 1)
++	{
++		return qfalse;
++	}
+ 
+-		qboolean left;
++	for (i = 1; i < bg_numItems; i++)
++	{
++		const gitem_t *it = &bg_itemlist[i];
+ 
+-		/* Taken counts as come across: the Colt, picked up before it was
+-		   marked as seen, was left out, and the tester heard the place
+-		   named by the health beside it. */
+-		if (thing->ride || ( !thing->known && !thing->done )
+-		    || ( thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
+-		    || CG_AccessibilityAreaOf(thing->point) >= 0)
++		if (it->giType == IT_WEAPON && it->giTag > WP_NONE && it->giTag < WP_NUM_WEAPONS
++		    && ( ( cgs.itemPrintNames[i][0] && !Q_stricmp(cgs.itemPrintNames[i], thing->name) )
++		         || ( it->pickup_name && !Q_stricmp(it->pickup_name, thing->name) ) ))
+ 		{
+-			continue;
++			return (qboolean)COM_BitCheck(cg.predictedPlayerState.weapons, it->giTag);
+ 		}
+-		left = (qboolean)( !thing->done && !thing->pressed );
+-		for (g = 0; g < n; g++)
++	}
++	return qfalse;
++}
++
++int CG_AccessibilityThingsOutdoors(vec3_t *at, char (*what)[48], int *count, int max)
++{
++	int i, g, n = 0, pass;
++
++	ETA_ThingsRecord();
++	/* First the places: where things were come across or taken. Then the
++	   things not seen yet beside them, counted as left there. The tester,
++	   playing on from a save made before places outdoors were kept, asked
++	   for the Colt's drop they had already emptied of the Colt: the Colt
++	   they carry says they were there. */
++	for (pass = 0; pass < 2; pass++)
++	{
++		for (i = 0; i < eta_things.count; i++)
+ 		{
+-			if (Distance(at[g], thing->point) < ETA_THINGS_OUTDOOR_GROUP)
++			const eta_thing_t *thing = &eta_things.things[i];
++			qboolean          left, carried = qfalse;
++
++			if (thing->ride || ( thing->kind != ETA_THING_ITEM && thing->kind != ETA_THING_TREASURE )
++			    || CG_AccessibilityAreaOf(thing->point) >= 0)
++			{
++				continue;
++			}
++			if (!thing->known && !thing->done)
+ 			{
+-				count[g] += left;
+-				/* Named by what marks it - the Colt, not the health
+-				   beside it. */
+-				if (( Q_stristr(what[g], "health") || Q_stristr(what[g], "ammo") )
+-				    && !Q_stristr(thing->name, "health") && !Q_stristr(thing->name, "ammo"))
++				carried = ETA_ThingCarried(thing);
++				if (!pass && !carried)
+ 				{
+-					Q_strncpyz(what[g], thing->name, sizeof(what[0]));
++					continue;
++				}
++				if (pass && carried)
++				{
++					continue;
+ 				}
+-				break;
+ 			}
+-		}
+-		if (g == n && n < max)
+-		{
+-			VectorCopy(thing->point, at[n]);
+-			Q_strncpyz(what[n], thing->name, sizeof(what[0]));
+-			count[n++] = left;
++			else if (pass)
++			{
++				continue;
++			}
++			left = (qboolean)( !thing->done && !thing->pressed && !carried );
++			for (g = 0; g < n; g++)
++			{
++				if (Distance(at[g], thing->point) < ETA_THINGS_OUTDOOR_GROUP)
++				{
++					count[g] += left;
++					/* Named by what marks it - the Colt, not the health
++					   beside it. */
++					if (( Q_stristr(what[g], "health") || Q_stristr(what[g], "ammo") )
++					    && !Q_stristr(thing->name, "health") && !Q_stristr(thing->name, "ammo"))
++					{
++						Q_strncpyz(what[g], thing->name, sizeof(what[0]));
++					}
++					break;
++				}
++			}
++			/* Not seen, and near no place come across: not a place yet. */
++			if (g == n && !pass && n < max)
++			{
++				VectorCopy(thing->point, at[n]);
++				Q_strncpyz(what[n], thing->name, sizeof(what[0]));
++				count[n++] = left;
++			}
+ 		}
+ 	}
+ 	return n;
