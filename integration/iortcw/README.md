@@ -3931,3 +3931,14 @@ the way is known, said the straight line: "Facing toward Thompson, 268
 meters", and a moment later "578 meters along the way". It now says no
 number - "Facing toward Thompson, not found yet, 8 meters above you" -
 and the first number heard is along the way.
+
+### 0227 Aimed at the head when the body is behind cover
+
+The tester crept up behind the forest's tower sniper and kept missing
+him. An enemy was taken as aimable if the line to his body or to his
+head was clear, and the lock then aimed at the body either way: with the
+body behind the tower's parapet and the head over it, the shots went
+into the parapet. Now, the body's line blocked and the head's clear, the
+lock aims at the head (16 units over the body's aim point, 18
+crouching). Checked that the lock still takes the east tower's soldier,
+108 metres off and 23 metres up.

@@ -1,0 +1,29 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6459084f..f47c1a3b 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -11585,12 +11585,20 @@ static qboolean ETA_EnemyAimable(const centity_t *cent, const vec3_t eye, vec3_t
+ 	}
+ 
+ 	ETA_PlayerAimPoint(cent, aim);
+-	VectorCopy(cent->lerpOrigin, head);
+-	head[2] += 36.0f;
++	VectorCopy(aim, head);
++	head[2] += ( es->eFlags & EF_CROUCHING ) ? 18.0f : 16.0f;
+ 
+-	if (!ETA_ClearLine(eye, aim) && !ETA_ClearLine(eye, head))
++	if (!ETA_ClearLine(eye, aim))
+ 	{
+-		return qfalse;
++		/* The body behind cover - a parapet, a sandbag wall, a crate -
++		   and the head over it: aimed at the head. Aimed at the body, as
++		   it was, the shots went into the cover: the tester, behind the
++		   forest's tower sniper, kept missing him. */
++		if (!ETA_ClearLine(eye, head))
++		{
++			return qfalse;
++		}
++		VectorCopy(head, aim);
+ 	}
+ 
+ 	meters   = Distance(cg.predictedPlayerState.origin, cent->lerpOrigin) * ETA_QU_TO_METERS;
