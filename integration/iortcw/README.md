@@ -3988,3 +3988,17 @@ one the player may have brought from the level before, says nothing of
 where they have been and is left out. Checked: the Colt given in a fresh
 game, nothing come across - semicolon gives "outdoors, by the Colt, 3
 things left, ahead, 252 meters".
+
+### 0232 The way keeps clear of no one again
+
+The tester took the long way round by the forest's edges, kept out of
+sight, and was seen all the same, crouched or not: soldiers walk their
+rounds, and see further than the 50 metres the way looked along. And it
+was none of their asking, and a kind of cheating: a way that knows where
+every soldier stands, and where those not yet come in will, knows more
+than a player can. 0218, 0219 and 0220 are taken out - the costs near a
+soldier and in his sight, and the server's list of soldiers yet to come
+in - and the way is the shortest again: from the Colt's drop to the
+tunnel 376 points through the middle of the forest, where it was 573
+round by the edges. What came with them stays: the tunnel named (0222),
+O turning at once (0221), the metres along the way (0224).

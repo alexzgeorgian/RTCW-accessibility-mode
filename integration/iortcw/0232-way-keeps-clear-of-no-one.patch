@@ -1,0 +1,234 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c365d223..f6dcfc82 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1287,7 +1287,7 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 		int    c;
+ 		vec3_t at;
+ 
+-		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4 && c >= 0
++		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4
+ 		    && ( first || c == AICHAR_HELGA || c == AICHAR_HEINRICH ))
+ 		{
+ 			for (i = 0; i < nk && kinds[i] != c; i++)
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index b566924f..4ce230c2 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -430,136 +430,12 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+    the village's walkway to the rifle, a wall's top 1.8 metres wide with
+    a five metre drop beside it, the way ran along the very edge, and the
+    test player stepped off it again and again. */
+-/*
+- * The soldiers alive in the level as the way is planned, from the server
+- * (CS_ETA_ENEMIES): the way keeps its distance from them. The tester, in
+- * the forest, was led to the Snooper rifle the long way round, past five
+- * soldiers, and remembered a quieter way. A square within ETA_ROUTE_ENEMY_
+- * NEAR of one costs up to ETA_ROUTE_ENEMY_SQUARES more, the more the
+- * nearer, however many are near - enough to take a way round worth the
+- * walk, never to leave the player with none. In the forest, with the
+- * farmhouse's soldiers in, the way to the rifle turns north short of the
+- * house and goes round along the low ground instead of through it.
+- */
+-#define ETA_ROUTE_ENEMY_MAX      40
+-#define ETA_ROUTE_ENEMY_NEAR     768.0f   /* about 20 metres */
+-#define ETA_ROUTE_ENEMY_SQUARES  16.0f
+-
+-static vec3_t eta_routeEnemies[ETA_ROUTE_ENEMY_MAX];
+-static int    eta_routeEnemyCount;
+-
+-static void ETA_RouteSeenClear(void);
+-
+-static void ETA_RouteEnemiesRead(void)
+-{
+-	const char *list = CG_ConfigString(CS_ETA_ENEMIES);
+-
+-	ETA_RouteSeenClear();
+-	eta_routeEnemyCount = 0;
+-	while (list && *list && eta_routeEnemyCount < ETA_ROUTE_ENEMY_MAX)
+-	{
+-		int    c;
+-		vec3_t at;
+-
+-		if (sscanf(list, "%d %f %f %f", &c, &at[0], &at[1], &at[2]) == 4)
+-		{
+-			VectorCopy(at, eta_routeEnemies[eta_routeEnemyCount]);
+-			eta_routeEnemyCount++;
+-		}
+-		list = strchr(list, ';');
+-		if (list)
+-		{
+-			list++;
+-		}
+-	}
+-}
+-
+-/*
+- * In a soldier's sight, too, not only near one. The tester, past the
+- * farmhouse, came out on a street in the open where the soldiers by the
+- * barn and the one up in the tower could all see them, crouched or not:
+- * 20 metres away is no cover in the open. A square a soldier within
+- * ETA_ROUTE_SEEN_FAR has a clear line to, from his eyes to a crouching
+- * player's head, costs ETA_ROUTE_SEEN_SQUARES more for each who does.
+- * The lines are looked along once for each four squares (a 64-unit cell
+- * holds four), and kept (a cache by cell, cleared as each way is
+- * planned): looked along for every square, they doubled the search.
+- */
+-#define ETA_ROUTE_SEEN_FAR      2048.0f   /* about 50 metres */
+-#define ETA_ROUTE_SEEN_SQUARES  4.0f
+-#define ETA_ROUTE_SEEN_CACHE    65536
+-
+-static struct
+-{
+-	int   key;      /* the square, packed; 0 for none */
+-	float extra;
+-} eta_routeSeen[ETA_ROUTE_SEEN_CACHE];
+-
+-static float ETA_RouteSeenExtra(const float at[3])
+-{
+-	int          sx = (int)floorf(at[0] / 64.0f), sy = (int)floorf(at[1] / 64.0f), sz = (int)floorf(at[2] / 64.0f);
+-	int          key = ( ( sx & 0x3ff ) | ( ( sy & 0x3ff ) << 10 ) | ( ( sz & 0x7f ) << 20 ) ) + 1;
+-	unsigned int slot = ( (unsigned int)key * 2654435761u ) & ( ETA_ROUTE_SEEN_CACHE - 1 );
+-	float        extra = 0.0f;
+-	vec3_t       head;
+-	int          i;
+-
+-	if (eta_routeSeen[slot].key == key)
+-	{
+-		return eta_routeSeen[slot].extra;
+-	}
+-	VectorSet(head, at[0], at[1], at[2] + 16.0f);
+-	for (i = 0; i < eta_routeEnemyCount; i++)
+-	{
+-		vec3_t  eye;
+-		trace_t trace;
+-
+-		if (Distance(head, eta_routeEnemies[i]) > ETA_ROUTE_SEEN_FAR)
+-		{
+-			continue;
+-		}
+-		VectorSet(eye, eta_routeEnemies[i][0], eta_routeEnemies[i][1], eta_routeEnemies[i][2] + 40.0f);
+-		trap_CM_BoxTrace(&trace, eye, head, NULL, NULL, 0, MASK_OPAQUE | CONTENTS_SOLID);
+-		if (trace.fraction >= 1.0f)
+-		{
+-			extra += ETA_ROUTE_SEEN_SQUARES;
+-		}
+-	}
+-	eta_routeSeen[slot].key   = key;
+-	eta_routeSeen[slot].extra = extra;
+-	return extra;
+-}
+-
+-static void ETA_RouteSeenClear(void)
+-{
+-	memset(eta_routeSeen, 0, sizeof(eta_routeSeen));
+-}
+-
+-static float ETA_RouteEnemyExtra(const float at[3])
+-{
+-	float extra = ETA_RouteSeenExtra(at);
+-	int   i;
+-
+-	for (i = 0; i < eta_routeEnemyCount; i++)
+-	{
+-		float dx = at[0] - eta_routeEnemies[i][0], dy = at[1] - eta_routeEnemies[i][1];
+-		float d  = sqrtf(dx * dx + dy * dy);
+-
+-		if (d < ETA_ROUTE_ENEMY_NEAR && fabsf(at[2] - eta_routeEnemies[i][2]) < 512.0f)
+-		{
+-			extra += ETA_ROUTE_ENEMY_SQUARES * ( 1.0f - d / ETA_ROUTE_ENEMY_NEAR );
+-		}
+-	}
+-	return extra < ETA_ROUTE_ENEMY_SQUARES ? extra : ETA_ROUTE_ENEMY_SQUARES;
+-}
+-
+ static float ETA_RouteEdgeExtra(const float at[3])
+ {
+ 	static const float near[5][2] = { { 0, 0 }, { 16, 0 }, { -16, 0 }, { 0, 16 }, { 0, -16 } };
+ 	trace_t            trace;
+ 	vec3_t             top, bottom;
+ 	int                i;
+-	float              enemies = ETA_RouteEnemyExtra(at);
+ 
+ 	/* The middle, and half a square to each side: an edge that near is
+ 	   one a step to the side goes over. */
+@@ -570,10 +446,10 @@ static float ETA_RouteEdgeExtra(const float at[3])
+ 		trap_CM_BoxTrace(&trace, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
+ 		if (!trace.startsolid && trace.fraction >= 1.0f)
+ 		{
+-			return 3.0f + enemies;
++			return 3.0f;
+ 		}
+ 	}
+-	return enemies;
++	return 0.0f;
+ }
+ 
+ /**
+@@ -1510,7 +1386,6 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 		eta_routeOpenBreakables = qfalse;
+ 	}
+ 	ETA_RouteLockedDoors();
+-	ETA_RouteEnemiesRead();
+ 	ETA_RouteStartAt(cg.predictedPlayerState.origin, start);
+ 	goal[0]  = eta_marker.origin[0];
+ 	goal[1]  = eta_marker.origin[1];
+@@ -1590,7 +1465,6 @@ void CG_AccessibilityNavSweep_f(void)
+ 			goal[k] = (float)atof(num);
+ 		}
+ 		ETA_RouteLockedDoors();
+-		ETA_RouteEnemiesRead();
+ 		ETA_RouteStartAt(from, start);
+ 		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS, qfalse);
+ 		began = trap_Milliseconds();
+@@ -1602,9 +1476,9 @@ void CG_AccessibilityNavSweep_f(void)
+ 		}
+ 		while (state == ETA_PATH_SEARCHING && trap_Milliseconds() - began < 4000);
+ 		count = ETA_PathFinder_PointCount();
+-		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d ms %d enemies %d\n",
++		CG_Printf("ETASWEEP route state %d start %.0f %.0f %.0f points %d locked %d breakables %d alltried %d ms %d\n",
+ 		          state, start[0], start[1], start[2], count, eta_routeLockedCount, eta_routeBreakables,
+-		          ETA_PathFinder_AllTried(), trap_Milliseconds() - began, eta_routeEnemyCount);
++		          ETA_PathFinder_AllTried(), trap_Milliseconds() - began);
+ 		for (k = 0; k < count; k++)
+ 		{
+ 			ETA_PathFinder_Point(k, point);
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index ae3dbf95..1bd2336b 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2526,30 +2526,19 @@ static void G_AccessibilityTriggers( void ) {
+ 	 * twenty Elite guards dead, and did not know four were still alive
+ 	 * in rooms they had left behind: the client knows only those in its
+ 	 * sight. Not the allies (team 1) nor the neutral (7).
+-	 *
+-	 * After them, those the level has yet to bring in, where they will
+-	 * come in, with their kind as -(aichar + 1): the way keeps clear of
+-	 * them too (cg_accessibility_route.c). The tester was led through the
+-	 * forest's farmhouse, its soldiers brought in only as the player came
+-	 * near, after the way was already planned. U and O's lists of the
+-	 * living pass them by.
+ 	 */
+ 	{
+ 		char list[1024], one[48], was[1024];
+-		int  n = 0, waiting;
++		int  n = 0;
+ 
+ 		list[0] = '\0';
+-		for ( waiting = 0; waiting < 2; waiting++ )
+ 		for ( i = 0, ent = g_entities; i < level.maxclients && n < 40; i++, ent++ ) {
+-			if ( !ent->inuse || !( ent->r.svFlags & SVF_CASTAI ) || ent->health <= 0
++			if ( !ent->inuse || !( ent->r.svFlags & SVF_CASTAI ) || !ent->r.linked || ent->health <= 0
+ 				 || ent->aiTeam == 1 || ent->aiTeam == 7 ) {
+ 				continue;
+ 			}
+-			if ( waiting ? !ent->aiInactive : ( !ent->r.linked || ent->aiInactive ) ) {
+-				continue;
+-			}
+-			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", waiting ? -( ent->aiCharacter + 1 ) : ent->aiCharacter,
+-						 (int)ent->r.currentOrigin[0], (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
++			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", ent->aiCharacter, (int)ent->r.currentOrigin[0],
++						 (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
+ 			if ( strlen( list ) + strlen( one ) >= sizeof( list ) ) {
+ 				break;
+ 			}
