@@ -1,0 +1,29 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index de891f09..c365d223 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -5214,9 +5214,8 @@ static qboolean ETA_OpeningToward(float wanted, float *yaw);
+  * is far: still looking for it", asked for it gone: in the ET mode the
+  * marker is never waited for, and a game should not stop for its guide.
+  * So O turns straight away to the opening nearest the line to where it
+- * leads, and says so as it would the way - "Facing toward the Thompson,
+- * 268 meters" - while the way round the walls is looked for out of
+- * earshot. Once it is known it is only said if it goes another way than
++ * leads, and says so - "Facing toward Thompson" - while the way round
++ * the walls is looked for out of earshot. Once it is known it is only said if it goes another way than
+  * the player was turned (ETA_FacePendingFrame), and not at all once they
+  * are walking: the ping follows the way by then.
+  */
+@@ -5266,7 +5265,11 @@ static void ETA_FaceTheWayGuess(void)
+ 		VectorCopy(ps->origin, eta_faceGuessFrom);
+ 	}
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+-	ETA_Speech_Say(va("Facing toward %s, %d meters%s%s", what, meters < 1 ? 1 : meters, height[0] ? ", " : "", height));
++	/* No number yet: as the crow flies it is not the one said along the
++	   way a moment later, and the tester, hearing 268 metres and then
++	   578, took the way to be leading them further off. Only how high. */
++	(void)meters;
++	ETA_Speech_Say(va("Facing toward %s%s%s", what, height[0] ? ", " : "", height));
+ }
+ 
+ void CG_AccessibilityFaceTheWay(void)

@@ -3921,3 +3921,13 @@ where items or treasure were come across is now on the list as an area
 is, things left or none - with things left among the first part, else
 among the rest - and named by what marks it, a weapon before the health
 and ammo beside it: "outdoors, by the Colt, 2 things left".
+
+### 0226 The first turn says no number
+
+The tester still heard the metres to the Thompson go up. A test bot
+following O from their save to the Thompson heard them come down, along
+the way - 409, 383, 349, 304, 261, 231, 195 - but O's first turn, before
+the way is known, said the straight line: "Facing toward Thompson, 268
+meters", and a moment later "578 meters along the way". It now says no
+number - "Facing toward Thompson, not found yet, 8 meters above you" -
+and the first number heard is along the way.
