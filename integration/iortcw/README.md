@@ -4138,3 +4138,17 @@ Checked: the main menu is PLAY, LOAD GAME, OPTIONS ...; Options opens on
 Controls, Up says ACCESSIBILITY, Enter opens the Accessibility pages,
 Escape comes back to Controls, and Up again gives ACCESSIBILITY,
 DEFAULTS, MODS, GAME OPTIONS, SYSTEM, CONTROLS.
+
+### 0239 Up the marked ladder from a few steps off
+
+The tester, led by the marker to the forest's watchtower ladder, was
+brought up against the wall on its north side, short of the ladder's
+foot, and F did not turn to the ladder. Walked as the marker leads, the
+way stops three metres short where the slope steps up beside the tower;
+F's ladder reach is two metres, and F turned to the stairs there - "Facing
+down the stairs". With the marker on a ladder's foot within F's four
+metres, F now takes the player to that foot and up the ladder, built
+from the map's own ladder: its face, which way it looks, and the foot to
+stand on. Checked: the marker followed to 1.6 metres short, F - "Climbing
+up, 10 meters", the top, "Enemy Soldier, ahead, 4 meters, has not seen
+you".

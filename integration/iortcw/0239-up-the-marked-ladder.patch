@@ -1,0 +1,53 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index aa592eae..fcaa296c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2120,6 +2120,48 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* The marker on a ladder's foot, a few steps off: F takes the player
++	   to it and up. The tester, led to the forest's watchtower, stopped
++	   three metres short where the slope steps up, and F turned them to
++	   the stairs there; the ladder was out of F's two metres' reach. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
++	{
++		vec3_t      markerAt;
++		const char *markerName;
++
++		if (CG_AccessibilityMarkerInfo(markerAt, &markerName) && markerName && strstr(markerName, "ladder up")
++		    && Distance(markerAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
++		{
++			int l;
++
++			for (l = 0; l < CG_AccessibilityLadderCount(); l++)
++			{
++				vec3_t      foot, top, lmins, lmaxs;
++				etaLadder_t ladder;
++				int         thin;
++
++				if (!CG_AccessibilityLadderEnds(l, foot, top) || Distance(foot, markerAt) > 64.0f
++				    || !CG_AccessibilityMapLadder(l, lmins, lmaxs))
++				{
++					continue;
++				}
++				memset(&ladder, 0, sizeof(ladder));
++				thin = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++				ladder.point[0]       = ( lmins[0] + lmaxs[0] ) * 0.5f;
++				ladder.point[1]       = ( lmins[1] + lmaxs[1] ) * 0.5f;
++				ladder.point[2]       = cg.predictedPlayerState.origin[2] + 16.0f;
++				ladder.normal[thin]   = foot[thin] > ladder.point[thin] ? 1.0f : -1.0f;
++				ladder.point[thin]    = ladder.normal[thin] > 0.0f ? lmaxs[thin] : lmins[thin];
++				ladder.goesUp         = qtrue;
++				ladder.hasStand       = qtrue;
++				VectorCopy(foot, ladder.stand);
++				ladder.meters         = Distance(foot, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS;
++				ETA_ClimbStart(&ladder);
++				return;
++			}
++		}
++	}
++
+ 	/* A ladder chosen on semicolon's list, its foot close by: F climbs
+ 	   that ladder, before turning to anything. At the forest's
+ 	   watchtower F turned the tester to the ladder's foot, or to the
