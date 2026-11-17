@@ -4110,3 +4110,31 @@ Checked in the forest: the tower's ladder chosen, the marker reached at
 its foot, F climbed it - "Climbing up, 10 meters", "Top of the ladder",
 the guard "ahead, 4 meters, has not seen you"; locked on, a step, and
 the knife: "Down".
+
+### 0238 Accessibility among the Options sections
+
+The tester wanted the mode's settings inside Options, beside the sound
+and its volumes and the key binds, as one organized place. ACCESSIBILITY
+leaves the main menu and joins the Options screen's sections, after
+DEFAULTS: CONTROLS (the key binds), SYSTEM (graphics, and the sound with
+its volumes), GAME OPTIONS, MODS, DEFAULTS, ACCESSIBILITY
+(accessibility_tabs.menu). That screen gives the keyboard to its page,
+and the row of sections above was reached only by Escape; each page now
+has the row too, after its own settings (UI_AccessibilitySetupSections):
+Up from the first setting, or Down past the last, comes to the sections.
+The copies are drawn clear, the game's row being where they are seen,
+and kept out of the page's way - focused, the arrows move the pointer
+onto an item's corner, and the Controls page's own tabs, under where
+ACCESSIBILITY is drawn, took the focus.
+
+Leaving the Accessibility pages opened from Options goes back to its
+Controls page. The paused game's ACCESSIBILITY tab stays as it was.
+
+And Up with nothing focused started from the menu's next-to-last item,
+the loop stepping back before it tries: a menu's last item could not be
+come to that way (Menu_SetPrevCursorItem). It starts one past the last.
+
+Checked: the main menu is PLAY, LOAD GAME, OPTIONS ...; Options opens on
+Controls, Up says ACCESSIBILITY, Enter opens the Accessibility pages,
+Escape comes back to Controls, and Up again gives ACCESSIBILITY,
+DEFAULTS, MODS, GAME OPTIONS, SYSTEM, CONTROLS.

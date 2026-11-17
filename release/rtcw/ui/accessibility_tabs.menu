@@ -1,11 +1,12 @@
 #include "ui/menudef.h"
 
 // The Accessibility button, put into the game's own menus as they load
-// (ui_main.c, UI_AccessibilityMenus): after OPTIONS in the main menu, and
-// after SYSTEM among the paused game's tabs, so the arrows come to it
-// there. Not among the Setup tabs that OPTIONS opens: that screen gives
-// the keyboard to its Controls page at once, and the tabs above it are
-// out of the arrows' reach. The game's menu files are the game's, and are
+// (ui_main.c, UI_AccessibilityMenus): among the Options screen's sections,
+// after DEFAULTS, beside CONTROLS with the key binds and SYSTEM with the
+// sound and its volumes - the tester wanted them in one organized place -
+// and after SYSTEM among the paused game's tabs. The Options screen gives
+// the keyboard to its page, so each page gets the row of sections after
+// its own settings (UI_AccessibilitySetupSections). The game's menu files are the game's, and are
 // not shipped; this is the one tab added to each, and the Load menus
 // get their two categories (below).
 //
@@ -18,20 +19,26 @@
 // side by side into one.
 
 {
-	tab main options itemDef {
+	tab setup_menu defaults itemDef {
 		text "ACCESSIBILITY"
 		type ITEM_TYPE_BUTTON
+		textfont UI_FONT_NORMAL
 		style 0
 		textstyle 6
-		rect 290 396 110 14
+		rect 540 108 100 14
 		textalign 0
-		textscale .2308
+		textscale .23
 		textalignx 2
-		textaligny 14
-		forecolor .9 .9 .9 1
+		textaligny 12
+		forecolor .9 .9 .9 .9
 		visible 1
-		textfont UI_FONT_NORMAL
-		action { play "sound/misc/zap.wav" ;
+		action { play "sound/misc/kcaction.wav" ;
+			close control_menu ;
+			close system_menu ;
+			close options_menu ;
+			close default_menu ;
+			close resetscore_menu ;
+			close mods_menu ;
 			uiScript etaAccessibilityClose ;
 			open eta_accessibility }
 	}

@@ -1,0 +1,119 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index 46f7befe..ec50d9ba 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -183,6 +183,7 @@ extern qboolean g_editingField;
+ static void UI_AccessibilityConsoleFrame( void );
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu );
+ static void UI_AccessibilityMenus( void );
++static void UI_AccessibilitySetupSections( void );
+ static void UI_AccessibilityCloseMenus( void );
+ static void UI_AccessibilityLeave( void );
+ static const char *UI_AccessibilitySavesText( void );
+@@ -8139,8 +8140,14 @@ static void UI_AccessibilityCloseMenus( void ) {
+    game's, or the main menu. */
+ static void UI_AccessibilityLeave( void ) {
+ 	menuDef_t *ingame = Menus_FindByName( "ingame" );
++	menuDef_t *setup  = Menus_FindByName( "setup_menu" );
+ 
+ 	UI_AccessibilityCloseMenus();
++	/* Opened among the Options screen's sections: back to its first. */
++	if ( setup && ( setup->window.flags & WINDOW_VISIBLE ) ) {
++		Menus_OpenByName( "control_menu" );
++		return;
++	}
+ 	Menus_ActivateByName( ingame && ( ingame->window.flags & WINDOW_VISIBLE ) ? "ingame" : "main" );
+ }
+ 
+@@ -8284,6 +8291,64 @@ static qboolean UI_AccessibilityIngamePage( const char *name ) {
+ 	return qfalse;
+ }
+ 
++/*
++ * The Options screen's sections within the arrows' reach. Its tabs -
++ * CONTROLS with the key binds, SYSTEM with the sound and its volumes,
++ * GAME OPTIONS, MODS, DEFAULTS, and ACCESSIBILITY - are a row of their
++ * own above the page, and the page has the keyboard: the arrows went
++ * round the Controls page's settings and never reached them. The tester
++ * wanted the mode's settings in Options beside the sound, the volumes and
++ * the key binds, as one organized place. So each page gets the row too,
++ * after its own settings: Down past the last setting, or Up from the
++ * first, comes to the sections. Drawn clear, the game's own row being
++ * already where they are seen.
++ */
++static void UI_AccessibilitySetupSections( void ) {
++	static const char *pages[] = {
++		"control_menu", "system_menu", "options_menu", "mods_menu", "default_menu"
++	};
++	static const char *tabs[] = {
++		"controls", "system", "gameoptions", "modoptions", "defaults", ETA_ACCESSIBILITY_TAB
++	};
++	menuDef_t *setup = Menus_FindByName( "setup_menu" );
++	int p, t;
++
++	if ( !setup ) {
++		return;
++	}
++	for ( p = 0; p < (int)ARRAY_LEN( pages ); p++ ) {
++		menuDef_t *page = Menus_FindByName( pages[p] );
++
++		if ( !page ) {
++			continue;
++		}
++		for ( t = 0; t < (int)ARRAY_LEN( tabs ) && page->itemCount < MAX_MENUITEMS; t++ ) {
++			itemDef_t *tab = Menu_FindItemByName( setup, tabs[t] ), *copy;
++
++			/* Each once, in the row's order: the mode's own comes in
++			   when its tab does, which may be a later load. */
++			if ( !tab || Menu_FindItemByName( page, va( "eta_section_%s", tabs[t] ) ) ) {
++				continue;
++			}
++			copy = UI_Alloc( sizeof( itemDef_t ) );
++			memcpy( copy, tab, sizeof( itemDef_t ) );
++			copy->parent = page;
++			copy->window.name = String_Alloc( va( "eta_section_%s", tabs[t] ) );
++			copy->window.flags &= ~( WINDOW_HASFOCUS | WINDOW_MOUSEOVER );
++			copy->window.foreColor[3] = 0.0f;
++			/* Out of the page's way: focused, the arrows move the pointer
++			   onto an item's corner, and the page's own item there - the
++			   Controls page's tabs, under ACCESSIBILITY's place - took the
++			   focus instead. */
++			copy->window.rect.x = copy->window.rect.y = 0.0f;
++			copy->window.rect.w = copy->window.rect.h = 1.0f;
++			copy->window.rectClient = copy->window.rect;
++			copy->mouseEnter = copy->mouseExit = NULL;
++			page->items[page->itemCount++] = copy;
++		}
++	}
++}
++
+ static void UI_AccessibilityMenus( void ) {
+ 	pc_token_t token;
+ 	int handle;
+@@ -8337,6 +8402,7 @@ static void UI_AccessibilityMenus( void ) {
+ 		UI_AccessibilityAddTab( menu, after, handle );
+ 	}
+ 	trap_PC_FreeSource( handle );
++	UI_AccessibilitySetupSections();
+ }
+ 
+ static void UI_AccessibilityMenuOpened( menuDef_t *menu ) {
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 47b12197..7b95177b 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -3773,7 +3773,14 @@ itemDef_t *Menu_SetPrevCursorItem( menuDef_t *menu ) {
+ 	int oldCursor = menu->cursorItem;
+ 
+ 	if ( menu->cursorItem < 0 ) {
++#ifdef FEATURE_ACCESSIBILITY
++		/* One past the last: the loop steps back before it tries, and
++		   from nothing focused Up passed the menu's last item by - the
++		   Options pages' last section, ACCESSIBILITY. */
++		menu->cursorItem = menu->itemCount;
++#else
+ 		menu->cursorItem = menu->itemCount - 1;
++#endif
+ 		wrapped = qtrue;
+ 	}
+ 

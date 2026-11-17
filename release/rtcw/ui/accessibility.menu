@@ -2,7 +2,7 @@
 
 // The Accessibility pages: the mode's own settings, as the ET mode keeps
 // them under ACCESSIBILITY in its Options. Reached by the ACCESSIBILITY
-// button the mode puts after OPTIONS in the main menu and among the paused
+// button the mode puts among the Options screen's sections and the paused
 // game's tabs (accessibility_tabs.menu), and laid over the screen where
 // the game's own Options pages are. Up and Down go through a page,
 // Enter changes a setting, Escape goes back. Each setting is a cvar the
