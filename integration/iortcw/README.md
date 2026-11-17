@@ -4028,3 +4028,28 @@ sends - out of sight, far off - says "Out of sight. Lock off", no longer
 "Down". Checked in the forest: "Soldier looking your way, ahead left, 32
 meters", then "has seen you" as he did; the gate guard shot from 21
 metres, "Down, ahead, 21 meters".
+
+### 0234 The rifle first, by the tunnel
+
+The tester remembered the forest's tunnel as the way on: reached as the
+two soldiers at its mouth turn to talk and the supply truck goes by, the
+way the map is made - its script turns the tower sniper away as the
+player goes in. O did not lead there. In a fresh forest it led to the
+way out, the truck parked in the compound, past the Snooper rifle the
+mission needs; and the shortest way to the rifle runs along the open
+road past those soldiers and up the hill, the tunnel being some 25
+metres longer.
+
+Now an objective met by picking something up, not met yet - the rifle -
+comes before the way out (CG_AccessibilityObjectivePickupPlace): "Your
+next objective: Recover OSA M1S SNOOPER rifle, 249 meters". And when a
+tunnel with a ladder up lies on the way - going by its ladder no more
+than half as far again as the crow flies, and not been through yet - O
+leads to the foot of that ladder first (ETA_TunnelOnTheWay): "The way
+goes through the tunnel: to its ladder up, 181 meters". There, O leads
+on up the ladder to the rifle. Checked before the bridge: the way runs
+by the checkpoint into the tunnel's mouth and along it to the ladder;
+from the ladder, up it and over the hill to the rifle, 136 points.
+
+A cost on open ground near a tunnel was tried first and dropped: the
+search, its estimate made too low, took over eight seconds and failed.
