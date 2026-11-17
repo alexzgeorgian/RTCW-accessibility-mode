@@ -4152,3 +4152,16 @@ from the map's own ladder: its face, which way it looks, and the foot to
 stand on. Checked: the marker followed to 1.6 metres short, F - "Climbing
 up, 10 meters", the top, "Enemy Soldier, ahead, 4 meters, has not seen
 you".
+
+### 0240 At a ladder's top, the enemy first
+
+The tester, up the forest's watchtower behind its guard, pressed F and
+was turned to "Ladder down, behind, 1 meter", the way they had come. At
+the top of one of the map's ladders, with an enemy within six metres on
+the same floor, F now turns to the enemy: "Turning to the soldier, 3
+meters, has not seen you. From behind, the knife kills". Not asked to be
+in sight: on the tower's platform a line traced to him met its posts.
+And a quiet alarm box there is only ever turned to, never pressed (as
+before): pressed, it would ring. Checked: climbed by F, F again at the
+top - turned to him; a step, "Unaware, in reach: the knife kills", the
+knife.

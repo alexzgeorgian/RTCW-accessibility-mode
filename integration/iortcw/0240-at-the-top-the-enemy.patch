@@ -1,0 +1,80 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index fcaa296c..a7757424 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1918,6 +1918,75 @@ void CG_AccessibilityActivateDown_f(void)
+ 
+ 	eta_use.held = qtrue;
+ 
++	/* At the top of a ladder, an enemy close by: F turns to him, not
++	   back down the ladder. The tester, up the forest's watchtower behind
++	   its guard, pressed F and was turned to "Ladder down, behind, 1
++	   meter", the way they had come. Within six metres, on the same
++	   floor - the tower's posts stood in a line traced to him, so not
++	   asked to be in sight; said with whether he has seen the player. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL
++	    && cg.predictedPlayerState.groundEntityNum != ENTITYNUM_NONE)
++	{
++		const float *at  = cg.predictedPlayerState.origin;
++		qboolean    atTop = qfalse;
++		int         l;
++
++		for (l = 0; l < CG_AccessibilityLadderCount(); l++)
++		{
++			vec3_t foot, top;
++
++			if (CG_AccessibilityLadderEnds(l, foot, top) && top[2] - foot[2] > 64.0f && fabsf(top[2] - at[2]) < 128.0f
++			    && ( top[0] - at[0] ) * ( top[0] - at[0] ) + ( top[1] - at[1] ) * ( top[1] - at[1] ) < 120.0f * 120.0f)
++			{
++				atTop = qtrue;
++			}
++		}
++		if (atTop)
++		{
++			const float *me   = cg.predictedPlayerState.origin;
++			int         i, best = -1;
++			float       bestFar = 6.0f / ETA_QU_TO_METERS;
++
++			for (i = 0; i < MAX_CLIENTS; i++)
++			{
++				const centity_t *cent = &cg_entities[i];
++
++				if (!cent->currentValid || i == cg.snap->ps.clientNum || !cent->currentState.aiChar
++				    || (cent->currentState.eFlags & EF_DEAD) || cent->currentState.teamNum == cg.snap->ps.teamNum
++				    || fabsf(cent->lerpOrigin[2] - me[2]) > 96.0f || Distance(cent->lerpOrigin, me) >= bestFar)
++				{
++					continue;
++				}
++				bestFar = Distance(cent->lerpOrigin, me);
++				best    = i;
++			}
++			if (best >= 0)
++			{
++				etaAimTarget_t enemy;
++				int            meters = (int)(bestFar * ETA_QU_TO_METERS + 0.5f);
++
++				memset(&enemy, 0, sizeof(enemy));
++				enemy.entityNum = best;
++				VectorCopy(cg_entities[best].lerpOrigin, enemy.point);
++				enemy.point[2] += 16.0f;
++				enemy.meters = bestFar * ETA_QU_TO_METERS;
++				enemy.enemy  = qtrue;
++				Q_strncpyz(enemy.name, CG_AccessibilityAiCharName(cg_entities[best].currentState.aiChar), sizeof(enemy.name));
++				enemy.name[0] = (char)tolower((unsigned char)enemy.name[0]);
++				char           aware[48];
++
++				Q_strncpyz(aware, ETA_EnemyAware(best), sizeof(aware));
++				aware[0] = (char)tolower((unsigned char)aware[0]);
++				ETA_AimStartSnap(&enemy, NULL);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("Turning to the %s, %d %s, %s. From behind, the knife kills", enemy.name,
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters", aware));
++				return;
++			}
++		}
++	}
++
++
+ 	/* The game's ladder icon is not something the use key does anything
+ 	   with, so it is not a hint here: the key climbs the ladder. Nor is
+ 	   the icon for anything else use does nothing with - a thing to shoot
