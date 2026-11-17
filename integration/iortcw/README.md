@@ -4073,3 +4073,18 @@ above you, facing away". The climb and the knife were not managed: the
 guard's round passes a metre from the top of the ladder every few
 seconds, and all six climbs tried were seen; nor can he be shot from the
 ladder's foot, the platform hiding him.
+
+### 0236 Ladders up on semicolon's list
+
+The tester had once climbed to the forest's north watchtower and its
+guard, and could not find the way back there: O leads to the rifle by
+the tunnel, and "the slope behind the tower" cannot be walked blind. A
+sighted player sees the towers from afar. On an outdoor map semicolon's
+list now ends with each ladder up at least 4 metres high, nearest first,
+and O leads to its foot: "the ladder up, 10 meters high, soldier up
+top, ahead left, 47 meters, 12 meters above you" - "soldier up top" for
+an enemy known within 8 metres of its top (ETA_LadderPlaces). The count
+before the list says them apart: "1 other place explored, nothing left
+in them, and 8 ladders up". Checked from the checkpoint's east end: the
+first on the list is the watchtower's, and O leads up the slope behind
+it, the way walked unseen in 0235's test, 54 points.

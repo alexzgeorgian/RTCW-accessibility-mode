@@ -1,0 +1,125 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 3957161a..12cb5323 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2503,11 +2503,61 @@ static qboolean ETA_AreaSpot(int area, vec3_t out)
+  * among those with things left: the tester, in the forest, did not find
+  * the Colt's drop on the list, its health still lying there.
+  */
+-#define ETA_BACK_OUTDOORS 16
++#define ETA_BACK_OUTDOORS 32
+ 
+ static vec3_t eta_backOutAt[ETA_BACK_OUTDOORS];
+ static char   eta_backOutWhat[ETA_BACK_OUTDOORS][48];
+ static int    eta_backOutCount[ETA_BACK_OUTDOORS];
++
++/*
++ * The ladders up, outdoors, on semicolon's list after the places: "the
++ * ladder up, 10 meters high, a soldier at the top", and O leads to its
++ * foot. The tester, in the forest, had once climbed to the north
++ * watchtower's guard, and could not find the way there again: O leads to
++ * the rifle by the tunnel, and a slope named in words cannot be walked
++ * blind. A sighted player sees the towers from afar. Counted -1, so
++ * among the places with nothing left, said with no count of things.
++ */
++static int ETA_LadderPlaces(int n)
++{
++	int l, ladders = CG_AccessibilityLadderCount();
++
++	if (!ETA_OutdoorMap())
++	{
++		return n;
++	}
++	for (l = 0; l < ladders && n < ETA_BACK_OUTDOORS; l++)
++	{
++		vec3_t   foot, top;
++		int      high, i;
++		qboolean soldier = qfalse;
++
++		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] < 4.0f / ETA_QU_TO_METERS)
++		{
++			continue;
++		}
++		for (i = 0; i < MAX_CLIENTS; i++)
++		{
++			const centity_t *cent = &cg_entities[i];
++
++			if (cent->currentValid && i != cg.snap->ps.clientNum && cent->currentState.aiChar
++			    && !(cent->currentState.eFlags & EF_DEAD) && cent->currentState.teamNum != cg.snap->ps.teamNum
++			    && fabsf(cent->lerpOrigin[2] - top[2]) < 160.0f
++			    && ( cent->lerpOrigin[0] - top[0] ) * ( cent->lerpOrigin[0] - top[0] )
++			       + ( cent->lerpOrigin[1] - top[1] ) * ( cent->lerpOrigin[1] - top[1] ) < 320.0f * 320.0f)
++			{
++				soldier = qtrue;
++			}
++		}
++		high = (int)(( top[2] - foot[2] ) * ETA_QU_TO_METERS + 0.5f);
++		VectorCopy(foot, eta_backOutAt[n]);
++		Com_sprintf(eta_backOutWhat[n], sizeof(eta_backOutWhat[n]), "the ladder up, %d meters high%s", high,
++		            soldier ? ", soldier up top" : "");
++		eta_backOutCount[n] = -1;
++		n++;
++	}
++	return n;
++}
+ void CG_AccessibilityAreasBack(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -2537,6 +2587,8 @@ void CG_AccessibilityAreasBack(void)
+ 		   among them, then the rest; nearest first within each. */
+ 		int outdoors = ETA_OutdoorPlaces(eta_backOutAt, eta_backOutWhat, eta_backOutCount, ETA_BACK_OUTDOORS);
+ 
++		outdoors = ETA_LadderPlaces(outdoors);
++
+ 		for (j = 0; j < 2; j++)
+ 		{
+ 			int start = count;
+@@ -2604,7 +2656,7 @@ void CG_AccessibilityAreasBack(void)
+ 		int out = -1 - area;
+ 
+ 		VectorCopy(eta_backOutAt[out], at);
+-		left = eta_backOutCount[out];
++		left = eta_backOutCount[out] > 0 ? eta_backOutCount[out] : 0;
+ 	}
+ 	else
+ 	{
+@@ -2615,6 +2667,10 @@ void CG_AccessibilityAreasBack(void)
+ 	{
+ 		Com_sprintf(things, sizeof(things), ", %d %s left", left, left == 1 ? "thing" : "things");
+ 	}
++	else if (area < 0 && eta_backOutCount[-1 - area] < 0)
++	{
++		things[0] = '\0';
++	}
+ 	else
+ 	{
+ 		Q_strncpyz(things, ", nothing left", sizeof(things));
+@@ -2628,12 +2684,23 @@ void CG_AccessibilityAreasBack(void)
+ 	ETA_Speech_BeginReport();
+ 	if (fresh)
+ 	{
+-		ETA_Speech_Say(withThings ? va("%d other %s explored, %d with things left", eta_areas.backCount,
+-		                               eta_areas.backCount == 1 ? "place" : "places", withThings)
+-		               : va("%d other %s explored, nothing left in them", eta_areas.backCount,
+-		                    eta_areas.backCount == 1 ? "place" : "places"));
++		int ladders = 0, places;
++
++		for (i = 0; i < eta_areas.backCount; i++)
++		{
++			ladders += eta_areas.back[i] < 0 && eta_backOutCount[-1 - eta_areas.back[i]] < 0;
++		}
++		places = eta_areas.backCount - ladders;
++		ETA_Speech_Say(va("%s%s", withThings ? va("%d other %s explored, %d with things left", places,
++		                                          places == 1 ? "place" : "places", withThings)
++		                  : va("%d other %s explored, nothing left in them", places, places == 1 ? "place" : "places"),
++		                  ladders ? va(", and %d %s up", ladders, ladders == 1 ? "ladder" : "ladders") : ""));
+ 	}
+-	if (area < 0)
++	if (area < 0 && eta_backOutCount[-1 - area] < 0)
++	{
++		Q_strncpyz(name, eta_backOutWhat[-1 - area], sizeof(name));
++	}
++	else if (area < 0)
+ 	{
+ 		Com_sprintf(name, sizeof(name), "outdoors, by the %s", eta_backOutWhat[-1 - area]);
+ 	}
