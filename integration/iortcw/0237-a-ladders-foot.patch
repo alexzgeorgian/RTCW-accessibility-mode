@@ -1,0 +1,92 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 8e1254ef..ed129a47 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -298,7 +298,11 @@ static const char *CG_AccessibilityHintName( int hint ) {
+ 	case HINT_ALARM:                return "Alarm";
+ 	case HINT_HEALTH:               return "Health";
+ 	case HINT_TREASURE:             return "Treasure";
+-	case HINT_KNIFE:                return "Sleeping, knife them";
++	/* Not asleep: the game gives this hint behind any enemy unaware of
++	   the player, within the knife's reach, where a stab kills at once
++	   (g_weapon.c). The tester, behind the forest's tower guard, needed
++	   to know the moment to strike. */
++	case HINT_KNIFE:                return "Unaware, in reach: the knife kills";
+ 	case HINT_LADDER:               return "Ladder";
+ 	case HINT_BUTTON:               return "Button";
+ 	case HINT_WATER:                return "Water";
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 7d2fe925..aa592eae 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2120,6 +2120,26 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* A ladder chosen on semicolon's list, its foot close by: F climbs
++	   that ladder, before turning to anything. At the forest's
++	   watchtower F turned the tester to the ladder's foot, or to the
++	   tower's wooden walls, nearer, and did not climb. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
++	{
++		vec3_t      chosenAt;
++		char        chosenName[64];
++		qboolean    chosenPending;
++		etaLadder_t ladder;
++		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		    && !Q_stricmpn(chosenName, "the ladder", 10)
++		    && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS
++		    && CG_AccessibilityLadderNear(&ladder) && ladder.meters <= ETA_F_CLOSE_METERS)
++		{
++			ETA_ClimbStart(&ladder);
++			return;
++		}
++	}
++
+ 	/* A thing chosen with T or Y: F turns to that thing, not to
+ 	   whatever F was last kept on or is nearest. The tester, choosing a
+ 	   switch with T, pressed F and was turned to something else. Further
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 4ce230c2..39a03c9d 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -60,6 +60,7 @@ static eta_marker_t eta_marker;
+  * reached by walking into it, which the grid decides rather than this.
+  */
+ #define ETA_MARKER_ARRIVE_METERS 3.0f
++#define ETA_MARKER_LADDER_UNITS  40.0f   /* a ladder's foot: within reach of the climb */
+ #define ETA_MARKER_ONTO_UNITS    32.0f   /* a thing walked onto: this close, the player touches it, and takes it */
+ #define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
+ 
+@@ -2812,6 +2813,20 @@ void CG_AccessibilityMarkerFrame(void)
+ 		}
+ 	}
+ 
++	/* A ladder up: reached at its foot, within reach of F's climb, not
++	   three metres off. The tester, led to the forest's watchtower,
++	   heard "Marker reached" short of the ladder; F turned them to the
++	   tower's wooden walls, nearer, and a climb begun from there "could
++	   not get onto the ladder". */
++	if (arrived && strstr(eta_marker.name, "ladder up"))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2]  = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_LADDER_UNITS );
++	}
++
+ 	/* Not arrived standing below it: in the church a large health pack
+ 	   lies on top of a stack of crates, three metres up, and the
+ 	   waypoint put on it said "reached" at the foot of the stack - its
+@@ -2853,6 +2868,10 @@ void CG_AccessibilityMarkerFrame(void)
+ 			ETA_MarkerSquareName(name, sizeof(name));
+ 			ETA_Speech_Say(va("Marker reached, %s", name));
+ 		}
++		else if (strstr(eta_marker.name, "ladder up"))
++		{
++			ETA_Speech_Say("Marker reached, at the foot of the ladder up. F climbs");
++		}
+ 		else if (eta_marker.objective)
+ 		{
+ 			ETA_Speech_Say(va("Marker reached, %s", eta_marker.name));

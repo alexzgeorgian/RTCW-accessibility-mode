@@ -4088,3 +4088,25 @@ before the list says them apart: "1 other place explored, nothing left
 in them, and 8 ladders up". Checked from the checkpoint's east end: the
 first on the list is the watchtower's, and O leads up the slope behind
 it, the way walked unseen in 0235's test, 54 points.
+
+### 0237 A ladder's foot, and the knife
+
+The tester, led to the forest's watchtower by 0236, heard "Marker
+reached" three metres short of the ladder, and F there turned them to
+the tower's wooden walls, things to break nearer than the ladder; a
+climb begun from there "could not get onto the ladder". A marker on a
+ladder up - semicolon's ladders, the tunnel's - is reached only at its
+foot, within a metre (ETA_MARKER_LADDER_UNITS), and says "Marker
+reached, at the foot of the ladder up. F climbs". A ladder chosen on
+semicolon's list, in reach, is climbed by F before anything nearer is
+turned to.
+
+And the game's knife hint, given behind an enemy unaware of the player
+within the knife's reach, where a stab kills at once, was said
+"Sleeping, knife them" - wrong of a guard awake with his back turned.
+Now "Unaware, in reach: the knife kills".
+
+Checked in the forest: the tower's ladder chosen, the marker reached at
+its foot, F climbed it - "Climbing up, 10 meters", "Top of the ladder",
+the guard "ahead, 4 meters, has not seen you"; locked on, a step, and
+the knife: "Down".
