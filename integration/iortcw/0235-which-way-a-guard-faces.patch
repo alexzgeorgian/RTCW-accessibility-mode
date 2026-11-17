@@ -1,0 +1,126 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index b7d28129..2e745d9f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3618,6 +3618,113 @@ static void ETA_DownFarWatch(void)
+ 	}
+ }
+ 
++/*
++ * Which way a guard faces: "Soldier, ahead, 21 meters, 20 meters above
++ * you, facing away", "... turning toward you". The tester, set on
++ * reaching the forest's watchtower unseen and knifing its guard from
++ * behind, could not tell which way he faced - a sighted player watches
++ * him from below and climbs while his back is turned. For the nearest
++ * enemy not fighting: one the player can see, within 60 metres, or one
++ * within 10, heard if not seen. Said as he comes to be the one followed,
++ * and as he turns - once he has faced the new way for half a second.
++ * Toward the player: within 45 degrees of facing them.
++ */
++#define ETA_FACING_SEE_METERS  60.0f
++#define ETA_FACING_HEAR_METERS 10.0f
++#define ETA_FACING_TOWARD      45.0f
++#define ETA_FACING_STEADY_MS   500
++#define ETA_FACING_GAP_MS      1500
++
++static void ETA_FacingWatch(void)
++{
++	static int      who = -1, steadySince, saidAt;
++	static qboolean said, toward, saidToward;
++	int             i, best = -1;
++	float           bestFar = 1.0e9f;
++	vec3_t          eye;
++
++	VectorCopy(cg.snap->ps.origin, eye);
++	eye[2] += cg.snap->ps.viewheight;
++	for (i = 0; i < MAX_CLIENTS; i++)
++	{
++		const centity_t     *cent = &cg_entities[i];
++		const entityState_t *es   = &cent->currentState;
++		float               meters;
++
++		if (!cent->currentValid || i == cg.snap->ps.clientNum || !es->aiChar || (es->eFlags & EF_DEAD)
++		    || !ETA_SeenAsEnemy(es) || es->aiState >= AISTATE_COMBAT)
++		{
++			continue;
++		}
++		meters = Distance(cent->lerpOrigin, cg.snap->ps.origin) * ETA_QU_TO_METERS;
++		if (meters > ETA_FACING_SEE_METERS || meters >= bestFar)
++		{
++			continue;
++		}
++		if (meters > ETA_FACING_HEAR_METERS)
++		{
++			trace_t trace;
++			vec3_t  head;
++
++			VectorCopy(cent->lerpOrigin, head);
++			head[2] += 40.0f;
++			CG_Trace(&trace, eye, NULL, NULL, head, cg.snap->ps.clientNum, MASK_SOLID);
++			if (trace.fraction < 1.0f)
++			{
++				continue;
++			}
++		}
++		bestFar = meters;
++		best    = i;
++	}
++	if (best < 0)
++	{
++		who = -1;
++		return;
++	}
++	{
++		const centity_t *cent = &cg_entities[best];
++		vec3_t          toPlayer;
++		float           off;
++		qboolean        now;
++
++		VectorSubtract(cg.snap->ps.origin, cent->lerpOrigin, toPlayer);
++		off = fabsf(AngleNormalize180(vectoyaw(toPlayer) - cent->lerpAngles[YAW]));
++		now = (qboolean)( off <= ETA_FACING_TOWARD );
++		if (best != who)
++		{
++			who         = best;
++			toward      = now;
++			steadySince = cg.time;
++			said        = qfalse;
++		}
++		else if (now != toward)
++		{
++			toward      = now;
++			steadySince = cg.time;
++		}
++		if (cg.time - steadySince < ETA_FACING_STEADY_MS || ( said && saidToward == toward )
++		    || ( saidAt && cg.time >= saidAt && cg.time - saidAt < ETA_FACING_GAP_MS ))
++		{
++			return;
++		}
++		{
++			float up     = (cent->lerpOrigin[2] - cg.snap->ps.origin[2]) * ETA_QU_TO_METERS;
++			int   rise   = (int)(fabsf(up) + 0.5f);
++			int   meters = (int)(bestFar + 0.5f);
++
++			ETA_Speech_Say(va("%s, %s, %d %s%s, %s", ETA_CharacterKind(&cent->currentState),
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)),
++			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++			                  rise < 3 ? "" : va(", %d meters %s you", rise, up > 0 ? "above" : "below"),
++			                  toward ? (said ? "turning toward you" : "facing you") : "facing away"));
++			said       = qtrue;
++			saidToward = toward;
++			saidAt     = cg.time;
++		}
++	}
++}
++
+ static void ETA_NarrateAwareness(qboolean held)
+ {
+ 	static int     lastSerial = -1;
+@@ -3646,6 +3753,7 @@ static void ETA_NarrateAwareness(qboolean held)
+ 	{
+ 		ETA_AwareSeenWatch();
+ 		ETA_DownFarWatch();
++		ETA_FacingWatch();
+ 	}
+ 
+ 	if (held)

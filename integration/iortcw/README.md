@@ -4053,3 +4053,23 @@ from the ladder, up it and over the hill to the rifle, 136 points.
 
 A cost on open ground near a tunnel was tried first and dropped: the
 search, its estimate made too low, took over eight seconds and failed.
+
+### 0235 Which way a guard faces
+
+The tester, set on reaching the forest's north watchtower unseen and
+knifing its guard from behind for his Mauser, could not tell which way
+he faced - a sighted player watches him from below and climbs while his
+back is turned. The nearest enemy not fighting - one the player can see
+within 60 metres, or one within 10, heard if not seen - is said with
+which way he faces, as he comes to be the one followed and as he turns,
+once he has faced the new way for half a second: "Soldier, ahead, 10
+meters, 9 meters above you, facing away", "... turning toward you".
+Toward: within 45 degrees of facing the player (ETA_FacingWatch).
+
+Checked in the forest: the slope from the checkpoint's east end up
+behind the watchtower to its ladder, 56 metres, walked with the guards
+in and none saw; below the tower, "Soldier, ahead, 10 meters, 9 meters
+above you, facing away". The climb and the knife were not managed: the
+guard's round passes a metre from the top of the ladder every few
+seconds, and all six climbs tried were seen; nor can he be shot from the
+ladder's foot, the platform hiding him.
