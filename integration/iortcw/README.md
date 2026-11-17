@@ -4002,3 +4002,29 @@ in - and the way is the shortest again: from the Colt's drop to the
 tunnel 376 points through the middle of the forest, where it was 573
 round by the edges. What came with them stays: the tunnel named (0222),
 O turning at once (0221), the metres along the way (0224).
+
+### 0233 Guards looking your way, and far kills, said
+
+The tester, in the forest, found no way to the tunnel that kept out of
+sight - and none was: every way over the river is watched, crouched or
+not, by the gate guards (some 49 metres), the tower guards with their
+binoculars (52 to 66) and the house guard's rounds. The mission is made
+for a player who sees a guard turn their way and stops, or takes him
+from afar before he reaches an alarm. That is what the tester asked to
+be told. The game now tells the client which soldiers could see the
+player and have not yet ("etawatch", AICast_EtaWatchers in
+ai_cast_sight.c), by the soldier's own test - how far he sees, his field
+of view, a clear line - changing nothing in the soldiers. Said: "Soldier
+looking your way, left, 54 meters, 21 meters above you", once for each
+as he turns their way; "Back in view" if he does again within ten
+seconds; "Out of view" when none looks any more. "Has seen you" still
+says the moment one does.
+
+And a guard shot far off was not known dead: "Enemy down" is said only
+within 15 metres, and the lock by itself let go silently. An enemy seen
+alive, then dead, beyond that is said: "Down, ahead, 21 meters"
+(ETA_DownFarWatch). A held lock whose enemy is lost from what the game
+sends - out of sight, far off - says "Out of sight. Lock off", no longer
+"Down". Checked in the forest: "Soldier looking your way, ahead left, 32
+meters", then "has seen you" as he did; the gate guard shot from 21
+metres, "Down, ahead, 21 meters".

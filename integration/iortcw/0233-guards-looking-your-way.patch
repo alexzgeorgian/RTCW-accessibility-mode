@@ -1,0 +1,366 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index f6dcfc82..7d2fe925 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7288,12 +7288,21 @@ void CG_AccessibilityAimFrame(void)
+ 	        || (cg_entities[eta_aim.entityNum].currentState.eFlags & EF_DEAD)))
+ 	{
+ 		qboolean automatic = eta_aim.automatic;
++		qboolean dead      = (qboolean)( cg_entities[eta_aim.entityNum].currentValid
++		                                 && (cg_entities[eta_aim.entityNum].currentState.eFlags & EF_DEAD) );
++
++		/* Gone from what the game sends, far off, is not down: the
++		   tester, shooting at a guard on a tower, could not tell. One
++		   down beyond 15 metres is said, where, by ETA_DownFarWatch
++		   (cg_accessibility_world.c), the lock letting go with it. */
++		qboolean far       = (qboolean)( Distance(cg_entities[eta_aim.entityNum].lerpOrigin, cg.snap->ps.origin)
++		                                 * ETA_QU_TO_METERS > 15.0f );
+ 
+ 		ETA_AimStop();
+-		if (!automatic)
++		if (!automatic && !(dead && far))
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("Down. Lock off");
++			ETA_Speech_Say(dead ? "Down. Lock off" : "Out of sight. Lock off");
+ 		}
+ 		return;
+ 	}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 005919b7..80a62f41 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3447,6 +3447,177 @@ static void ETA_AwareSeenWatch(void)
+ 	}
+ }
+ 
++/*
++ * A guard looking the player's way: "Soldier looking your way, ahead
++ * left, 52 meters, 18 meters above you". The game tells which soldiers
++ * could see the player now and have not yet ("etawatch", ai_cast_sight.c)
++ * - what a sighted player sees as a guard turning toward them, near or
++ * far, a tower sniper as much as one on the road. Said once for each as
++ * he turns their way; again only after a while, a guard sweeping with
++ * binoculars being "back in view" in between. "Out of view" when none
++ * is looking any more.
++ */
++#define ETA_WATCH_AGAIN_MS 10000
++
++static qboolean eta_watching[MAX_CLIENTS];
++static int      eta_watchSaidAt[MAX_CLIENTS];
++static qboolean eta_watchSaid;
++
++static const char *ETA_WatchWhere(int entityNum)
++{
++	const centity_t *cent = &cg_entities[entityNum];
++	float           up    = (cent->lerpOrigin[2] - cg.snap->ps.origin[2]) * ETA_QU_TO_METERS;
++	int             meters = (int)(Distance(cent->lerpOrigin, cg.snap->ps.origin) * ETA_QU_TO_METERS + 0.5f);
++	int             rise   = (int)(fabsf(up) + 0.5f);
++
++	return va("%s, %d %s%s", ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)),
++	          meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++	          rise < 3 ? "" : va(", %d meters %s you", rise, up > 0 ? "above" : "below"));
++}
++
++void CG_AccessibilityWatchers(void)
++{
++	qboolean now[MAX_CLIENTS];
++	int      i, n = trap_Argc(), count = 0, fresh = -1, again = -1;
++	float    freshFar = 1.0e9f;
++
++	if (!cg.snap)
++	{
++		return;
++	}
++	memset(now, 0, sizeof(now));
++	for (i = 1; i < n; i++)
++	{
++		char arg[16];
++		int  e;
++
++		trap_Argv(i, arg, sizeof(arg));
++		e = atoi(arg);
++		if (e > 0 && e < MAX_CLIENTS && e != cg.snap->ps.clientNum && cg_entities[e].currentValid
++		    && ETA_SeenAsEnemy(&cg_entities[e].currentState))
++		{
++			now[e] = qtrue;
++		}
++	}
++	for (i = 0; i < MAX_CLIENTS; i++)
++	{
++		float far;
++
++		if (!now[i])
++		{
++			continue;
++		}
++		count++;
++		if (eta_watching[i])
++		{
++			continue;
++		}
++		if (eta_watchSaidAt[i] && cg.time >= eta_watchSaidAt[i] && cg.time - eta_watchSaidAt[i] < ETA_WATCH_AGAIN_MS)
++		{
++			again = i;
++			continue;
++		}
++		far = Distance(cg_entities[i].lerpOrigin, cg.snap->ps.origin);
++		if (far < freshFar)
++		{
++			freshFar = far;
++			fresh    = i;
++		}
++	}
++	if (fresh >= 0)
++	{
++		for (i = 0; i < MAX_CLIENTS; i++)
++		{
++			if (now[i] && !eta_watching[i])
++			{
++				eta_watchSaidAt[i] = cg.time;
++			}
++		}
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("%s looking your way, %s%s", ETA_CharacterKind(&cg_entities[fresh].currentState),
++		                  ETA_WatchWhere(fresh), count > 1 ? va(". %d looking", count) : ""));
++		eta_watchSaid = qtrue;
++	}
++	else if (again >= 0)
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("Back in view");
++		eta_watchSaid = qtrue;
++	}
++	else if (!count && eta_watchSaid)
++	{
++		/* One who has seen the player leaves the list, being past
++		   looking: "has seen you" has said so, and he is not out of
++		   view. */
++		for (i = 0; i < MAX_CLIENTS; i++)
++		{
++			if (eta_watching[i] && cg_entities[i].currentValid
++			    && cg_entities[i].currentState.aiState >= AISTATE_COMBAT)
++			{
++				eta_watchSaid = qfalse;
++				memcpy(eta_watching, now, sizeof(eta_watching));
++				return;
++			}
++		}
++		ETA_Speech_Say("Out of view");
++		eta_watchSaid = qfalse;
++	}
++	memcpy(eta_watching, now, sizeof(eta_watching));
++}
++
++/*
++ * An enemy falling far off: "Down, 48 meters". The tester, shooting at a
++ * guard on a tower, could not tell whether he had died - the body falls
++ * out of earshot, and the callouts say "Enemy down" only within 15
++ * meters. Said for an enemy seen alive and then dead, beyond that.
++ */
++#define ETA_DOWN_FAR_METERS 15.0f
++
++static void ETA_DownFarWatch(void)
++{
++	static int alive[MAX_CLIENTS];   /* serverTime last seen alive, 0 not */
++	int        i, far = -1;
++	float      farMeters = 0.0f;
++
++	for (i = 0; i < MAX_CLIENTS; i++)
++	{
++		const centity_t     *cent = &cg_entities[i];
++		const entityState_t *es   = &cent->currentState;
++		float               meters;
++
++		if (!cent->currentValid || i == cg.snap->ps.clientNum || !es->aiChar || !ETA_SeenAsEnemy(es))
++		{
++			alive[i] = 0;
++			continue;
++		}
++		if (!(es->eFlags & EF_DEAD))
++		{
++			alive[i] = cg.snap->serverTime;
++			continue;
++		}
++		if (!alive[i] || cg.snap->serverTime - alive[i] > 1000 || cg.snap->serverTime < alive[i])
++		{
++			alive[i] = 0;
++			continue;
++		}
++		alive[i] = 0;
++		meters = Distance(cent->lerpOrigin, cg.snap->ps.origin) * ETA_QU_TO_METERS;
++		if (meters > ETA_DOWN_FAR_METERS && meters > farMeters)
++		{
++			farMeters = meters;
++			far       = i;
++		}
++	}
++	if (far >= 0)
++	{
++		int m = (int)(farMeters + 0.5f);
++
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say(va("Down, %s, %d meters", ETA_HudNarrator_RelativeDirection(
++		                  CG_AccessibilityLeftOfView(cg_entities[far].lerpOrigin)), m));
++	}
++}
++
+ static void ETA_NarrateAwareness(qboolean held)
+ {
+ 	static int     lastSerial = -1;
+@@ -3474,6 +3645,7 @@ static void ETA_NarrateAwareness(qboolean held)
+ 	if (eta_playerCallouts.integer)
+ 	{
+ 		ETA_AwareSeenWatch();
++		ETA_DownFarWatch();
+ 	}
+ 
+ 	if (held)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 84df1270..eccc6480 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2350,6 +2350,7 @@ int CG_AccessibilitySwitchDoorShut( const vec3_t point );
+ int CG_AccessibilityDoorShutNow( int model );
+ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ void CG_AccessibilityGameSaved( void );
++void CG_AccessibilityWatchers( void );
+ void CG_AccessibilityExploredRestart( void );
+ int CG_AccessibilityThingsUnfound( int area );
+ int CG_AccessibilityThingsUnfoundPoints( vec3_t *out, int max );
+diff --git a/SP/code/cgame/cg_servercmds.c b/SP/code/cgame/cg_servercmds.c
+index 2c73cd7c..6641b23a 100644
+--- a/SP/code/cgame/cg_servercmds.c
++++ b/SP/code/cgame/cg_servercmds.c
+@@ -825,6 +825,13 @@ static void CG_ServerCommand( void ) {
+ 		return;
+ 	}
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	if ( !strcmp( cmd, "etawatch" ) ) {
++		CG_AccessibilityWatchers();
++		return;
++	}
++#endif
++
+ 	if ( !strcmp( cmd, "cp" ) ) {
+ #ifdef FEATURE_ACCESSIBILITY
+ 		if ( !Q_stricmp( CG_Argv( 1 ), "gamesaved" ) ) {
+diff --git a/SP/code/game/ai_cast_sight.c b/SP/code/game/ai_cast_sight.c
+index de45edc2..0c03a991 100644
+--- a/SP/code/game/ai_cast_sight.c
++++ b/SP/code/game/ai_cast_sight.c
+@@ -776,3 +776,98 @@ escape:
+ 	}
+ 	lastdest = dest;
+ }
++
++#ifdef FEATURE_ACCESSIBILITY
++/*
++ * [Accessibility]: which soldiers could see the player now and have not
++ * yet - the guard looking their way. A sighted player sees a guard turn
++ * toward them and stops or backs off before he notices; the tester,
++ * blind, in the forest where an alarm sounded fails the mission, found
++ * no way past the bridge and could not tell who was looking. The same
++ * test the soldier's own eyes make (AICast_CheckVisibility: how far he
++ * sees, his field of view, a clear line), told to the client as
++ * "etawatch" and the soldiers' numbers whenever the set changes; it
++ * changes nothing in the soldiers. Said by cg_accessibility_world.c.
++ */
++static qboolean AICast_EtaCouldSee( gentity_t *src, gentity_t *dest ) {
++	cast_state_t *cs = AICast_GetCastState( src->s.number );
++	cast_visibility_t *vis = &cs->vislist[dest->s.number];
++	vec3_t middle, eye, viewangles, dir, entangles;
++	orientation_t or;
++	float fov;
++
++	fov = cs->attributes[FOV] * aiStateFovScales[cs->aiState];
++	if ( !fov ) {
++		fov = 180;
++	}
++	if ( cs->aiFlags & AIFL_ZOOMING ) {
++		fov *= 0.8;
++	} else if ( cs->lastEnemy >= 0 && fov < 270 ) {
++		fov = 270;
++	}
++	if ( cs->aiState >= AISTATE_ALERT && vis->visible_timestamp == vis->lastcheck_timestamp ) {
++		fov = 360;
++	}
++	VectorAdd( dest->r.mins, dest->r.maxs, middle );
++	VectorScale( middle, 0.5, middle );
++	VectorAdd( dest->client->ps.origin, middle, middle );
++	if ( trap_GetTag( src->s.number, "tag_head", &or ) ) {
++		vectoangles( or.axis[0], viewangles );
++		VectorCopy( or.origin, eye );
++		VectorMA( eye, 12, or.axis[2], eye );
++	} else {
++		VectorCopy( src->client->ps.origin, eye );
++		eye[2] += src->client->ps.viewheight;
++		VectorCopy( src->client->ps.viewangles, viewangles );
++	}
++	VectorSubtract( middle, eye, dir );
++	vectoangles( dir, entangles );
++	if ( VectorLength( dir ) > cs->attributes[ALERTNESS] ) {
++		return qfalse;
++	}
++	if ( !AICast_InFieldOfVision( viewangles, fov, entangles ) ) {
++		return qfalse;
++	}
++	return AICast_VisibleFromPos( src->client->ps.origin, src->s.number, dest->client->ps.origin, dest->s.number, qfalse );
++}
++
++void AICast_EtaWatchers( void ) {
++	static int lastCheck;
++	static char lastSent[MAX_STRING_CHARS];
++	char list[MAX_STRING_CHARS];
++	gentity_t *player = &g_entities[0];
++	int i;
++
++	if ( g_gametype.integer != GT_SINGLE_PLAYER || !player->inuse || !player->client ) {
++		return;
++	}
++	if ( level.time >= lastCheck && level.time - lastCheck < 200 ) {
++		return;
++	}
++	lastCheck = level.time;
++	list[0] = 0;
++	if ( player->health > 0 && !( player->flags & FL_NOTARGET )
++		 && player->client->pers.connected == CON_CONNECTED
++		 && !( level.lastLoadTime && level.lastLoadTime > level.time - 2000 ) ) {
++		for ( i = 1; i < level.maxclients; i++ ) {
++			gentity_t *e = &g_entities[i];
++			cast_state_t *cs;
++
++			if ( !e->inuse || !e->client || !( e->r.svFlags & SVF_CASTAI ) || e->health <= 0 ) {
++				continue;
++			}
++			cs = AICast_GetCastState( i );
++			if ( !cs || !cs->bs || cs->aiState >= AISTATE_COMBAT || AICast_SameTeam( cs, 0 ) ) {
++				continue;
++			}
++			if ( AICast_EtaCouldSee( e, player ) ) {
++				Q_strcat( list, sizeof( list ), va( " %d", i ) );
++			}
++		}
++	}
++	if ( strcmp( list, lastSent ) ) {
++		Q_strncpyz( lastSent, list, sizeof( lastSent ) );
++		trap_SendServerCommand( 0, va( "etawatch%s", list ) );
++	}
++}
++#endif
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index 1bd2336b..a6ff8565 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2577,6 +2577,10 @@ void G_RunFrame( int levelTime ) {
+ 	G_UpdateCvars();
+ #ifdef FEATURE_ACCESSIBILITY
+ 	G_AccessibilityTriggers();
++	{
++		extern void AICast_EtaWatchers( void );
++		AICast_EtaWatchers();
++	}
+ #endif
+ 
+ 	//
