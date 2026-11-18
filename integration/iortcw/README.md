@@ -4256,3 +4256,20 @@ to be on X's list and the ladder on F. Now:
 
 Checked: six metres down the slope, "Ladder up, right, 6 meters…";
 four metres off, F climbed to "Top of the ladder".
+
+### 0248 "Climbing up" heard whole
+
+Up the forest's watchtower, the tester heard "Top of the ladder" but
+never "Climbing up". It was said, and then cut off at once: VoiceOver
+does not queue, and right after it came "Step up" (the stairs callout,
+at the ladder's foot), "Ladder" (the obstacle callout, as the ladder's
+face came ahead) and the tower guard's facing cue. It was not left out
+to save time. Now, while F climbs:
+
+- The callouts of what is ahead - obstacle, stairs, furniture, ladder -
+  are quiet. The crosshair's "Ladder" is too.
+- The facing cue waits until "Climbing up, N meters" has been said,
+  then comes as before.
+
+Checked, timed: "Climbing up, 11 meters"; 1.4 s later "Soldier, ahead, 8
+meters, 7 meters above you, facing away"; "Top of the ladder".

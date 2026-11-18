@@ -1,0 +1,80 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index ed129a47..74e7ce20 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1513,6 +1513,14 @@ void CG_AccessibilityFrame( void ) {
+ 	if ( hint != eta.hint ) {
+ 		const char *name = CG_AccessibilityHintName( hint );
+ 
++		/* The ladder being climbed: "Ladder" as the view met it cut off
++		   "Climbing up, 11 meters" at once - VoiceOver does not queue -
++		   and the tester, up the forest's watchtower, heard only "Top of
++		   the ladder". */
++		if ( hint == HINT_LADDER && CG_AccessibilityClimbing() ) {
++			name = NULL;
++		}
++
+ 		/* A door already open, or swinging: F would shut it. */
+ 		if ( hint == HINT_DOOR || hint == HINT_DOOR_ROTATING ) {
+ 			trace_t trace;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2e745d9f..0b8e83ac 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3635,7 +3635,7 @@ static void ETA_DownFarWatch(void)
+ #define ETA_FACING_STEADY_MS   500
+ #define ETA_FACING_GAP_MS      1500
+ 
+-static void ETA_FacingWatch(void)
++static void ETA_FacingWatch(qboolean speaking)
+ {
+ 	static int      who = -1, steadySince, saidAt;
+ 	static qboolean said, toward, saidToward;
+@@ -3708,6 +3708,13 @@ static void ETA_FacingWatch(void)
+ 		{
+ 			return;
+ 		}
++		/* Climbing, and still being told so: after it, not over it -
++		   VoiceOver does not queue, and the guard up the forest's
++		   watchtower cut "Climbing up, 11 meters" off. */
++		if (speaking && CG_AccessibilityClimbing())
++		{
++			return;
++		}
+ 		{
+ 			float up     = (cent->lerpOrigin[2] - cg.snap->ps.origin[2]) * ETA_QU_TO_METERS;
+ 			int   rise   = (int)(fabsf(up) + 0.5f);
+@@ -3751,9 +3758,11 @@ static void ETA_NarrateAwareness(qboolean held)
+ 
+ 	if (eta_playerCallouts.integer)
+ 	{
++		const char *was = ETA_Speech_GetLastMessage();
++
+ 		ETA_AwareSeenWatch();
+ 		ETA_DownFarWatch();
+-		ETA_FacingWatch();
++		ETA_FacingWatch((qboolean)( was && cg.time - lastSpeechAt < ETA_Speech_EstimateDurationMs(was) ));
+ 	}
+ 
+ 	if (held)
+@@ -11165,12 +11174,19 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 
+ 	ETA_NarrateCrosshair();
+ 
+-	if (!held)
++	/* Not while F climbs: "Step up" at the ladder's foot and "Ladder" as
++	   its face came ahead cut "Climbing up, 11 meters" off at once -
++	   VoiceOver does not queue - and the tester, up the forest's
++	   watchtower, heard only "Top of the ladder". */
++	if (!held && !CG_AccessibilityClimbing())
+ 	{
+ 		ETA_NarrateObstacleAhead();
+ 		ETA_NarrateStairsAhead();
+ 		ETA_NarrateFurniture();
+ 		ETA_NarrateLadder();
++	}
++	if (!held)
++	{
+ 		CG_AccessibilityMarkerApproach();
+ 		ETA_TrailFrame();
+ 		CG_AccessibilityWaysFrame();
