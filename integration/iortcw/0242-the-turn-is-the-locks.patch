@@ -1,0 +1,56 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index b53e3707..73331872 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1918,12 +1918,14 @@ void CG_AccessibilityActivateDown_f(void)
+ 
+ 	eta_use.held = qtrue;
+ 
+-	/* At the top of a ladder, an enemy close by: F turns to him, not
+-	   back down the ladder. The tester, up the forest's watchtower behind
+-	   its guard, pressed F and was turned to "Ladder down, behind, 1
+-	   meter", the way they had come. Within six metres, on the same
+-	   floor - the tower's posts stood in a line traced to him, so not
+-	   asked to be in sight; said with whether he has seen the player. */
++	/* At the top of a ladder, an enemy close by: F does not take the
++	   player back down the ladder, and says where he is - turning to him
++	   is the lock's, as everywhere else, the tester asked. Up the
++	   forest's watchtower behind its guard, F had turned them to "Ladder
++	   down, behind, 1 meter", the way they had come. Within six metres,
++	   on the same floor - the tower's posts stood in a line traced to
++	   him, so not asked to be in sight; said with whether he has seen
++	   the player. */
+ 	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL
+ 	    && cg.predictedPlayerState.groundEntityNum != ENTITYNUM_NONE)
+ 	{
+@@ -1962,24 +1964,16 @@ void CG_AccessibilityActivateDown_f(void)
+ 			}
+ 			if (best >= 0)
+ 			{
+-				etaAimTarget_t enemy;
+-				int            meters = (int)(bestFar * ETA_QU_TO_METERS + 0.5f);
+-
+-				memset(&enemy, 0, sizeof(enemy));
+-				enemy.entityNum = best;
+-				VectorCopy(cg_entities[best].lerpOrigin, enemy.point);
+-				enemy.point[2] += 16.0f;
+-				enemy.meters = bestFar * ETA_QU_TO_METERS;
+-				enemy.enemy  = qtrue;
+-				Q_strncpyz(enemy.name, CG_AccessibilityAiCharName(cg_entities[best].currentState.aiChar), sizeof(enemy.name));
+-				enemy.name[0] = (char)tolower((unsigned char)enemy.name[0]);
+-				char           aware[48];
++				const centity_t *cent  = &cg_entities[best];
++				int             meters = (int)(bestFar * ETA_QU_TO_METERS + 0.5f);
++				char            who[48], aware[48];
+ 
++				Q_strncpyz(who, CG_AccessibilityAiCharName(cent->currentState.aiChar), sizeof(who));
+ 				Q_strncpyz(aware, ETA_EnemyAware(best), sizeof(aware));
+ 				aware[0] = (char)tolower((unsigned char)aware[0]);
+-				ETA_AimStartSnap(&enemy, NULL);
+ 				ETA_HudNarrator_HoldPassive(cg.time);
+-				ETA_Speech_Say(va("Turning to the %s, %d %s, %s. From behind, the knife kills", enemy.name,
++				ETA_Speech_Say(va("%s, %s, %d %s, %s. The lock turns you to him", who,
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)),
+ 				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters", aware));
+ 				return;
+ 			}

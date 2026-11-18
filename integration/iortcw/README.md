@@ -4176,3 +4176,13 @@ the marker was reached at is kept until another marker is on
 (CG_AccessibilityLadderReached), and F within four metres of it climbs
 that ladder, as with the marker still on (0239). Checked: the foot
 reached, three metres back onto the ramp, F - "Climbing up, 10 meters".
+
+### 0242 The turn to him is the lock's
+
+0240 had F at a ladder's top turn the player to the enemy close by. The
+tester asked why F, when turning to an enemy is the lock's: F is for
+using things. F there now only keeps from taking them back down the
+ladder, and says where he is: "Soldier, ahead, 3 meters, has not seen
+you. The lock turns you to him". Checked on the watchtower: F said so
+and left the view; the lock - "Locked, Soldier, ahead, 3 meters"; a step,
+"Unaware, in reach: the knife kills", the knife.
