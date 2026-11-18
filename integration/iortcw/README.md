@@ -4208,3 +4208,16 @@ then onto its foot, closer than from the front (six units, not twenty:
 come at a slant, the player got on at the ladder's edge and stuck under
 the tower roof's corner at the top). Checked: from under the watchtower,
 F went round and up, "Top of the ladder"; from in front, as before.
+
+### 0245 Accessibility within OPTIONS in a mission
+
+0238 put the Options screen's sections, Accessibility among them, onto
+each of its pages from the main menu. In a mission, Escape's menu has its
+own row - SAVE, LOAD, CONTROLS, OPTIONS, SYSTEM, ACCESSIBILITY, EXIT -
+and the tester, in OPTIONS there, found no Accessibility. Its pages -
+CONTROLS, OPTIONS, SYSTEM - now get CONTROLS, OPTIONS, SYSTEM and
+ACCESSIBILITY after their own settings, the same way: Up from the first
+setting, or Down past the last. Those pages do not close one another, so
+from within one the others are closed first. Checked: in OPTIONS, Up -
+"ACCESSIBILITY", Enter, the Accessibility page; Escape, the in-game
+menu; from OPTIONS, CONTROLS opened Controls.
