@@ -1,0 +1,199 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 12cb5323..7ae32624 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2551,6 +2551,28 @@ static int ETA_LadderPlaces(int n)
+ 		}
+ 		high = (int)(( top[2] - foot[2] ) * ETA_QU_TO_METERS + 0.5f);
+ 		VectorCopy(foot, eta_backOutAt[n]);
++		/* A couple of steps out in front of it, not its foot: the way led
++		   to the foot of the forest's watchtower's ladder ended under the
++		   tower, behind the ladder - the last stretch to the foot was
++		   taken as clear through it - and the tester had to search for it.
++		   Out in front, the way goes round. As far as is clear. */
++		{
++			vec3_t  lmins, lmaxs, out, pmins = { -15.0f, -15.0f, -8.0f }, pmaxs = { 15.0f, 15.0f, 32.0f };
++			int     thin;
++			trace_t tr;
++
++			if (CG_AccessibilityMapLadder(l, lmins, lmaxs))
++			{
++				thin = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++				VectorCopy(foot, out);
++				out[thin] += ( foot[thin] > ( lmins[thin] + lmaxs[thin] ) * 0.5f ? 1.0f : -1.0f ) * 72.0f;
++				CG_Trace(&tr, foot, pmins, pmaxs, out, cg.snap->ps.clientNum, MASK_PLAYERSOLID);
++				if (!tr.startsolid)
++				{
++					VectorCopy(tr.endpos, eta_backOutAt[n]);
++				}
++			}
++		}
+ 		Com_sprintf(eta_backOutWhat[n], sizeof(eta_backOutWhat[n]), "the ladder up, %d meters high%s", high,
+ 		            soldier ? ", soldier up top" : "");
+ 		eta_backOutCount[n] = -1;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 014ed3cd..90b7b9d2 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -528,6 +528,8 @@ typedef struct
+ 	vec3_t   stand;
+ 	qboolean hasRound;  /* walked to before the stand: round from behind it */
+ 	vec3_t   round;
++	qboolean hasRoundFirst; /* before that, out to the side, still behind */
++	vec3_t   roundFirst;
+ 	qboolean cameRound;
+ 	float    bestZ;     /* highest yet, going up */
+ 	int      bestAt;
+@@ -840,7 +842,20 @@ static void ETA_ClimbFrame(void)
+ 	/* Behind the ladder - under the forest's watchtower, the tester was
+ 	   walked into its back, and "Could not get onto the ladder": round
+ 	   its side first. Time to get on counted from there. */
+-	if (eta_climb.hasRound && !eta_climb.latched)
++	if (eta_climb.hasRoundFirst && !eta_climb.latched)
++	{
++		vec3_t toFirst;
++
++		VectorSubtract(eta_climb.roundFirst, ps->origin, toFirst);
++		toFirst[2] = 0.0f;
++		if (VectorLength(toFirst) < 20.0f)
++		{
++			eta_climb.hasRoundFirst = qfalse;
++			eta_climb.started       = cg.time;
++		}
++	}
++
++	if (eta_climb.hasRound && !eta_climb.hasRoundFirst && !eta_climb.latched)
+ 	{
+ 		vec3_t toRound;
+ 
+@@ -859,16 +874,20 @@ static void ETA_ClimbFrame(void)
+ 
+ 		VectorSubtract(eta_climb.stand, ps->origin, toStand);
+ 		toStand[2] = 0.0f;
+-		/* Come round from behind, at a slant: closer, or the player gets
+-		   on at the ladder's edge, and at the watchtower's top stuck under
+-		   its roof's corner. */
+-		if (VectorLength(toStand) < ( eta_climb.cameRound ? 6.0f : 20.0f ))
++		/* Close: come at a slant - round from behind it, or from beside
++		   it - the player got on at the ladder's edge, and at the
++		   watchtower's top stuck under its roof's corner. */
++		if (VectorLength(toStand) < 8.0f)
+ 		{
+ 			eta_climb.hasStand = qfalse;
+ 		}
+ 	}
+ 
+-	if (eta_climb.hasRound && !eta_climb.latched)
++	if (eta_climb.hasRoundFirst && !eta_climb.latched)
++	{
++		VectorSubtract(eta_climb.roundFirst, ps->origin, toLadder);
++	}
++	else if (eta_climb.hasRound && !eta_climb.latched)
+ 	{
+ 		VectorSubtract(eta_climb.round, ps->origin, toLadder);
+ 	}
+@@ -1954,7 +1973,9 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 		{
+ 			continue;
+ 		}
+-		if (near && Distance(foot, near) > 64.0f)
++		/* The place said for a ladder is a couple of steps in front of
++		   its foot (cg_accessibility_areas.c). */
++		if (near && Distance(foot, near) > 96.0f)
+ 		{
+ 			continue;
+ 		}
+@@ -1980,25 +2001,39 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 	ladder.hasStand     = qtrue;
+ 	VectorCopy(foot, ladder.stand);
+ 	ladder.meters = Distance(foot, at) * ETA_QU_TO_METERS;
+-	ETA_ClimbStart(&ladder);
+ 
+-	/* Behind its face: round whichever side is open, to in front. */
+-	if (( at[thin] - ladder.point[thin] ) * ladder.normal[thin] < 0.0f)
++	/* Behind its face: round whichever side is open, to in front - out
++	   to the side first, still behind it, then forward past it. Straight
++	   at a corner in front, the tester, crouched under the forest's
++	   watchtower, was held on a post of the tower's. */
++	if (( at[thin] - ladder.point[thin] ) * ladder.normal[thin] < -16.0f)
+ 	{
+ 		int     side = thin ^ 1, s, bestSide = 0;
+ 		float   half = ( lmaxs[side] - lmins[side] ) * 0.5f, bestOpen = -1.0f;
+-		vec3_t  pmins = { -15.0f, -15.0f, -8.0f }, pmaxs = { 15.0f, 15.0f, 32.0f }, round[2];
++		vec3_t  pmins, pmaxs, first[2], round[2];
+ 		trace_t tr;
+ 
++		/* The player's own size, crouched or not, lifted by a step. */
++		VectorCopy(cg.predictedPlayerState.mins, pmins);
++		VectorCopy(cg.predictedPlayerState.maxs, pmaxs);
++		pmins[2] += 18.0f;
++		if (pmaxs[2] <= pmins[2])
++		{
++			pmaxs[2] = pmins[2] + 1.0f;
++		}
++
+ 		for (s = 0; s < 2; s++)
+ 		{
+ 			float open;
+ 
+-			VectorCopy(at, round[s]);
+-			round[s][side] = ( lmins[side] + lmaxs[side] ) * 0.5f + ( s ? -1.0f : 1.0f ) * ( half + 40.0f );
++			VectorCopy(at, first[s]);
++			first[s][side] = ( lmins[side] + lmaxs[side] ) * 0.5f + ( s ? -1.0f : 1.0f ) * ( half + 40.0f );
++			VectorCopy(first[s], round[s]);
+ 			round[s][thin] = ladder.point[thin] + ladder.normal[thin] * 40.0f;
+-			CG_Trace(&tr, at, pmins, pmaxs, round[s], cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			CG_Trace(&tr, at, pmins, pmaxs, first[s], cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
+ 			open = tr.fraction;
++			CG_Trace(&tr, first[s], pmins, pmaxs, round[s], cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			open += tr.fraction;
+ 			CG_Trace(&tr, round[s], pmins, pmaxs, foot, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
+ 			open += tr.fraction;
+ 			if (open > bestOpen)
+@@ -2007,9 +2042,46 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 				bestSide = s;
+ 			}
+ 		}
++		/* Walled in behind it - under the forest's watchtower, a small
++		   room: led round by the way, as O leads, to in front of it. */
++		if (bestOpen < 2.99f)
++		{
++			vec3_t front;
++
++			VectorCopy(foot, front);
++			front[thin] += ladder.normal[thin] * 72.0f;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("The ladder's back is to you: led round to its front");
++			CG_AccessibilityChoose(front, "the ladder up");
++			CG_AccessibilityWayOut();
++			return qtrue;
++		}
++		ETA_ClimbStart(&ladder);
++		eta_climb.hasRoundFirst = qtrue;
++		VectorCopy(first[bestSide], eta_climb.roundFirst);
+ 		eta_climb.hasRound  = qtrue;
+ 		eta_climb.cameRound = qtrue;
+ 		VectorCopy(round[bestSide], eta_climb.round);
++		return qtrue;
++	}
++	ETA_ClimbStart(&ladder);
++
++	/* Off to one side: first to straight out in front of it, then in.
++	   Come at from beside the forest's watchtower's ladder, the player
++	   slid along it as they climbed, off its edge, and stuck under the
++	   tower's roof. */
++	{
++		int   side   = thin ^ 1;
++		float middle = ( lmins[side] + lmaxs[side] ) * 0.5f;
++
++		if (fabsf(at[side] - middle) > 24.0f)
++		{
++			VectorCopy(at, eta_climb.round);
++			eta_climb.round[side] = middle;
++			eta_climb.round[thin] = ladder.point[thin] + ladder.normal[thin] * 56.0f;
++			eta_climb.hasRound    = qtrue;
++			eta_climb.cameRound   = qtrue;
++		}
+ 	}
+ 	return qtrue;
+ }

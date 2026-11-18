@@ -4273,3 +4273,29 @@ to save time. Now, while F climbs:
 
 Checked, timed: "Climbing up, 11 meters"; 1.4 s later "Soldier, ahead, 8
 meters, 7 meters above you, facing away"; "Top of the ladder".
+
+### 0249 To a ladder's front, and straight up it
+
+The tester, led to the forest's watchtower's ladder, still ended up
+under the tower, and could not climb from two metres there, crouched.
+
+- The way led to a ladder chosen on semicolon's list ended at its foot,
+  and from the south the last stretch to the foot was taken as clear
+  through the ladder: the way stopped under the tower, behind it. The
+  place said for a ladder is now a couple of steps out in front of its
+  foot, as far as is clear, and the way goes round the tower's west
+  side to it. F takes a ladder within 96 units of that place as its own.
+- F behind a ladder (more than 16 units past its face): round its side,
+  out first, still behind it, then forward past it, traced for the
+  player's own size, crouched or not. Walled in behind it, as under the
+  watchtower, a small room, F says "The ladder's back is to you: led
+  round to its front", and leads there as O does.
+- Off to one side of a ladder, F walks first to straight out in front
+  of it, then in, onto its foot within eight units, not twenty: come at
+  a slant, the player slid along the ladder as they climbed, off its
+  edge, and stuck under the tower's roof.
+
+Checked: crouched in front, 2 m off: up, "Top of the ladder". Beside it,
+from the east, and from the west crouched: up. Under the tower,
+crouched: led round, by the west side. Routes from the south and from
+under the tower to the place: round the west side, ending in front.
