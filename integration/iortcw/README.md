@@ -4186,3 +4186,14 @@ ladder, and says where he is: "Soldier, ahead, 3 meters, has not seen
 you. The lock turns you to him". Checked on the watchtower: F said so
 and left the view; the lock - "Locked, Soldier, ahead, 3 meters"; a step,
 "Unaware, in reach: the knife kills", the knife.
+
+### 0243 A ladder within F's few steps, marked or not
+
+0239 and 0241 climbed a ladder from four metres only with the marker on
+it, or just reached at its foot; any other way F felt for a ladder within
+two metres. The tester, three metres from the forest's watchtower's
+ladder, could no longer climb: F said "Nothing close". The ladder is now
+found from the map - its foot within four metres across, at the player's
+own level - whether marked, chosen on semicolon's list, or with nothing
+chosen and nothing in the crosshair to use. Checked: three metres north
+of the watchtower's ladder, F walked to it and up to "Top of the ladder".

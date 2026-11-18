@@ -1,0 +1,145 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 73331872..ef333610 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1905,6 +1905,57 @@ static qboolean ETA_UseReachAhead(void)
+ 	return qfalse;
+ }
+ 
++/* A ladder of the map whose foot is within F's few steps, at the
++   player's own level: the one nearest `near` (the marker's foot) or, with
++   none, the player. Climbed: walked to its foot, and up. False when none. */
++static qboolean ETA_ClimbMapLadder(const vec3_t near)
++{
++	const float *at  = cg.predictedPlayerState.origin;
++	int         l, best = -1;
++	float       bestFar = ETA_F_CLOSE_METERS / ETA_QU_TO_METERS;
++	vec3_t      foot, top, lmins, lmaxs;
++	etaLadder_t ladder;
++	int         thin;
++
++	for (l = 0; l < CG_AccessibilityLadderCount(); l++)
++	{
++		float far;
++
++		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] <= 64.0f
++		    || fabsf(foot[2] - at[2]) > 80.0f)
++		{
++			continue;
++		}
++		if (near && Distance(foot, near) > 64.0f)
++		{
++			continue;
++		}
++		far = sqrtf(( foot[0] - at[0] ) * ( foot[0] - at[0] ) + ( foot[1] - at[1] ) * ( foot[1] - at[1] ));
++		if (far <= bestFar)
++		{
++			bestFar = far;
++			best    = l;
++		}
++	}
++	if (best < 0 || !CG_AccessibilityLadderEnds(best, foot, top) || !CG_AccessibilityMapLadder(best, lmins, lmaxs))
++	{
++		return qfalse;
++	}
++	memset(&ladder, 0, sizeof(ladder));
++	thin = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++	ladder.point[0]     = ( lmins[0] + lmaxs[0] ) * 0.5f;
++	ladder.point[1]     = ( lmins[1] + lmaxs[1] ) * 0.5f;
++	ladder.point[2]     = at[2] + 16.0f;
++	ladder.normal[thin] = foot[thin] > ladder.point[thin] ? 1.0f : -1.0f;
++	ladder.point[thin]  = ladder.normal[thin] > 0.0f ? lmaxs[thin] : lmins[thin];
++	ladder.goesUp       = qtrue;
++	ladder.hasStand     = qtrue;
++	VectorCopy(foot, ladder.stand);
++	ladder.meters = Distance(foot, at) * ETA_QU_TO_METERS;
++	ETA_ClimbStart(&ladder);
++	return qtrue;
++}
++
+ void CG_AccessibilityActivateDown_f(void)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -2201,54 +2252,47 @@ void CG_AccessibilityActivateDown_f(void)
+ 		{
+ 			marked = CG_AccessibilityLadderReached(markerAt);
+ 		}
+-		if (marked && Distance(markerAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
++		if (marked && Distance(markerAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS
++		    && ETA_ClimbMapLadder(markerAt))
+ 		{
+-			int l;
+-
+-			for (l = 0; l < CG_AccessibilityLadderCount(); l++)
+-			{
+-				vec3_t      foot, top, lmins, lmaxs;
+-				etaLadder_t ladder;
+-				int         thin;
+-
+-				if (!CG_AccessibilityLadderEnds(l, foot, top) || Distance(foot, markerAt) > 64.0f
+-				    || !CG_AccessibilityMapLadder(l, lmins, lmaxs))
+-				{
+-					continue;
+-				}
+-				memset(&ladder, 0, sizeof(ladder));
+-				thin = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
+-				ladder.point[0]       = ( lmins[0] + lmaxs[0] ) * 0.5f;
+-				ladder.point[1]       = ( lmins[1] + lmaxs[1] ) * 0.5f;
+-				ladder.point[2]       = cg.predictedPlayerState.origin[2] + 16.0f;
+-				ladder.normal[thin]   = foot[thin] > ladder.point[thin] ? 1.0f : -1.0f;
+-				ladder.point[thin]    = ladder.normal[thin] > 0.0f ? lmaxs[thin] : lmins[thin];
+-				ladder.goesUp         = qtrue;
+-				ladder.hasStand       = qtrue;
+-				VectorCopy(foot, ladder.stand);
+-				ladder.meters         = Distance(foot, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS;
+-				ETA_ClimbStart(&ladder);
+-				return;
+-			}
++			return;
+ 		}
+ 	}
+ 
+ 	/* A ladder chosen on semicolon's list, its foot close by: F climbs
+ 	   that ladder, before turning to anything. At the forest's
+ 	   watchtower F turned the tester to the ladder's foot, or to the
+-	   tower's wooden walls, nearer, and did not climb. */
++	   tower's wooden walls, nearer, and did not climb. Its foot found
++	   from the map, not by feeling for the ladder: that reaches two
++	   metres, and the tester, three off, could not climb. */
+ 	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
+ 	{
+-		vec3_t      chosenAt;
+-		char        chosenName[64];
+-		qboolean    chosenPending;
+-		etaLadder_t ladder;
++		vec3_t   chosenAt;
++		char     chosenName[64];
++		qboolean chosenPending;
++
+ 		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 		    && !Q_stricmpn(chosenName, "the ladder", 10)
+ 		    && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS
+-		    && CG_AccessibilityLadderNear(&ladder) && ladder.meters <= ETA_F_CLOSE_METERS)
++		    && ETA_ClimbMapLadder(NULL))
++		{
++			return;
++		}
++	}
++
++	/* Nothing chosen, nothing in the crosshair to use, and a ladder's
++	   foot a few steps off: F climbs it. The tester, three metres from
++	   the forest's watchtower's ladder, the marker gone, heard "Nothing
++	   close". */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && !hint && !eta_choose.held)
++	{
++		vec3_t   chosenAt;
++		char     chosenName[64];
++		qboolean chosenPending;
++
++		if (!CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		    && ETA_ClimbMapLadder(NULL))
+ 		{
+-			ETA_ClimbStart(&ladder);
+ 			return;
+ 		}
+ 	}
