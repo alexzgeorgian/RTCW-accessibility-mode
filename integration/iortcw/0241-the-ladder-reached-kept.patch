@@ -1,0 +1,79 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index a7757424..b53e3707 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2198,8 +2198,16 @@ void CG_AccessibilityActivateDown_f(void)
+ 		vec3_t      markerAt;
+ 		const char *markerName;
+ 
+-		if (CG_AccessibilityMarkerInfo(markerAt, &markerName) && markerName && strstr(markerName, "ladder up")
+-		    && Distance(markerAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
++		/* Or its foot reached, and the marker gone since: a step or two
++		   off it, F turned the tester to the ramp beside it. */
++		qboolean marked = (qboolean)( CG_AccessibilityMarkerInfo(markerAt, &markerName) && markerName
++		                              && strstr(markerName, "ladder up") );
++
++		if (!marked)
++		{
++			marked = CG_AccessibilityLadderReached(markerAt);
++		}
++		if (marked && Distance(markerAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
+ 		{
+ 			int l;
+ 
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 39a03c9d..c857500c 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -61,6 +61,9 @@ static eta_marker_t eta_marker;
+  */
+ #define ETA_MARKER_ARRIVE_METERS 3.0f
+ #define ETA_MARKER_LADDER_UNITS  40.0f   /* a ladder's foot: within reach of the climb */
++
++static vec3_t eta_ladderReachedFoot;   /* CG_AccessibilityLadderReached */
++static int    eta_ladderReachedAt;
+ #define ETA_MARKER_ONTO_UNITS    32.0f   /* a thing walked onto: this close, the player touches it, and takes it */
+ #define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
+ 
+@@ -2871,6 +2874,8 @@ void CG_AccessibilityMarkerFrame(void)
+ 		else if (strstr(eta_marker.name, "ladder up"))
+ 		{
+ 			ETA_Speech_Say("Marker reached, at the foot of the ladder up. F climbs");
++			VectorCopy(eta_marker.origin, eta_ladderReachedFoot);
++			eta_ladderReachedAt = cg.time ? cg.time : 1;
+ 		}
+ 		else if (eta_marker.objective)
+ 		{
+@@ -2960,6 +2965,20 @@ void CG_AccessibilityMarkerApproach(void)
+ }
+ 
+ 
++/* The foot of the last ladder the marker was reached at, kept once the
++   marker is gone: a step or two off it after "Marker reached", F turned
++   the tester to the ramp beside the forest's watchtower, the ladder out
++   of its own reach. Kept until another marker is on. */
++qboolean CG_AccessibilityLadderReached(vec3_t foot)
++{
++	if (!eta_ladderReachedAt || eta_marker.active)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_ladderReachedFoot, foot);
++	return qtrue;
++}
++
+ /**
+  * @brief Puts the marker on a place with a name of its own: the level's
+  *        way out.
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 56907c57..2a2f9807 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2252,6 +2252,7 @@ qboolean CG_AccessibilityMarkerJumpNow( void );
+ qboolean CG_AccessibilityMarkerCrouchNow( void );
+ qboolean CG_AccessibilityMarkerLadderNext( void );
+ qboolean CG_AccessibilityMarkerInfo( vec3_t origin, const char **name );
++qboolean CG_AccessibilityLadderReached( vec3_t foot );
+ void CG_AccessibilityFaceTheWay( void );
+ qboolean CG_AccessibilityMarkerWayKnown( void );
+ qboolean CG_AccessibilityMarkerTurn( float *distance, int *side );

@@ -4165,3 +4165,14 @@ And a quiet alarm box there is only ever turned to, never pressed (as
 before): pressed, it would ring. Checked: climbed by F, F again at the
 top - turned to him; a step, "Unaware, in reach: the knife kills", the
 knife.
+
+### 0241 The ladder reached, kept for F
+
+The tester, at the forest's watchtower, was also turned by F to the
+ramp beside it. Once "Marker reached, at the foot of the ladder up" has
+been said the marker is gone, and a step or two off the foot the ladder
+was out of F's two metres, the ramp nearer. The foot of the last ladder
+the marker was reached at is kept until another marker is on
+(CG_AccessibilityLadderReached), and F within four metres of it climbs
+that ladder, as with the marker still on (0239). Checked: the foot
+reached, three metres back onto the ramp, F - "Climbing up, 10 meters".
