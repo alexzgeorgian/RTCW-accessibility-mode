@@ -1,0 +1,135 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index e623f54e..014ed3cd 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1947,8 +1947,10 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 	{
+ 		float far;
+ 
++		/* Its foot up to a little more than three metres above: on the
++		   slope that falls away below the forest's watchtower. */
+ 		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] <= 64.0f
+-		    || fabsf(foot[2] - at[2]) > 80.0f)
++		    || foot[2] - at[2] > 128.0f || at[2] - foot[2] > 80.0f)
+ 		{
+ 			continue;
+ 		}
+@@ -2012,6 +2014,44 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 	return qtrue;
+ }
+ 
++/* A ladder a little further than F climbs from: where it is, said, so
++   the player is not left to look for it - by the forest's watchtower,
++   beside the ramp. False when none within ten metres. */
++static qboolean ETA_SayLadderFurther(void)
++{
++	const float *at = cg.predictedPlayerState.origin;
++	vec3_t      foot, top, bestFoot;
++	float       bestFar = 10.0f / ETA_QU_TO_METERS;
++	int         l, meters;
++	qboolean    found = qfalse;
++
++	for (l = 0; l < CG_AccessibilityLadderCount(); l++)
++	{
++		float far;
++
++		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] <= 64.0f || foot[2] - at[2] > 128.0f
++		    || at[2] - foot[2] > 80.0f)
++		{
++			continue;
++		}
++		far = sqrtf(( foot[0] - at[0] ) * ( foot[0] - at[0] ) + ( foot[1] - at[1] ) * ( foot[1] - at[1] ));
++		if (far < bestFar)
++		{
++			bestFar = far;
++			VectorCopy(foot, bestFoot);
++			found   = qtrue;
++		}
++	}
++	if (!found)
++	{
++		return qfalse;
++	}
++	meters = (int)( bestFar * ETA_QU_TO_METERS + 0.5f );
++	ETA_Speech_Say(va("Ladder up, %s, %d meters. A little closer, F climbs",
++	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestFoot)), meters));
++	return qtrue;
++}
++
+ void CG_AccessibilityActivateDown_f(void)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -2336,17 +2376,21 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
+-	/* Nothing chosen, nothing in the crosshair to use, and a ladder's
+-	   foot a few steps off: F climbs it. The tester, three metres from
+-	   the forest's watchtower's ladder, the marker gone, heard "Nothing
+-	   close". */
++	/* Nothing chosen close by, nothing in the crosshair to use, and a
++	   ladder's foot a few steps off: F climbs it. The tester, three
++	   metres from the forest's watchtower's ladder, the marker gone,
++	   heard "Nothing close". A thing chosen further off no longer keeps F
++	   from the ladder: with one, F turned the tester toward the way - the
++	   ramp beside the ladder. Ladders are F's, as in Enemy Territory's
++	   mode. */
+ 	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && !hint && !eta_choose.held)
+ 	{
+ 		vec3_t   chosenAt;
+ 		char     chosenName[64];
+ 		qboolean chosenPending;
+ 
+-		if (!CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		if (!( CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		       && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS )
+ 		    && ETA_ClimbMapLadder(NULL))
+ 		{
+ 			return;
+@@ -2550,6 +2594,22 @@ void CG_AccessibilityActivateDown_f(void)
+ 	count = (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL && !hint)
+ 	        ? CG_AccessibilityUseTargets(list, ETA_AIM_MAX_TARGETS) : 0;
+ 
++	/* Stairs and ramps are not F's: they are walked, and on X's list of
++	   the ways out. By the forest's watchtower F kept turning the tester
++	   to the ramp beside its ladder; F is for what is used, and ladders. */
++	{
++		int j, kept = 0;
++
++		for (j = 0; j < count; j++)
++		{
++			if (!list[j].stairs)
++			{
++				list[kept++] = list[j];
++			}
++		}
++		count = kept;
++	}
++
+ 	/* What the player chose with T or Y, before a ladder close by: the
+ 	   tester, by a ladder, chose a switch with T, and F climbed the ladder
+ 	   instead. */
+@@ -2645,7 +2705,10 @@ void CG_AccessibilityActivateDown_f(void)
+ 		if (!hint && cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("Nothing to use within 15 meters");
++			if (!ETA_SayLadderFurther())
++			{
++				ETA_Speech_Say("Nothing to use within 15 meters");
++			}
+ 		}
+ 		if (hint)
+ 		{
+@@ -2709,6 +2772,11 @@ void CG_AccessibilityActivateDown_f(void)
+ 	if (list[index].meters > ETA_F_CLOSE_METERS)
+ 	{
+ 		ETA_HudNarrator_HoldPassive(cg.time);
++		if (ETA_SayLadderFurther())
++		{
++			ETA_UseKey(qtrue);
++			return;
++		}
+ 		ETA_Speech_Say("Nothing close. T finds things further off");
+ 		ETA_UseKey(qtrue);
+ 		return;

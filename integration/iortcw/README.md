@@ -4233,3 +4233,26 @@ the other pages to hold them; this patch gives it its spoken name and
 closes it with the others. Checked: Accessibility, KEY BINDS - "Key
 binds", the keys from "The way on, O" to "Stop speaking, F8", BACK;
 Escape, back to Accessibility.
+
+### 0247 Ladders are F's; stairs and ramps are X's
+
+By the forest's watchtower F kept turning the tester to the ramp beside
+the ladder. They asked, as Enemy Territory's mode has it, for the ramp
+to be on X's list and the ladder on F. Now:
+
+- Stairs and ramps are left out of what F turns to. They are walked,
+  and named on X's list of the ways out. Chosen with the bracket keys,
+  they are still turned to.
+- The ladder within four metres is climbed even with a thing chosen
+  with T further off than F reaches. Before, any choice kept F from
+  the ladder, and F turned the tester toward the chosen thing's way,
+  which was the ramp. A thing chosen within four metres still comes
+  first.
+- A ladder further than F climbs from, up to ten metres, is said where
+  F would have said nothing was close: "Ladder up, right, 6 meters. A
+  little closer, F climbs".
+- A ladder's foot may be up to 128 units above the player, not 80: the
+  slope below the watchtower falls away two metres from its foot.
+
+Checked: six metres down the slope, "Ladder up, right, 6 meters…";
+four metres off, F climbed to "Top of the ladder".
