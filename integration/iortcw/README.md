@@ -4221,3 +4221,15 @@ setting, or Down past the last. Those pages do not close one another, so
 from within one the others are closed first. Checked: in OPTIONS, Up -
 "ACCESSIBILITY", Enter, the Accessibility page; Escape, the in-game
 menu; from OPTIONS, CONTROLS opened Controls.
+
+### 0246 Key binds, one page
+
+The mode's keys were on three pages of the Accessibility menu - getting
+around, things and enemies, what you are told. The tester, used to Enemy
+Territory's mode, which has them as one category, Key binds, found them
+not unified. ui/accessibility.menu now has one page, KEY BINDS
+(eta_acc_keys), with all twenty-two, in the old pages' order, taller than
+the other pages to hold them; this patch gives it its spoken name and
+closes it with the others. Checked: Accessibility, KEY BINDS - "Key
+binds", the keys from "The way on, O" to "Stop speaking, F8", BACK;
+Escape, back to Accessibility.

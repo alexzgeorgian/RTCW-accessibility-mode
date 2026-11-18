@@ -1,0 +1,24 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index ec6a8235..e859a5cc 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -8034,9 +8034,7 @@ static const struct {
+ 	{ "eta_acc_sounds",         "Sounds",                         qfalse },
+ 	{ "eta_acc_volumes",        "Volumes",                        qfalse },
+ 	{ "eta_acc_moving",         "Moving and aiming",              qfalse },
+-	{ "eta_acc_keys_around",    "Keys: getting around",           qfalse },
+-	{ "eta_acc_keys_things",    "Keys: things and enemies",       qfalse },
+-	{ "eta_acc_keys_told",      "Keys: what you are told",        qfalse },
++	{ "eta_acc_keys",           "Key binds",                      qfalse },
+ };
+ 
+ /*
+@@ -8123,7 +8121,7 @@ static void UI_AccessibilityPregame( menuDef_t *menu ) {
+  */
+ static const char *eta_accessibilityMenus[] = {
+ 	"eta_accessibility", "eta_acc_told", "eta_acc_sounds", "eta_acc_volumes", "eta_acc_moving",
+-	"eta_acc_keys_around", "eta_acc_keys_things", "eta_acc_keys_told"
++	"eta_acc_keys"
+ };
+ 
+ #define ETA_ACCESSIBILITY_TAB "eta_accessibility_tab"

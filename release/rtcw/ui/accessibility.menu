@@ -138,10 +138,8 @@ menuDef {
 	ETA_BUTTON(64, "SOUNDS", close eta_accessibility ; open eta_acc_sounds)
 	ETA_BUTTON(88, "VOLUMES", close eta_accessibility ; open eta_acc_volumes)
 	ETA_BUTTON(112, "MOVING AND AIMING", close eta_accessibility ; open eta_acc_moving)
-	ETA_BUTTON(136, "KEYS: GETTING AROUND", close eta_accessibility ; open eta_acc_keys_around)
-	ETA_BUTTON(160, "KEYS: THINGS AND ENEMIES", close eta_accessibility ; open eta_acc_keys_things)
-	ETA_BUTTON(184, "KEYS: WHAT YOU ARE TOLD", close eta_accessibility ; open eta_acc_keys_told)
-	ETA_BUTTON(216, "BACK", uiScript etaAccessibilityLeave)
+	ETA_BUTTON(136, "KEY BINDS", close eta_accessibility ; open eta_acc_keys)
+	ETA_BUTTON(168, "BACK", uiScript etaAccessibilityLeave)
 }
 
 // What you are told: what the mode says as you play, without a key.
@@ -243,75 +241,53 @@ menuDef {
 	ETA_BUTTON(168, "BACK", close eta_acc_moving ; open eta_accessibility)
 }
 
-// The mode's keys, as the game's Controls page has its own: each row
-// says its key, Enter puts it on another.
+// The mode's keys, all on one page, as Enemy Territory's mode has them
+// under Key binds - the tester found three pages of them not as one.
+// Each row says its key; Enter puts it on another. The game's own keys
+// stay on its Controls page. Taller than the other pages, to hold them.
 menuDef {
-	name "eta_acc_keys_around"
+	name "eta_acc_keys"
 	visible 0
 	fullscreen 0
 	outOfBoundsClick
-	ETA_PAGE_RECT
+	rect 100 30 443 422
 	focusColor 1 .75 0 1
 	style 1
 	border 1
 	onOpen { uiScript loadControls }
-	onEsc { close eta_acc_keys_around ; open eta_accessibility }
-	ETA_WINDOW
-	ETA_TITLE("KEYS: GETTING AROUND")
-	ETA_KEY(32, "The way on", "accessibilityWayOut")
-	ETA_KEY(50, "The doors out of this area", "accessibilityAreaExits")
-	ETA_KEY(68, "Back through the areas explored", "accessibilityAreasBack")
-	ETA_KEY(86, "Mark a waypoint where you stand", "accessibilityWaypointPlace")
-	ETA_KEY(104, "Your waypoints, Shift goes back", "accessibilityWaypointList")
-	ETA_KEY(122, "Go to the waypoint on top", "accessibilityWaypointTop")
-	ETA_KEY(140, "Take the marker away", "accessibilityMarkerClear")
-	ETA_KEY(158, "Turn left", "+accessibilityTurnLeft")
-	ETA_KEY(176, "Turn right", "+accessibilityTurnRight")
-	ETA_BUTTON(204, "BACK", close eta_acc_keys_around ; open eta_accessibility)
-}
-
-menuDef {
-	name "eta_acc_keys_things"
-	visible 0
-	fullscreen 0
-	outOfBoundsClick
-	ETA_PAGE_RECT
-	focusColor 1 .75 0 1
-	style 1
-	border 1
-	onOpen { uiScript loadControls }
-	onEsc { close eta_acc_keys_things ; open eta_accessibility }
-	ETA_WINDOW
-	ETA_TITLE("KEYS: THINGS AND ENEMIES")
-	ETA_KEY(32, "Next thing to take, press or break", "accessibilityThingsNext")
-	ETA_KEY(50, "Previous thing", "accessibilityThingsPrev")
-	ETA_KEY(68, "Use, turn to a thing, climb a ladder", "+accessibilityActivate")
-	ETA_KEY(86, "Lock on to an enemy, and again to let go", "accessibilityEnemyLock")
-	ETA_KEY(104, "Lock on while held", "+accessibilityAimLock")
-	ETA_BUTTON(132, "BACK", close eta_acc_keys_things ; open eta_accessibility)
-}
-
-menuDef {
-	name "eta_acc_keys_told"
-	visible 0
-	fullscreen 0
-	outOfBoundsClick
-	ETA_PAGE_RECT
-	focusColor 1 .75 0 1
-	style 1
-	border 1
-	onOpen { uiScript loadControls }
-	onEsc { close eta_acc_keys_told ; open eta_accessibility }
-	ETA_WINDOW
-	ETA_TITLE("KEYS: WHAT YOU ARE TOLD")
-	ETA_KEY(32, "Where you are", "accessibilityStatus")
-	ETA_KEY(50, "Health", "accessibilityHealth")
-	ETA_KEY(68, "Weapon, ammo and what you carry", "accessibilityAmmo")
-	ETA_KEY(86, "Facing and coordinates", "accessibilityFacing")
-	ETA_KEY(104, "What is ahead", "accessibilityAhead")
-	ETA_KEY(122, "Say the last thing again", "accessibilityRepeat")
-	ETA_KEY(140, "Read the screen", "accessibilityReadScreen")
-	ETA_KEY(158, "Stop speaking", "accessibilityStopSpeech")
-	ETA_BUTTON(186, "BACK", close eta_acc_keys_told ; open eta_accessibility)
+	onEsc { close eta_acc_keys ; open eta_accessibility }
+	itemDef {
+		rect 0 2 443 416
+		style WINDOW_STYLE_FILLED
+		border 1
+		bordercolor .5 .5 .5 .5
+		backcolor 0 0 0 .75
+		visible 1
+		decoration
+	}
+	ETA_TITLE("KEY BINDS")
+	ETA_KEY(28, "The way on", "accessibilityWayOut")
+	ETA_KEY(44, "The doors out of this area", "accessibilityAreaExits")
+	ETA_KEY(60, "Back through the areas explored", "accessibilityAreasBack")
+	ETA_KEY(76, "Mark a waypoint where you stand", "accessibilityWaypointPlace")
+	ETA_KEY(92, "Your waypoints, Shift goes back", "accessibilityWaypointList")
+	ETA_KEY(108, "Go to the waypoint on top", "accessibilityWaypointTop")
+	ETA_KEY(124, "Take the marker away", "accessibilityMarkerClear")
+	ETA_KEY(140, "Turn left", "+accessibilityTurnLeft")
+	ETA_KEY(156, "Turn right", "+accessibilityTurnRight")
+	ETA_KEY(172, "Next thing to take, press or break", "accessibilityThingsNext")
+	ETA_KEY(188, "Previous thing", "accessibilityThingsPrev")
+	ETA_KEY(204, "Use, turn to a thing, climb a ladder", "+accessibilityActivate")
+	ETA_KEY(220, "Lock on to an enemy, and again to let go", "accessibilityEnemyLock")
+	ETA_KEY(236, "Lock on while held", "+accessibilityAimLock")
+	ETA_KEY(252, "Where you are", "accessibilityStatus")
+	ETA_KEY(268, "Health", "accessibilityHealth")
+	ETA_KEY(284, "Weapon, ammo and what you carry", "accessibilityAmmo")
+	ETA_KEY(300, "Facing and coordinates", "accessibilityFacing")
+	ETA_KEY(316, "What is ahead", "accessibilityAhead")
+	ETA_KEY(332, "Say the last thing again", "accessibilityRepeat")
+	ETA_KEY(348, "Read the screen", "accessibilityReadScreen")
+	ETA_KEY(364, "Stop speaking", "accessibilityStopSpeech")
+	ETA_BUTTON(392, "BACK", close eta_acc_keys ; open eta_accessibility)
 }
 }
