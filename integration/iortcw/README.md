@@ -4197,3 +4197,14 @@ found from the map - its foot within four metres across, at the player's
 own level - whether marked, chosen on semicolon's list, or with nothing
 chosen and nothing in the crosshair to use. Checked: three metres north
 of the watchtower's ladder, F walked to it and up to "Top of the ladder".
+
+### 0244 Round the ladder from behind
+
+Led to the forest's watchtower, the tester ended up under the tower,
+behind its ladder: F walked them into the ladder's back, and "Could not
+get onto the ladder". F now, behind a ladder's face, walks round
+whichever side is open - traced for the player's size - to its front,
+then onto its foot, closer than from the front (six units, not twenty:
+come at a slant, the player got on at the ladder's edge and stuck under
+the tower roof's corner at the top). Checked: from under the watchtower,
+F went round and up, "Top of the ladder"; from in front, as before.

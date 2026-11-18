@@ -1,0 +1,96 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index ef333610..e623f54e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -526,6 +526,9 @@ typedef struct
+ 	float    startZ;
+ 	qboolean hasStand;  /* walked to first: where the map says to get on */
+ 	vec3_t   stand;
++	qboolean hasRound;  /* walked to before the stand: round from behind it */
++	vec3_t   round;
++	qboolean cameRound;
+ 	float    bestZ;     /* highest yet, going up */
+ 	int      bestAt;
+ } eta_climb_t;
+@@ -834,19 +837,42 @@ static void ETA_ClimbFrame(void)
+ 	/* Found from the map, some steps off: to where the map says to get
+ 	   on first, then at the ladder. Walked at straight from the side, the
+ 	   test player brushed it, let go, and walked into the wall beside it. */
++	/* Behind the ladder - under the forest's watchtower, the tester was
++	   walked into its back, and "Could not get onto the ladder": round
++	   its side first. Time to get on counted from there. */
++	if (eta_climb.hasRound && !eta_climb.latched)
++	{
++		vec3_t toRound;
++
++		VectorSubtract(eta_climb.round, ps->origin, toRound);
++		toRound[2] = 0.0f;
++		if (VectorLength(toRound) < 20.0f)
++		{
++			eta_climb.hasRound = qfalse;
++			eta_climb.started  = cg.time;
++		}
++	}
++
+ 	if (eta_climb.hasStand && !eta_climb.latched)
+ 	{
+ 		vec3_t toStand;
+ 
+ 		VectorSubtract(eta_climb.stand, ps->origin, toStand);
+ 		toStand[2] = 0.0f;
+-		if (VectorLength(toStand) < 20.0f)
++		/* Come round from behind, at a slant: closer, or the player gets
++		   on at the ladder's edge, and at the watchtower's top stuck under
++		   its roof's corner. */
++		if (VectorLength(toStand) < ( eta_climb.cameRound ? 6.0f : 20.0f ))
+ 		{
+ 			eta_climb.hasStand = qfalse;
+ 		}
+ 	}
+ 
+-	if (eta_climb.hasStand && !eta_climb.latched)
++	if (eta_climb.hasRound && !eta_climb.latched)
++	{
++		VectorSubtract(eta_climb.round, ps->origin, toLadder);
++	}
++	else if (eta_climb.hasStand && !eta_climb.latched)
+ 	{
+ 		VectorSubtract(eta_climb.stand, ps->origin, toLadder);
+ 	}
+@@ -1953,6 +1979,36 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 	VectorCopy(foot, ladder.stand);
+ 	ladder.meters = Distance(foot, at) * ETA_QU_TO_METERS;
+ 	ETA_ClimbStart(&ladder);
++
++	/* Behind its face: round whichever side is open, to in front. */
++	if (( at[thin] - ladder.point[thin] ) * ladder.normal[thin] < 0.0f)
++	{
++		int     side = thin ^ 1, s, bestSide = 0;
++		float   half = ( lmaxs[side] - lmins[side] ) * 0.5f, bestOpen = -1.0f;
++		vec3_t  pmins = { -15.0f, -15.0f, -8.0f }, pmaxs = { 15.0f, 15.0f, 32.0f }, round[2];
++		trace_t tr;
++
++		for (s = 0; s < 2; s++)
++		{
++			float open;
++
++			VectorCopy(at, round[s]);
++			round[s][side] = ( lmins[side] + lmaxs[side] ) * 0.5f + ( s ? -1.0f : 1.0f ) * ( half + 40.0f );
++			round[s][thin] = ladder.point[thin] + ladder.normal[thin] * 40.0f;
++			CG_Trace(&tr, at, pmins, pmaxs, round[s], cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			open = tr.fraction;
++			CG_Trace(&tr, round[s], pmins, pmaxs, foot, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			open += tr.fraction;
++			if (open > bestOpen)
++			{
++				bestOpen = open;
++				bestSide = s;
++			}
++		}
++		eta_climb.hasRound  = qtrue;
++		eta_climb.cameRound = qtrue;
++		VectorCopy(round[bestSide], eta_climb.round);
++	}
+ 	return qtrue;
+ }
+ 
