@@ -4299,3 +4299,20 @@ Checked: crouched in front, 2 m off: up, "Top of the ladder". Beside it,
 from the east, and from the west crouched: up. Under the tower,
 crouched: led round, by the west side. Routes from the south and from
 under the tower to the place: round the west side, ending in front.
+
+### 0250 Kept to the ladder's middle
+
+Next to the forest's watchtower's ladder, F climbed the tester into a
+wall at the top instead of up beside the guard. Started a little to one
+side - 21 units, under the "off to one side" walk 0249 added - the
+player climbed along the ladder's edge and stuck under the tower's roof
+at 1067, 2 m short of the top. Now every climb, however the ladder was
+found, takes the map's ladder for its middle across, and while on it
+steps sideways back to the middle when more than six units off.
+Checked: 21 units right, and 21 left crouched, of the watchtower's
+ladder: both up to "Top of the ladder", facing the guard; from beside
+it, east and west, crouched: up.
+
+And the game's own messages break lines with a written "\n": "Mission
+Failed\nYou Have Been Detected" was read with a backslash and an n. It
+is a full stop now.
