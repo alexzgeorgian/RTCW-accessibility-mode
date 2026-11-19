@@ -1,0 +1,147 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c03d01a1..c2747601 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2335,6 +2335,17 @@ static qboolean ETA_SayLadderFurther(void)
+ 	return qtrue;
+ }
+ 
++/* What T chose, for F - but not a quiet alarm box: F would press it,
++   and it would ring. T still turns to it and says it. */
++static qboolean ETA_FThingChoice(vec3_t at, char *name, int size, qboolean *pending)
++{
++	if (!CG_AccessibilityThingChoice(at, name, size, pending))
++	{
++		return qfalse;
++	}
++	return (qboolean)( Q_stricmpn(name, "alarm box", 9) || Q_stristr(name, "ringing") );
++}
++
+ void CG_AccessibilityActivateDown_f(void)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -2407,6 +2418,50 @@ void CG_AccessibilityActivateDown_f(void)
+ 				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters", aware));
+ 				return;
+ 			}
++
++			/* No one close, the ladder down a few steps off: turned to it,
++			   as F turns to a thing, and F climbs once there. Up the
++			   forest's watchtower, two metres from it, beside the alarm
++			   box, F had nothing else to do but the box. */
++			{
++				vec3_t foot, top, lmins, lmaxs;
++				float  downFar = ETA_F_CLOSE_METERS / ETA_QU_TO_METERS;
++				int    down = -1;
++
++				for (l = 0; l < CG_AccessibilityLadderCount(); l++)
++				{
++					float far;
++
++					if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] <= 64.0f
++					    || fabsf(top[2] - me[2]) >= 128.0f)
++					{
++						continue;
++					}
++					far = sqrtf(( top[0] - me[0] ) * ( top[0] - me[0] ) + ( top[1] - me[1] ) * ( top[1] - me[1] ));
++					if (far < downFar)
++					{
++						downFar = far;
++						down    = l;
++					}
++				}
++				if (down >= 0 && downFar * ETA_QU_TO_METERS > 1.0f && CG_AccessibilityLadderEnds(down, foot, top)
++				    && CG_AccessibilityMapLadder(down, lmins, lmaxs))
++				{
++					etaAimTarget_t t;
++					int            thin = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++
++					memset(&t, 0, sizeof(t));
++					t.entityNum = -1;
++					t.ladder    = qtrue;
++					VectorCopy(top, t.point);
++					t.point[thin ^ 1] = ( lmins[thin ^ 1] + lmaxs[thin ^ 1] ) * 0.5f;
++					t.point[2]        = me[2] + cg.predictedPlayerState.viewheight - 16.0f;
++					t.meters          = downFar * ETA_QU_TO_METERS;
++					Q_strncpyz(t.name, "Ladder down", sizeof(t.name));
++					ETA_AimStartSnap(&t, "Ladder down");
++					return;
++				}
++			}
+ 		}
+ 	}
+ 
+@@ -2650,7 +2705,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 		char     chosenName[64];
+ 		qboolean chosenPending;
+ 
+-		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		if (ETA_FThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 		    && !Q_stricmpn(chosenName, "the ladder", 10)
+ 		    && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS
+ 		    && ETA_ClimbMapLadder(NULL))
+@@ -2672,7 +2727,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 		char     chosenName[64];
+ 		qboolean chosenPending;
+ 
+-		if (!( CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		if (!( ETA_FThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 		       && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS )
+ 		    && ETA_ClimbMapLadder(NULL))
+ 		{
+@@ -2703,14 +2758,14 @@ void CG_AccessibilityActivateDown_f(void)
+ 			char     chosenName[64];
+ 			qboolean chosenPending;
+ 
+-			if (ahead && CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++			if (ahead && ETA_FThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 			    && Q_stricmpn(chosenName, "Tram,", 5) && Q_stricmpn(chosenName, "the tram", 8))
+ 			{
+ 				ahead = qfalse;
+ 			}
+ 		}
+ 
+-		if (CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending)
++		if (ETA_FThingChoice(marker, ledName, sizeof(ledName), &pending)
+ 		    && Distance(eyeAt, marker) * ETA_QU_TO_METERS > ETA_F_CLOSE_METERS && !ahead)
+ 		{
+ 			vec3_t      markerAt;
+@@ -2736,7 +2791,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 			}
+ 			return;
+ 		}
+-		if (!ahead && CG_AccessibilityThingChoice(marker, ledName, sizeof(ledName), &pending))
++		if (!ahead && ETA_FThingChoice(marker, ledName, sizeof(ledName), &pending))
+ 		{
+ 			int   j, best = -1;
+ 			float bestFar = ETA_F_LED_NEAR;
+@@ -2885,7 +2940,10 @@ void CG_AccessibilityActivateDown_f(void)
+ 
+ 		for (j = 0; j < count; j++)
+ 		{
+-			if (!list[j].stairs)
++			/* Nor a quiet alarm box: pressed, it rings. Left out, F
++			   goes on to what is beside it - up the forest's watchtower,
++			   the ladder down - as the tester asked. */
++			if (!list[j].stairs && Q_stricmp(list[j].name, "Alarm box"))
+ 			{
+ 				list[kept++] = list[j];
+ 			}
+@@ -2901,7 +2959,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 		vec3_t   chosenAt;
+ 		char     chosenName[64];
+ 		qboolean chosenPending;
+-		qboolean chosen = (qboolean)( CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		qboolean chosen = (qboolean)( ETA_FThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 		                              && Q_stricmpn(chosenName, "the ladder", 10) );
+ 		int      j, pick = -1;
+ 		float    best = 1.0e9f;
+@@ -2961,7 +3019,7 @@ void CG_AccessibilityActivateDown_f(void)
+ 
+ 		/* Something else chosen close by, even one not in sight from
+ 		   here: not the ladder. */
+-		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		if (ETA_FThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
+ 		    && Q_stricmpn(chosenName, "the ladder", 10)
+ 		    && Distance(chosenAt, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS <= ETA_F_CLOSE_METERS)
+ 		{

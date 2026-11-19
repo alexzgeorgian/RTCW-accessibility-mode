@@ -4421,3 +4421,19 @@ mission (g_alarm.c fires its script trigger). Now:
 Reproduced first: the guard dead, beside the box, F twice - "Mission
 Failed. You Have Been Detected". After: the same, F twice, the refusal
 said twice, no alarm in fifteen seconds.
+
+### 0257 The alarm box left out; the ladder down turned to
+
+After 0256, F up the watchtower beside its alarm box only said it would
+not press it. The tester asked for the box to be put aside, so F could
+work as usual. Now:
+
+- A quiet alarm box is left out of what F turns to, and a box chosen
+  with T is not F's to use (T still turns to it and says it).
+- At a ladder's top with no enemy close, the ladder down two to four
+  metres off is turned to, as F turns to a thing: "Ladder down, right,
+  1 meter". A step on, F climbs down it as before.
+
+Checked: the guard dead, two metres from the ladder beside the box - F,
+"Ladder down, right, 1 meter"; a step; F, "Climbing down, 10 meters" to
+"Bottom of the ladder". No alarm.
