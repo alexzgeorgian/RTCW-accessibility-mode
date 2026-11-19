@@ -4402,3 +4402,22 @@ Read from the map's trigger_deathCheck brushes, and 16 units round them
 for the soldier's own size. Checked on the watchtower: its guard stands
 at spotn6a by the south railing, or at spotn6c by the west one beside the
 alarm box, both said; spotn6b, the middle, is not.
+
+### 0256 F never rings an alarm
+
+Up the forest's watchtower, its guard down, the tester pressed F to go
+down for his rifle, and the alarm rang a little later. F had pressed the
+tower's alarm box, a metre from the ladder's top: the crosshair's
+"alarm" hint counted as something F uses, and where F found nothing
+else close it pressed the game's use key, which reaches a box a line
+from the eyes misses - and a box the player presses rings, and fails the
+mission (g_alarm.c fires its script trigger). Now:
+
+- The alarm hint is not one F uses.
+- The use key is never pressed with a quiet alarm box within 160 units
+  ahead; F says "Alarm box: F never presses it, it would ring". A box
+  ringing is still pressed: that turns it off.
+
+Reproduced first: the guard dead, beside the box, F twice - "Mission
+Failed. You Have Been Detected". After: the same, F twice, the refusal
+said twice, no alarm in fifteen seconds.

@@ -1,0 +1,55 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index ce07a310..c03d01a1 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -320,6 +320,42 @@ static void ETA_UseKey(qboolean down)
+ 		return;
+ 	}
+ 
++	/* Never on a quiet alarm box: pressed, it rings, and the mission
++	   fails. Up the forest's watchtower, its box a metre from the
++	   ladder's top, the tester pressed F with the view on it, and the
++	   alarm went. Ringing, it is pressed - that turns it off. */
++	if (down && cg.snap)
++	{
++		vec3_t forward, to;
++		int    i;
++
++		AngleVectors(cg.refdefViewAngles, forward, NULL, NULL);
++		for (i = 0; i < cg.snap->numEntities; i++)
++		{
++			const entityState_t *es = &cg.snap->entities[i];
++			vec3_t              at;
++
++			if (es->eType != ET_ALARMBOX || es->frame != 0)
++			{
++				continue;
++			}
++			VectorCopy(cg_entities[es->number].lerpOrigin, at);
++			if (es->modelindex > 0 && es->modelindex < MAX_MODELS)
++			{
++				VectorAdd(at, cgs.inlineModelMidpoints[es->modelindex], at);
++			}
++			VectorSubtract(at, cg.refdef.vieworg, to);
++			/* In the use key's reach, and anywhere ahead: the game's own
++			   use finds a box a straight line from the eyes misses. */
++			if (VectorLength(to) < 160.0f && DotProduct(to, forward) > 0.0f)
++			{
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say("Alarm box: F never presses it, it would ring");
++				return;
++			}
++		}
++	}
++
+ 	trap_SendConsoleCommand(va("%sactivate %s\n", down ? "+" : "-", ETA_USE_KEY));
+ 	eta_use.pressed   = down;
+ 	eta_use.releaseAt = 0;
+@@ -2037,6 +2073,7 @@ static qboolean ETA_HintUsable(int hint)
+ 	case HINT_BREAKABLE_DYNAMITE:
+ 	case HINT_KNIFE:
+ 	case HINT_LADDER:
++	case HINT_ALARM:    /* quiet, pressed, it rings: never F's */
+ 	case HINT_WATER:
+ 	case HINT_CAUTION:
+ 	case HINT_DANGER:
