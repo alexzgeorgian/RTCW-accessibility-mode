@@ -4334,3 +4334,24 @@ down and exits quietly, so there is no report to send. Now:
 Checked: the game sent a segmentation fault on purpose; rtcwconsole.log
 ends with "Crash: signal 11. Where, innermost first:" and the calls,
 then the shutdown.
+
+### 0252 Not under the tower
+
+F kept sending the tester into the space under the forest's watchtower,
+behind its ladder, instead of to the ladder. Two causes:
+
+- The way round to the ladder's front was free to go between the
+  tower's legs, under the tower, and did. The way now keeps out of the
+  space behind every ladder four metres or more high - a circle 80
+  units across its middle, 90 behind its face - as it keeps off a spot
+  the walk guide found blocked. A player already in there is let out.
+- South of the tower, 5 m from the ladder but behind it, F said "Ladder
+  up, ahead, 5 meters. A little closer, F climbs", and closer was under
+  the tower. Behind a ladder F now says "Ladder up, ahead, 5 meters,
+  its back to you: led round to its front", and leads there.
+
+Checked, walking with the way: from under the tower, from the south-east
+corner, and from 5 m south: each round the outside to "Marker reached,
+at the foot of the ladder up. F climbs", then F up to "Top of the
+ladder". The ways from five spots round the tower all keep outside its
+legs.

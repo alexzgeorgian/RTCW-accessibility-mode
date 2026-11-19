@@ -1,0 +1,136 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 2818cfff..df77a910 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -2168,7 +2168,7 @@ static qboolean ETA_SayLadderFurther(void)
+ 	const float *at = cg.predictedPlayerState.origin;
+ 	vec3_t      foot, top, bestFoot;
+ 	float       bestFar = 10.0f / ETA_QU_TO_METERS;
+-	int         l, meters;
++	int         l, meters, bestLadder = -1;
+ 	qboolean    found = qfalse;
+ 
+ 	for (l = 0; l < CG_AccessibilityLadderCount(); l++)
+@@ -2183,9 +2183,10 @@ static qboolean ETA_SayLadderFurther(void)
+ 		far = sqrtf(( foot[0] - at[0] ) * ( foot[0] - at[0] ) + ( foot[1] - at[1] ) * ( foot[1] - at[1] ));
+ 		if (far < bestFar)
+ 		{
+-			bestFar = far;
++			bestFar    = far;
+ 			VectorCopy(foot, bestFoot);
+-			found   = qtrue;
++			found      = qtrue;
++			bestLadder = l;
+ 		}
+ 	}
+ 	if (!found)
+@@ -2193,6 +2194,33 @@ static qboolean ETA_SayLadderFurther(void)
+ 		return qfalse;
+ 	}
+ 	meters = (int)( bestFar * ETA_QU_TO_METERS + 0.5f );
++
++	/* Its back to the player - south of the forest's watchtower, its
++	   ladder on the far side: "a little closer" took the tester under
++	   the tower. Led round to its front instead. */
++	{
++		vec3_t lmins, lmaxs;
++
++		if (CG_AccessibilityMapLadder(bestLadder, lmins, lmaxs))
++		{
++			int   thin   = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++			float normal = bestFoot[thin] > ( lmins[thin] + lmaxs[thin] ) * 0.5f ? 1.0f : -1.0f;
++			float face   = normal > 0.0f ? lmaxs[thin] : lmins[thin];
++
++			if (( at[thin] - face ) * normal < -16.0f)
++			{
++				vec3_t front;
++
++				VectorCopy(bestFoot, front);
++				front[thin] += normal * 72.0f;
++				ETA_Speech_Say(va("Ladder up, %s, %d meters, its back to you: led round to its front",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestFoot)), meters));
++				CG_AccessibilityChoose(front, "the ladder up");
++				CG_AccessibilityWayOut();
++				return qtrue;
++			}
++		}
++	}
+ 	ETA_Speech_Say(va("Ladder up, %s, %d meters. A little closer, F climbs",
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestFoot)), meters));
+ 	return qtrue;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index c857500c..cec2e29f 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -519,6 +519,54 @@ void CG_AccessibilityRouteAvoid(const float (*points)[3], int count)
+ static float eta_routeBlocked[ETA_ROUTE_BLOCK_MAX][4];   /* x, y, z, radius */
+ static int   eta_routeBlockedCount, eta_routeBlockedNext;
+ 
++/* Behind each tall ladder: under the forest's watchtower, behind its
++   ladder, the way went between the tower's legs, through its cross
++   braces, and the tester - led there again and again by F, to go round
++   to the ladder's front - was held under the tower. The way keeps out
++   of the space behind a ladder four metres or more high, as of a spot
++   it was blocked at. Worked out once a level. */
++#define ETA_LADDER_BACK_MAX 16
++
++static float eta_ladderBack[ETA_LADDER_BACK_MAX][4];
++static int   eta_ladderBackCount = -1, eta_ladderBackLevel;
++
++static void ETA_LadderBacks(void)
++{
++	int l;
++
++	if (eta_ladderBackCount >= 0 && eta_ladderBackLevel == cgs.levelStartTime)
++	{
++		return;
++	}
++	eta_ladderBackLevel = cgs.levelStartTime;
++	eta_ladderBackCount = 0;
++	for (l = 0; l < CG_AccessibilityLadderCount() && eta_ladderBackCount < ETA_LADDER_BACK_MAX; l++)
++	{
++		vec3_t foot, top, lmins, lmaxs;
++		int    thin;
++		float  normal, face;
++
++		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] < 4.0f / ETA_QU_TO_METERS
++		    || !CG_AccessibilityMapLadder(l, lmins, lmaxs))
++		{
++			continue;
++		}
++		thin   = ( lmaxs[0] - lmins[0] ) < ( lmaxs[1] - lmins[1] ) ? 0 : 1;
++		normal = foot[thin] > ( lmins[thin] + lmaxs[thin] ) * 0.5f ? 1.0f : -1.0f;
++		face   = normal > 0.0f ? lmaxs[thin] : lmins[thin];
++		eta_ladderBack[eta_ladderBackCount][thin ^ 1] = ( lmins[thin ^ 1] + lmaxs[thin ^ 1] ) * 0.5f;
++		eta_ladderBack[eta_ladderBackCount][thin]     = face - normal * 90.0f;
++		eta_ladderBack[eta_ladderBackCount][2]        = foot[2];
++		eta_ladderBack[eta_ladderBackCount][3]        = 80.0f;
++		eta_ladderBackCount++;
++	}
++	/* None read yet: tried again. */
++	if (!eta_ladderBackCount)
++	{
++		eta_ladderBackCount = -1;
++	}
++}
++
+ /* Whether a walk from one point to another goes over a blocked spot - a
+    walk that only takes the player further from one they are already at
+    is let through, the way out of it. */
+@@ -526,11 +574,13 @@ static qboolean ETA_RouteBlockedNear(const float from[3], const float to[3])
+ {
+ 	float dx = to[0] - from[0], dy = to[1] - from[1];
+ 	float length2 = dx * dx + dy * dy;
+-	int   i;
++	int   i, backs;
+ 
+-	for (i = 0; i < eta_routeBlockedCount; i++)
++	ETA_LadderBacks();
++	backs = eta_ladderBackCount > 0 ? eta_ladderBackCount : 0;
++	for (i = 0; i < eta_routeBlockedCount + backs; i++)
+ 	{
+-		const float *spot = eta_routeBlocked[i];
++		const float *spot = i < eta_routeBlockedCount ? eta_routeBlocked[i] : eta_ladderBack[i - eta_routeBlockedCount];
+ 		float       f     = length2 > 0.0f ? ((spot[0] - from[0]) * dx + (spot[1] - from[1]) * dy) / length2 : 0.0f;
+ 		float       ax, ay, closest, already;
+ 
