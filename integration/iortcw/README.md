@@ -4316,3 +4316,21 @@ it, east and west, crouched: up.
 And the game's own messages break lines with a written "\n": "Mission
 Failed\nYou Have Been Detected" was read with a backslash and an n. It
 is a full stop now.
+
+### 0251 Where it crashed, kept
+
+After knifing the forest's tower guard, with the alarm, the tester was
+put back on the Mac's desktop with nothing said, and the Mac kept no
+crash report: iortcw catches the crash itself (Sys_SigHandler), shuts
+down and exits quietly, so there is no report to send. Now:
+
+- The console is written as it goes to rtcwconsole.log, in the game's
+  own folder - on a Mac, ~/Library/Application Support/RTCW/main - a
+  new one each start (logfile 2 by default, not kept in the config).
+- A crash writes, before the shutdown, "Crash: signal N" and the calls
+  it was in, innermost first, each as its file, offset and name where
+  there is one (backtrace and dladdr; the Mac and Linux).
+
+Checked: the game sent a segmentation fault on purpose; rtcwconsole.log
+ends with "Crash: signal 11. Where, innermost first:" and the calls,
+then the shutdown.

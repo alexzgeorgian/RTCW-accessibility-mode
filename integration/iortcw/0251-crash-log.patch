@@ -1,0 +1,76 @@
+diff --git a/SP/code/qcommon/common.c b/SP/code/qcommon/common.c
+index a1e7dc0b..c44d7608 100644
+--- a/SP/code/qcommon/common.c
++++ b/SP/code/qcommon/common.c
+@@ -2366,7 +2366,14 @@ void Com_Init( char *commandLine ) {
+ 	com_maxfps = Cvar_Get( "com_maxfps", "76", CVAR_ARCHIVE );
+ 	com_blood = Cvar_Get( "com_blood", "1", CVAR_ARCHIVE );
+ 
++#ifdef FEATURE_ACCESSIBILITY
++	/* Kept, and written as it goes: the game's console, in qconsole.log
++	   in the game's own folder, for when it stops - the tester has no
++	   other way to see what it said. A new one each time it starts. */
++	com_logfile = Cvar_Get( "logfile", "2", CVAR_TEMP );
++#else
+ 	com_logfile = Cvar_Get( "logfile", "0", CVAR_TEMP );
++#endif
+ 
+ 	com_timescale = Cvar_Get( "timescale", "1", CVAR_CHEAT | CVAR_SYSTEMINFO );
+ 	com_fixedtime = Cvar_Get( "fixedtime", "0", CVAR_CHEAT );
+diff --git a/SP/code/sys/sys_main.c b/SP/code/sys/sys_main.c
+index 07cdd23f..63a3ebee 100644
+--- a/SP/code/sys/sys_main.c
++++ b/SP/code/sys/sys_main.c
+@@ -20,6 +20,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ ===========================================================================
+ */
+ 
++#if defined( FEATURE_ACCESSIBILITY ) && defined( __linux__ ) && !defined( _GNU_SOURCE )
++#define _GNU_SOURCE   /* dladdr, for where a crash happened */
++#endif
+ #include <signal.h>
+ #include <stdlib.h>
+ #include <limits.h>
+@@ -30,6 +33,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ #include <string.h>
+ #include <ctype.h>
+ #include <errno.h>
++#if defined( FEATURE_ACCESSIBILITY ) && ( defined( __APPLE__ ) || defined( __linux__ ) )
++#include <execinfo.h>
++#include <dlfcn.h>
++#endif
+ 
+ #ifndef DEDICATED
+ #ifdef USE_LOCAL_HEADERS
+@@ -675,6 +682,31 @@ void Sys_SigHandler( int signal )
+ 	else
+ 	{
+ 		signalcaught = qtrue;
++#if defined( FEATURE_ACCESSIBILITY ) && ( defined( __APPLE__ ) || defined( __linux__ ) )
++		/* A crash caught here closes the game quietly, and the Mac keeps
++		   no report of it: the tester, knifing the forest's tower guard,
++		   was put back on the desktop with nothing said and nothing to
++		   send. Where it happened goes into qconsole.log first. */
++		if ( signal != SIGTERM && signal != SIGINT ) {
++			void *frames[48];
++			int count = backtrace( frames, 48 ), f;
++
++			Com_Printf( "^1Crash: signal %d. Where, innermost first:\n", signal );
++			for ( f = 0; f < count; f++ ) {
++				Dl_info where;
++
++				if ( dladdr( frames[f], &where ) && where.dli_fname ) {
++					const char *file = strrchr( where.dli_fname, '/' );
++
++					Com_Printf( "  %s +0x%lx %s\n", file ? file + 1 : where.dli_fname,
++								(unsigned long)( (char *)frames[f] - (char *)where.dli_fbase ),
++								where.dli_sname ? where.dli_sname : "" );
++				} else {
++					Com_Printf( "  %p\n", frames[f] );
++				}
++			}
++		}
++#endif
+ 		VM_Forced_Unload_Start();
+ #ifndef DEDICATED
+ 		CL_Shutdown(va("Received signal %d", signal), qtrue, qtrue);
