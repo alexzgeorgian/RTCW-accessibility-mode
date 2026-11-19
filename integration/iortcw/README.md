@@ -4365,3 +4365,21 @@ knock was the bump cue, played as F walked them onto the ladder at its
 foot and off it at the top, pressed against it as it is meant to be. It
 is quiet now while F climbs. Checked: at the top, facing south, forward
 goes 1.7 m on toward the guard without stopping.
+
+### 0254 F turns you round; the nearer one out of sight
+
+- Led round to a ladder's front by F, the tester found it took too long,
+  turning with O at each bend, and asked F to do the turning. While F's
+  walk round lasts - its marker on "the ladder up" - the walk guide
+  turns the player along the way as they walk, as it does with
+  eta_autoSteer on; nothing else is steered. F says so: "led round to
+  its front. Walk, and F turns you". Checked from under the watchtower
+  and from 5 m south, eta_autoSteer off, holding forward only: round to
+  "Marker reached", then F up to "Top of the ladder".
+- By the watchtower, its guard above through the tower's floor, the lock
+  took a soldier a hundred metres off, and the tester took it for wrong:
+  it takes the nearest it can see. "Locked" now says a nearer enemy out
+  of sight after its own direction: "Locked, Soldier, ahead, 103 meters,
+  5 meters above you. A nearer one out of sight: Soldier, ahead, 10
+  meters, 10 meters above you". At the top, it takes the guard:
+  "Locked, Soldier, ahead, 2 meters".

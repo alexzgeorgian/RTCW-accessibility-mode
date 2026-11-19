@@ -1,0 +1,163 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index df77a910..b7523234 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -541,6 +541,12 @@ typedef struct
+ 
+ static eta_climb_t eta_climb;
+ 
++/* Led round to a ladder's front by F: while the player walks, the way
++   turns them, as the walk guide does - the tester, led round the forest's
++   watchtower, found it took too long, turning by O at each bend, and
++   asked F to do the turning. Only for that walk, to that ladder. */
++static qboolean eta_guideByF;
++
+ qboolean CG_AccessibilityClimbing(void)
+ {
+ 	return eta_climb.active;
+@@ -1048,6 +1054,57 @@ static void ETA_AimSay(const char *what, const vec3_t point)
+ 	ETA_AimSayThen(what, point, NULL);
+ }
+ 
++/* Said with "Locked": an enemy nearer than the one taken, out of sight.
++   The tester, by the forest's watchtower, its guard above them through
++   the tower's floor, locked on and was turned to a soldier fifty metres
++   off, and took the lock for wrong: it takes the nearest it can see. */
++static char eta_lockNearer[128];
++
++static void ETA_LockNearerNote(void)
++{
++	const float *me = cg.predictedPlayerState.origin;
++	float       taken, best;
++	int         i, nearest = -1;
++
++	eta_lockNearer[0] = '\0';
++	if (!cg.snap || eta_aim.entityNum < 0 || eta_aim.entityNum >= MAX_GENTITIES)
++	{
++		return;
++	}
++	taken = Distance(cg_entities[eta_aim.entityNum].lerpOrigin, me);
++	best  = taken - 3.0f / ETA_QU_TO_METERS;
++	for (i = 0; i < cg.snap->numEntities; i++)
++	{
++		const entityState_t *es   = &cg.snap->entities[i];
++		const centity_t     *cent = &cg_entities[es->number];
++		float               far;
++
++		if (es->number == eta_aim.entityNum || es->number == cg.snap->ps.clientNum || es->eType != ET_PLAYER
++		    || !es->aiChar || (es->eFlags & EF_DEAD) || es->teamNum == cg.snap->ps.teamNum)
++		{
++			continue;
++		}
++		far = Distance(cent->lerpOrigin, me);
++		if (far < best)
++		{
++			best    = far;
++			nearest = es->number;
++		}
++	}
++	if (nearest >= 0)
++	{
++		const centity_t *cent   = &cg_entities[nearest];
++		float           up      = ( cent->lerpOrigin[2] - me[2] ) * ETA_QU_TO_METERS;
++		int             meters  = (int)( best * ETA_QU_TO_METERS + 0.5f );
++		int             rise    = (int)( fabsf(up) + 0.5f );
++
++		Com_sprintf(eta_lockNearer, sizeof(eta_lockNearer), "A nearer one out of sight: %s, %s, %d meters%s",
++		            CG_AccessibilityCharacterName(nearest),
++		            ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)), meters,
++		            rise < 2 ? "" : va(", %d meters %s you", rise, up > 0 ? "above" : "below"));
++	}
++}
++
+ /**
+  * @brief "Locked" only once a shot would hit.
+  *
+@@ -1225,11 +1282,15 @@ static void ETA_AimLockedFrame(void)
+ 
+ 		eta_aim.steadySay = qtrue;
+ 		ETA_AimSayThen(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point,
+-		               va("Hold still: your aim steadies in %d second%s%s", secs, secs == 1 ? "" : "s",
++		               va("%s%sHold still: your aim steadies in %d second%s%s", eta_lockNearer,
++		                  eta_lockNearer[0] ? ". " : "", secs, secs == 1 ? "" : "s",
+ 		                  (ps->eFlags & EF_CROUCHING) ? "" : ", or half that crouched"));
++		eta_lockNearer[0] = '\0';
+ 		return;
+ 	}
+-	ETA_AimSay(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point);
++	ETA_AimSayThen(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point,
++	               eta_lockNearer[0] ? eta_lockNearer : NULL);
++	eta_lockNearer[0] = '\0';
+ }
+ 
+ /**
+@@ -2125,9 +2186,10 @@ static qboolean ETA_ClimbMapLadder(const vec3_t near)
+ 			VectorCopy(foot, front);
+ 			front[thin] += ladder.normal[thin] * 72.0f;
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say("The ladder's back is to you: led round to its front");
++			ETA_Speech_Say("The ladder's back is to you: led round to its front. Walk, and F turns you");
+ 			CG_AccessibilityChoose(front, "the ladder up");
+ 			CG_AccessibilityWayOut();
++			eta_guideByF = qtrue;
+ 			return qtrue;
+ 		}
+ 		ETA_ClimbStart(&ladder);
+@@ -2213,10 +2275,11 @@ static qboolean ETA_SayLadderFurther(void)
+ 
+ 				VectorCopy(bestFoot, front);
+ 				front[thin] += normal * 72.0f;
+-				ETA_Speech_Say(va("Ladder up, %s, %d meters, its back to you: led round to its front",
++				ETA_Speech_Say(va("Ladder up, %s, %d meters, its back to you: led round to its front. Walk, and F turns you",
+ 				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestFoot)), meters));
+ 				CG_AccessibilityChoose(front, "the ladder up");
+ 				CG_AccessibilityWayOut();
++				eta_guideByF = qtrue;
+ 				return qtrue;
+ 			}
+ 		}
+@@ -3037,6 +3100,7 @@ void CG_AccessibilityAimLockDown_f(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
++		ETA_LockNearerNote();
+ 		ETA_AimLockedLater();
+ 	}
+ 	else
+@@ -3182,6 +3246,7 @@ static void ETA_AutoLock(void)
+ 		return;
+ 	}
+ 
++	eta_lockNearer[0] = '\0';
+ 	eta_aim.mode      = ETA_AIM_LOCK;
+ 	eta_aim.automatic = qtrue;
+ 	eta_aim.started   = cg.time;
+@@ -3488,7 +3553,19 @@ static void ETA_GuideFrame(void)
+ 	usercmd_t           cmd;
+ 	vec3_t              target, delta, wanted;
+ 
+-	if (!eta_autoSteer.integer || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
++	/* F's walk round to a ladder lasts while its marker does. */
++	if (eta_guideByF)
++	{
++		vec3_t      at;
++		const char *name;
++
++		if (!CG_AccessibilityMarkerInfo(at, &name) || !name || !strstr(name, "ladder up"))
++		{
++			eta_guideByF = qfalse;
++		}
++	}
++
++	if (( !eta_autoSteer.integer && !eta_guideByF ) || cg.cameraMode || !cg.snap || ps->pm_type != PM_NORMAL
+ 	    || eta_turn.step || eta_turn.held
+ 	    || (cg.time < eta_aim.manualUntil && eta_aim.manualUntil - cg.time <= ETA_AIM_MANUAL_MS)
+ 	    || !CG_AccessibilityMarkerSteerPoint(target))
+@@ -7810,6 +7887,7 @@ void CG_AccessibilityAimFrame(void)
+ 
+ 	if (ETA_AimAcquire(0.0f))
+ 	{
++		ETA_LockNearerNote();
+ 		ETA_AimLockedLater();
+ 		return;
+ 	}
