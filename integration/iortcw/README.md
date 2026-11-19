@@ -4383,3 +4383,22 @@ goes 1.7 m on toward the guard without stopping.
   5 meters above you. A nearer one out of sight: Soldier, ahead, 10
   meters, 10 meters above you". At the top, it takes the guard:
   "Locked, Soldier, ahead, 2 meters".
+
+### 0255 By a weak railing
+
+The level lets some railings break under a soldier who dies against them
+(trigger_deathCheck): the forest's watchtower has two, south and west.
+He falls with the railing, and his rifle with him. A sighted player sees
+the guard lean on the railing. The tester asked for the same:
+
+- "Locked" says it: "Locked, Soldier, by a weak railing, ahead, 3
+  meters".
+- So does the facing cue: "Soldier, ahead, 9 meters, 8 meters above you,
+  facing away, by a weak railing".
+- While locked on, coming to one or leaving it is said: "By a weak
+  railing: he falls if he dies there", "Away from the railing".
+
+Read from the map's trigger_deathCheck brushes, and 16 units round them
+for the soldier's own size. Checked on the watchtower: its guard stands
+at spotn6a by the south railing, or at spotn6c by the west one beside the
+alarm box, both said; spotn6b, the middle, is not.

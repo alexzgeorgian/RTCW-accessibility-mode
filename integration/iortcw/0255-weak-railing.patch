@@ -1,0 +1,167 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index b7523234..ce07a310 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -547,6 +547,12 @@ static eta_climb_t eta_climb;
+    asked F to do the turning. Only for that walk, to that ladder. */
+ static qboolean eta_guideByF;
+ 
++/* Who the lock is on, or -1. */
++int CG_AccessibilityLockedEntity(void)
++{
++	return eta_aim.mode == ETA_AIM_LOCK ? eta_aim.entityNum : -1;
++}
++
+ qboolean CG_AccessibilityClimbing(void)
+ {
+ 	return eta_climb.active;
+@@ -1281,15 +1287,18 @@ static void ETA_AimLockedFrame(void)
+ 		int secs = (waitMs + 999) / 1000;
+ 
+ 		eta_aim.steadySay = qtrue;
+-		ETA_AimSayThen(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point,
++		ETA_AimSayThen(va("Locked, %s%s", CG_AccessibilityCharacterName(eta_aim.entityNum),
++		                  CG_AccessibilityByWeakRailing(cg_entities[eta_aim.entityNum].lerpOrigin) ? ", by a weak railing" : ""),
++		               eta_aim.point,
+ 		               va("%s%sHold still: your aim steadies in %d second%s%s", eta_lockNearer,
+ 		                  eta_lockNearer[0] ? ". " : "", secs, secs == 1 ? "" : "s",
+ 		                  (ps->eFlags & EF_CROUCHING) ? "" : ", or half that crouched"));
+ 		eta_lockNearer[0] = '\0';
+ 		return;
+ 	}
+-	ETA_AimSayThen(va("Locked, %s", CG_AccessibilityCharacterName(eta_aim.entityNum)), eta_aim.point,
+-	               eta_lockNearer[0] ? eta_lockNearer : NULL);
++	ETA_AimSayThen(va("Locked, %s%s", CG_AccessibilityCharacterName(eta_aim.entityNum),
++	                  CG_AccessibilityByWeakRailing(cg_entities[eta_aim.entityNum].lerpOrigin) ? ", by a weak railing" : ""),
++	               eta_aim.point, eta_lockNearer[0] ? eta_lockNearer : NULL);
+ 	eta_lockNearer[0] = '\0';
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 208333eb..13d7edaa 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3724,11 +3724,12 @@ static void ETA_FacingWatch(qboolean speaking)
+ 			int   rise   = (int)(fabsf(up) + 0.5f);
+ 			int   meters = (int)(bestFar + 0.5f);
+ 
+-			ETA_Speech_Say(va("%s, %s, %d %s%s, %s", ETA_CharacterKind(&cent->currentState),
++			ETA_Speech_Say(va("%s, %s, %d %s%s, %s%s", ETA_CharacterKind(&cent->currentState),
+ 			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cent->lerpOrigin)),
+ 			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
+ 			                  rise < 3 ? "" : va(", %d meters %s you", rise, up > 0 ? "above" : "below"),
+-			                  toward ? (said ? "turning toward you" : "facing you") : "facing away"));
++			                  toward ? (said ? "turning toward you" : "facing you") : "facing away",
++			                  CG_AccessibilityByWeakRailing(cent->lerpOrigin) ? ", by a weak railing" : ""));
+ 			said       = qtrue;
+ 			saidToward = toward;
+ 			saidAt     = cg.time;
+@@ -5952,6 +5953,39 @@ static void ETA_LiftScriptLine(const char *a, const char *b, const char *c, cons
+ 	}
+ }
+ 
++
++/* Railings the level lets break under a soldier who dies against them
++   (trigger_deathCheck): he falls with them, and the crash and the fall
++   rouse the soldiers below. The forest's watchtower has two; the tester,
++   shooting its guard there, heard the alarm a little later. A sighted
++   player sees him lean on the railing, and waits. */
++#define ETA_WEAK_RAILS 16
++
++static int eta_weakRail[ETA_WEAK_RAILS];
++static int eta_weakRailCount;
++
++qboolean CG_AccessibilityByWeakRailing(const vec3_t at)
++{
++	int i;
++
++	for (i = 0; i < eta_weakRailCount; i++)
++	{
++		vec3_t mins, maxs;
++
++		if (eta_weakRail[i] <= 0 || eta_weakRail[i] >= MAX_MODELS || !cgs.inlineDrawModel[eta_weakRail[i]])
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[eta_weakRail[i]], mins, maxs);
++		if (at[0] > mins[0] - 16.0f && at[0] < maxs[0] + 16.0f && at[1] > mins[1] - 16.0f && at[1] < maxs[1] + 16.0f
++		    && at[2] > mins[2] - 64.0f && at[2] < maxs[2] + 64.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static void ETA_ReadMapEntities(void)
+ {
+ 	char token[MAX_TOKEN_CHARS];
+@@ -6045,6 +6079,7 @@ static void ETA_ReadMapEntities(void)
+ 	}
+ 	eta_exitCount       = 0;
+ 	eta_modelPropCount  = 0;
++	eta_weakRailCount   = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
+@@ -6122,6 +6157,11 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags, origin);
+ 
++		if (!Q_stricmp(classname, "trigger_deathCheck") && model[0] == '*' && eta_weakRailCount < ETA_WEAK_RAILS)
++		{
++			eta_weakRail[eta_weakRailCount++] = atoi(model + 1);
++		}
++
+ 		/* A thing placed as a model of its own: a tree, a wagon. */
+ 		if (( !Q_stricmp(classname, "misc_gamemodel") || !Q_stricmp(classname, "misc_model") ) && model[0]
+ 		    && origin[0] && eta_modelPropCount < ETA_MODEL_PROPS)
+@@ -11178,6 +11218,35 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 
+ 	ETA_NarrateCrosshair();
+ 
++	/* The one locked on, coming to a weak railing or leaving it: said, so
++	   the shot can wait until he is away from it. */
++	{
++		static int      railFor = -1;
++		static qboolean railWas;
++		int             locked  = CG_AccessibilityLockedEntity();
++
++		if (locked < 0 || locked >= MAX_GENTITIES || !cg_entities[locked].currentValid
++		    || (cg_entities[locked].currentState.eFlags & EF_DEAD))
++		{
++			railFor = -1;
++		}
++		else
++		{
++			qboolean now = CG_AccessibilityByWeakRailing(cg_entities[locked].lerpOrigin);
++
++			if (railFor != locked)
++			{
++				railFor = locked;
++				railWas = now;      /* said with "Locked" */
++			}
++			else if (now != railWas)
++			{
++				railWas = now;
++				ETA_Speech_Say(now ? "By a weak railing: he falls if he dies there" : "Away from the railing");
++			}
++		}
++	}
++
+ 	/* Not while F climbs: "Step up" at the ladder's foot and "Ladder" as
+ 	   its face came ahead cut "Climbing up, 11 meters" off at once -
+ 	   VoiceOver does not queue - and the tester, up the forest's
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 2a2f9807..c8c74d2a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2354,6 +2354,8 @@ int CG_AccessibilityDoorShutNow( int model );
+ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ void CG_AccessibilityGameSaved( void );
+ void CG_AccessibilityWatchers( void );
++qboolean CG_AccessibilityByWeakRailing( const vec3_t at );
++int CG_AccessibilityLockedEntity( void );
+ void CG_AccessibilityExploredRestart( void );
+ int CG_AccessibilityThingsUnfound( int area );
+ int CG_AccessibilityThingsUnfoundPoints( vec3_t *out, int max );
