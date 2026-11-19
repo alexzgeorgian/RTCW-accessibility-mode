@@ -4355,3 +4355,13 @@ corner, and from 5 m south: each round the outside to "Marker reached,
 at the foot of the ladder up. F climbs", then F up to "Top of the
 ladder". The ways from five spots round the tower all keep outside its
 legs.
+
+### 0253 No knock while climbing
+
+Up the forest's watchtower, the tester heard the wall's knock and took
+it that they had come up facing a wall instead of the guard. They had
+not: at the top they face the guard, and walking on goes to him. The
+knock was the bump cue, played as F walked them onto the ladder at its
+foot and off it at the top, pressed against it as it is meant to be. It
+is quiet now while F climbs. Checked: at the top, facing south, forward
+goes 1.7 m on toward the guard without stopping.

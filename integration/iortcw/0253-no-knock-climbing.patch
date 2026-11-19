@@ -1,0 +1,18 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 0b8e83ac..208333eb 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2708,8 +2708,12 @@ static void ETA_BeaconBump(void)
+ 	sfxHandle_t          sfx;
+ 	int                  volume;
+ 
++	/* Nor while F climbs: walked onto the ladder and off it at the top,
++	   the player is meant to press against it, and the tester, up the
++	   forest's watchtower, heard the wall's knock and thought they had
++	   come up facing a wall, not the guard. */
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL || !eta_bumpCues.integer || ps->groundEntityNum == ENTITYNUM_NONE
+-	    || (ps->pm_flags & (PMF_LADDER | PMF_FOLLOW | PMF_LIMBO))
++	    || (ps->pm_flags & (PMF_LADDER | PMF_FOLLOW | PMF_LIMBO)) || CG_AccessibilityClimbing()
+ 	    || !trap_GetUserCmd(trap_GetCurrentCmdNumber(), &cmd) || (!cmd.forwardmove && !cmd.rightmove))
+ 	{
+ 		wasBlocked = qfalse;
