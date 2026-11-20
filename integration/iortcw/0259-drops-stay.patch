@@ -1,0 +1,25 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 6a0fcf2b..7cba2a90 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1410,13 +1410,13 @@ void CG_AccessibilityThingsFrame(void)
+ 		{
+ 			eta_thing_t *thing = &eta_things.things[i];
+ 
+-			/* Dropped, and its time up: the game has taken it away. */
+-			if (!thing->done && thing->goneAt
+-			    && ( cg.time >= thing->goneAt || thing->goneAt - cg.time > ETA_THINGS_DROPPED_MS ))
+-			{
+-				thing->done = qtrue;
+-				continue;
+-			}
++			/* Dropped is not gone: in the campaign what a soldier drops
++			   stays for good (TossClientItems, g_combat.c: "dropped items
++			   stay forever in SP"). It was let go of after thirty seconds,
++			   taking the multiplayer's rule for the campaign's, and the
++			   tester, going back to the farm for a Luger, found it gone
++			   from the list - still lying there. Gone only when taken, seen
++			   gone, as anything else. */
+ 
+ 			/* A door's switch: there while its door is shut, gone while it
+ 			   is open. The tester pressed the hatch's switch, the hatch

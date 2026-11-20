@@ -4447,3 +4447,19 @@ at once, by the game's own Save: a name already used asks "Overwrite
 existing file?", and no name asks for one. Checked: "tow", Enter - "Game
 Saved", and LOAD lists "tow"; "tow" again, Enter - "Overwrite existing
 file?".
+
+### 0259 What a soldier drops stays
+
+The things list let a dropped weapon go thirty seconds after it fell,
+taken for gone, from LaunchItem's thirty-second removal. That is the
+multiplayer's rule: in the campaign TossClientItems clears the timer -
+"dropped items stay forever in SP". The tester, back at the farm for a
+Luger dropped there, found it gone from the list, and it was still
+lying there; they remembered, from playing it years ago, picking up
+everything left at the end of a level with no hurry. The thirty-second
+expiry is gone: a dropped thing is let go of only when it is seen gone,
+as anything else. Checked: the watchtower's guard shot, forty-five
+seconds on, T: "Mauser Rifle, ahead right, 3 meters".
+
+A soldier with no ammunition left drops no weapon at all (the same
+function): a Luger not found where a soldier fell may be that.
