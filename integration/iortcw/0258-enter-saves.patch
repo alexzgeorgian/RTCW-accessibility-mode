@@ -1,0 +1,20 @@
+diff --git a/SP/code/ui/ui_shared.c b/SP/code/ui/ui_shared.c
+index 7b95177b..c3aa49b3 100644
+--- a/SP/code/ui/ui_shared.c
++++ b/SP/code/ui/ui_shared.c
+@@ -4027,6 +4027,15 @@ void Menu_HandleKey( menuDef_t *menu, int key, qboolean down ) {
+ 			/* Enter and Escape end the editing, and the box is left as
+ 			   the keyboard's place: say so, or the next key seems lost. */
+ 			if ( eta_field ) {
++				/* Enter in the save's name: saved under it at once, as the
++				   tester asked, rather than Down to SAVE and Enter again.
++				   The game's own Save does it, so a name already used asks
++				   first, and no name asks for one. */
++				if ( ( key == K_ENTER || key == K_KP_ENTER ) && eta_field->window.name
++					 && !Q_stricmp( eta_field->window.name, "savename" ) && eta_field->action ) {
++					Item_RunScript( eta_field, eta_field->action );
++					return;
++				}
+ 				ETA_MenuNarrator_OnValueChanged( ETA_MenuItem_SpokenLabel( eta_field ), "done editing" );
+ 			}
+ #endif

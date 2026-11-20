@@ -4437,3 +4437,13 @@ work as usual. Now:
 Checked: the guard dead, two metres from the ladder beside the box - F,
 "Ladder down, right, 1 meter"; a step; F, "Climbing down, 10 meters" to
 "Bottom of the ladder". No alarm.
+
+### 0258 Enter saves
+
+Saving under a name of one's own took typing it in "Save As", Enter
+("done editing"), Down to SAVE and Enter again. The tester asked for the
+save made simpler. Enter in the save's name box now saves under the name
+at once, by the game's own Save: a name already used asks "Overwrite
+existing file?", and no name asks for one. Checked: "tow", Enter - "Game
+Saved", and LOAD lists "tow"; "tow" again, Enter - "Overwrite existing
+file?".
