@@ -4477,3 +4477,11 @@ the head point. His eye level is now one of the parts tried: what he
 sees from, he can be seen at. Checked: at the watchtower's top, "Locked,
 Soldier, ahead, 2 meters"; below it, the guard on the platform is still
 out of sight, as the player is out of his - the platform between.
+
+0261-watchtower-names.patch: each ladder up in the semicolon list is
+named after its watchtower, so the towers can be told apart. A ladder
+at least 8 meters high with a soldier's post near its top is a
+watchtower, named by its compass side of the map: "the ladder up the
+north-east watchtower, 10 meters high, soldier up top". The marker keeps
+the name up to the first comma. The outdoor names are copied into the
+wider list buffer rather than written into it at the old width.

@@ -1,0 +1,171 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 7ae32624..5a7a2be4 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2506,7 +2506,7 @@ static qboolean ETA_AreaSpot(int area, vec3_t out)
+ #define ETA_BACK_OUTDOORS 32
+ 
+ static vec3_t eta_backOutAt[ETA_BACK_OUTDOORS];
+-static char   eta_backOutWhat[ETA_BACK_OUTDOORS][48];
++static char   eta_backOutWhat[ETA_BACK_OUTDOORS][96];
+ static int    eta_backOutCount[ETA_BACK_OUTDOORS];
+ 
+ /*
+@@ -2531,6 +2531,7 @@ static int ETA_LadderPlaces(int n)
+ 		vec3_t   foot, top;
+ 		int      high, i;
+ 		qboolean soldier = qfalse;
++		char     tower[48];
+ 
+ 		if (!CG_AccessibilityLadderEnds(l, foot, top) || top[2] - foot[2] < 4.0f / ETA_QU_TO_METERS)
+ 		{
+@@ -2550,6 +2551,31 @@ static int ETA_LadderPlaces(int n)
+ 			}
+ 		}
+ 		high = (int)(( top[2] - foot[2] ) * ETA_QU_TO_METERS + 0.5f);
++		/* A watchtower's - a soldier posted at its top - named for where
++		   it stands in the level, north-east of its middle and so on: the
++		   forest has three, all "10 meters high", and the tester went to
++		   the far one, its guard a hundred metres off, for the near one. */
++		tower[0] = '\0';
++		if (high >= 8 && CG_AccessibilityPostNear(top, 320.0f, 160.0f))
++		{
++			static const char *eta_compass[8] = { "east", "north-east", "north", "north-west",
++			                                       "west", "south-west", "south", "south-east" };
++			vec3_t wmins, wmaxs;
++			float  cx = 0.0f, cy = 0.0f, yaw;
++
++			if (cgs.inlineDrawModel[0])
++			{
++				trap_R_ModelBounds(cgs.inlineDrawModel[0], wmins, wmaxs);
++				cx = ( wmins[0] + wmaxs[0] ) * 0.5f;
++				cy = ( wmins[1] + wmaxs[1] ) * 0.5f;
++			}
++			yaw = atan2f(top[1] - cy, top[0] - cx) * 180.0f / M_PI;
++			if (yaw < 0.0f)
++			{
++				yaw += 360.0f;
++			}
++			Com_sprintf(tower, sizeof(tower), " the %s watchtower", eta_compass[((int)( ( yaw + 22.5f ) / 45.0f )) & 7]);
++		}
+ 		VectorCopy(foot, eta_backOutAt[n]);
+ 		/* A couple of steps out in front of it, not its foot: the way led
+ 		   to the foot of the forest's watchtower's ladder ended under the
+@@ -2573,7 +2599,7 @@ static int ETA_LadderPlaces(int n)
+ 				}
+ 			}
+ 		}
+-		Com_sprintf(eta_backOutWhat[n], sizeof(eta_backOutWhat[n]), "the ladder up, %d meters high%s", high,
++		Com_sprintf(eta_backOutWhat[n], sizeof(eta_backOutWhat[n]), "the ladder up%s, %d meters high%s", tower, high,
+ 		            soldier ? ", soldier up top" : "");
+ 		eta_backOutCount[n] = -1;
+ 		n++;
+@@ -2586,7 +2612,7 @@ void CG_AccessibilityAreasBack(void)
+ 	int                 here, i, j, count = 0, withThings = 0, meters, left, area;
+ 	float               far[ETA_AREAS_MAX];
+ 	vec3_t              at, delta;
+-	char                height[64], name[64], things[48];
++	char                height[64], name[96], things[48];
+ 	qboolean            fresh;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL)
+@@ -2607,7 +2633,13 @@ void CG_AccessibilityAreasBack(void)
+ 	{
+ 		/* Those with things left, the places outdoors with things left
+ 		   among them, then the rest; nearest first within each. */
+-		int outdoors = ETA_OutdoorPlaces(eta_backOutAt, eta_backOutWhat, eta_backOutCount, ETA_BACK_OUTDOORS);
++		static char outWhat[ETA_BACK_OUTDOORS][48];
++		int         outdoors = ETA_OutdoorPlaces(eta_backOutAt, outWhat, eta_backOutCount, ETA_BACK_OUTDOORS);
++
++		for (j = 0; j < outdoors; j++)
++		{
++			Q_strncpyz(eta_backOutWhat[j], outWhat[j], sizeof(eta_backOutWhat[j]));
++		}
+ 
+ 		outdoors = ETA_LadderPlaces(outdoors);
+ 
+@@ -2738,6 +2770,16 @@ void CG_AccessibilityAreasBack(void)
+ 	                  meters, meters == 1 ? "meter" : "meters", height[0] ? ", " : "", height));
+ 	ETA_Speech_EndReport();
+ 
++	if (area < 0 && eta_backOutCount[-1 - area] < 0)
++	{
++		char *cut = strstr(name, ", ");
++
++		/* the marker keeps only "the ladder up the north-east watchtower" */
++		if (cut)
++		{
++			*cut = '\0';
++		}
++	}
+ 	CG_AccessibilityChoose(at, name);
+ }
+ 
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index ecd6746f..6eb08bf4 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5964,6 +5964,29 @@ static void ETA_LiftScriptLine(const char *a, const char *b, const char *c, cons
+ static int eta_weakRail[ETA_WEAK_RAILS];
+ static int eta_weakRailCount;
+ 
++/* Where the level posts its soldiers at the start (the ai_ entities'
++   origins): a ladder with one posted at its top is a watchtower's. */
++#define ETA_POSTS 128
++
++static vec3_t eta_post[ETA_POSTS];
++static int    eta_postCount;
++
++qboolean CG_AccessibilityPostNear(const vec3_t at, float across, float up)
++{
++	int i;
++
++	for (i = 0; i < eta_postCount; i++)
++	{
++		if (fabsf(eta_post[i][2] - at[2]) < up
++		    && ( eta_post[i][0] - at[0] ) * ( eta_post[i][0] - at[0] ) + ( eta_post[i][1] - at[1] ) * ( eta_post[i][1] - at[1] )
++		       < across * across)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ qboolean CG_AccessibilityByWeakRailing(const vec3_t at)
+ {
+ 	int i;
+@@ -6080,6 +6103,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_exitCount       = 0;
+ 	eta_modelPropCount  = 0;
+ 	eta_weakRailCount   = 0;
++	eta_postCount       = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
+@@ -6157,6 +6181,13 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		CG_AccessibilityUnlockEntity(classname, model, targetname, target, ainame, lock, spawnflags, origin);
+ 
++		if (!Q_stricmpn(classname, "ai_", 3) && Q_stricmp(classname, "ai_marker") && Q_stricmpn(classname, "ai_trigger", 10)
++		    && origin[0] && eta_postCount < ETA_POSTS
++		    && sscanf(origin, "%f %f %f", &eta_post[eta_postCount][0], &eta_post[eta_postCount][1], &eta_post[eta_postCount][2]) == 3)
++		{
++			eta_postCount++;
++		}
++
+ 		if (!Q_stricmp(classname, "trigger_deathCheck") && model[0] == '*' && eta_weakRailCount < ETA_WEAK_RAILS)
+ 		{
+ 			eta_weakRail[eta_weakRailCount++] = atoi(model + 1);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c8c74d2a..d6666267 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2355,6 +2355,7 @@ qboolean CG_AccessibilityItemUsedUp( const entityState_t *es );
+ void CG_AccessibilityGameSaved( void );
+ void CG_AccessibilityWatchers( void );
+ qboolean CG_AccessibilityByWeakRailing( const vec3_t at );
++qboolean CG_AccessibilityPostNear( const vec3_t at, float across, float up );
+ int CG_AccessibilityLockedEntity( void );
+ void CG_AccessibilityExploredRestart( void );
+ int CG_AccessibilityThingsUnfound( int area );
