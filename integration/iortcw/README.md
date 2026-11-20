@@ -4463,3 +4463,17 @@ seconds on, T: "Mauser Rifle, ahead right, 3 meters".
 
 A soldier with no ammunition left drops no weapon at all (the same
 function): a Luger not found where a soldier fell may be that.
+
+### 0260 Seen at his eyes
+
+The tester asked whether the lock only takes enemies ahead and not
+above: a soldier up a slope shot at them, and they could not lock on to
+him. The lock takes an enemy above as well as level ("Locked, Soldier,
+ahead, 108 meters, 6 meters above you"), anywhere round when pressed,
+but only with a clear line from the player's eyes to some part of him -
+chest, head, belly, legs, a shoulder. Looking down over a crest, a
+soldier sees the player and shoots with only his eyes showing, above
+the head point. His eye level is now one of the parts tried: what he
+sees from, he can be seen at. Checked: at the watchtower's top, "Locked,
+Soldier, ahead, 2 meters"; below it, the guard on the platform is still
+out of sight, as the player is out of his - the platform between.
