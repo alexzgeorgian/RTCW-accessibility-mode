@@ -4485,3 +4485,14 @@ watchtower, named by its compass side of the map: "the ladder up the
 north-east watchtower, 10 meters high, soldier up top". The marker keeps
 the name up to the first comma. The outdoor names are copied into the
 wider list buffer rather than written into it at the old width.
+
+0262-alarm-boxes-to-shoot.patch: a quiet alarm box in sight within about
+60 meters goes on T's list as a thing to break: "Alarm box, ahead, 12
+meters. F turns you to it, to shoot it". F turns to it at any distance it
+is in sight from, with the lock's quarter-degree nudge, and never presses
+it; out of sight it says so. Shot out (the map gives each box 11 health,
+two Sten hits), it is said - "Alarm box out" - and leaves the list. A
+guard who runs to a broken box rings nothing (on_alarm1 in the forest's
+script). Checked at the forest's gate: from the road east of the box,
+T, F and a burst broke it; from the south and the west, where a wall
+hides it, it is not listed.

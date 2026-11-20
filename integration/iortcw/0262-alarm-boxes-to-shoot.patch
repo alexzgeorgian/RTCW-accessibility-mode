@@ -1,0 +1,263 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c2747601..e694239c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -261,6 +261,7 @@ typedef struct
+ 	int           refreshAt;
+ 	int           itemFocusUntil;  /* turned to a thing: no enemy takes the aim before this */
+ 	qboolean      toggled;         /* the lock was pressed on with U, and stays till U again */
++	qboolean      precise;         /* a turn to something small - an alarm box - nudged to the lock's quarter degree */
+ 	qboolean      sayPending;      /* "Locked" waits till the sights are on, and the shot goes true */
+ 	int           sayFrom;
+ 	qboolean      steadySay;       /* "Locked" said with how long the aim takes to steady: "Steady" to come */
+@@ -399,6 +400,7 @@ static void ETA_AimStop(void)
+ 	eta_aim.mode       = ETA_AIM_NONE;
+ 	eta_aim.automatic  = qfalse;
+ 	eta_aim.toggled    = qfalse;
++	eta_aim.precise    = qfalse;
+ 	eta_aim.sayPending = qfalse;
+ 	eta_aim.steadySay  = qfalse;
+ 	eta_use.pending    = qfalse;
+@@ -439,7 +441,7 @@ static qboolean ETA_AimSteerAngles(const vec3_t wanted, float tolerance)
+ 	 * a press and a release a few milliseconds apart turn exactly so far.
+ 	 * One at a time, a frame or two apart, as each takes a frame to show.
+ 	 */
+-	if (eta_aim.mode == ETA_AIM_LOCK && !eta_turn.fast)
++	if (( eta_aim.mode == ETA_AIM_LOCK || eta_aim.precise ) && !eta_turn.fast)
+ 	{
+ 		char  buf[32];
+ 		float yawRate, pitchRate, frameMs = cg.frametime > 0 ? (float)cg.frametime : 16.0f;
+@@ -2465,6 +2467,48 @@ void CG_AccessibilityActivateDown_f(void)
+ 		}
+ 	}
+ 
++	/* An alarm box T chose, quiet: turned to, to shoot it, from as far as
++	   it is in sight - never pressed, which would ring it. The tester, by
++	   the forest's gate, had no way to aim at the box its guards run to;
++	   a bullet breaks it, and then their run rings nothing. */
++	if (cg.snap && cg.predictedPlayerState.pm_type == PM_NORMAL)
++	{
++		vec3_t   chosenAt, center;
++		char     chosenName[64];
++		qboolean chosenPending, inSight = qfalse;
++
++		if (CG_AccessibilityThingChoice(chosenAt, chosenName, sizeof(chosenName), &chosenPending)
++		    && !Q_stricmpn(chosenName, "alarm box", 9) && !Q_stristr(chosenName, "ringing"))
++		{
++			int box = CG_AccessibilityAlarmBoxAt(chosenAt, center, &inSight);
++
++			ETA_HudNarrator_HoldPassive(cg.time);
++			if (box >= 0 && inSight)
++			{
++				etaAimTarget_t target;
++
++				memset(&target, 0, sizeof(target));
++				target.entityNum = -1;
++				target.locked    = qtrue;
++				VectorCopy(center, target.point);
++				target.meters = Distance(cg.predictedPlayerState.origin, center) * ETA_QU_TO_METERS;
++				Q_strncpyz(target.name, "Alarm box", sizeof(target.name));
++				ETA_AimStartSnap(&target, NULL);
++				/* The box is a hand's width across: the turn's usual two
++				   degrees put the tester's shots beside it at twelve
++				   metres. */
++				eta_aim.precise = qtrue;
++				eta_use.pending = qfalse;
++				ETA_AimSayThen("Alarm box", center, "Shoot it");
++			}
++			else
++			{
++				ETA_AimSayThen("Alarm box", box >= 0 ? center : chosenAt, "Out of sight from here");
++			}
++			return;
++		}
++	}
++
+ 
+ 	/* The game's ladder icon is not something the use key does anything
+ 	   with, so it is not a hint here: the key climbs the ladder. Nor is
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 7cba2a90..46f172a2 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -313,6 +313,133 @@ static void ETA_ThingsSeed(void)
+ 	}
+ }
+ 
++/*
++ * Alarm boxes, as things to break. A quiet one, pressed, rings and the
++ * mission is lost, so F never presses one; but a single bullet breaks
++ * it, and a guard running to a broken box can ring nothing
++ * (alarmbox_die, g_alarm.c; on_alarm1 in the forest's script). A
++ * sighted player sees the box on its wall from across the road; the
++ * tester, by the forest's gate, had no way to know one was there, nor
++ * to aim at it. So one in sight within ETA_ALARM_SEE goes on T's list as
++ * a thing to break, and F turns to it there, at any distance it can be
++ * seen from - never pressing it.
++ */
++#define ETA_ALARM_SEE 2400.0f   /* about 60 meters */
++
++/* The middle of an alarm box: its brush is set about its origin. */
++static void ETA_AlarmBoxCenter(const centity_t *cent, vec3_t out)
++{
++	vec3_t mins, maxs;
++
++	VectorCopy(cent->lerpOrigin, out);
++	if (cent->currentState.modelindex > 0 && cent->currentState.modelindex < MAX_MODELS
++	    && cgs.inlineDrawModel[cent->currentState.modelindex])
++	{
++		trap_R_ModelBounds(cgs.inlineDrawModel[cent->currentState.modelindex], mins, maxs);
++		out[0] += ( mins[0] + maxs[0] ) * 0.5f;
++		out[1] += ( mins[1] + maxs[1] ) * 0.5f;
++		out[2] += ( mins[2] + maxs[2] ) * 0.5f;
++	}
++}
++
++/* Whether a shot from the eye would reach the box: nothing solid
++   between. */
++static qboolean ETA_AlarmBoxInSight(int number, const vec3_t center)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	trace_t             trace;
++	vec3_t              eye;
++
++	VectorCopy(ps->origin, eye);
++	eye[2] += ps->viewheight;
++	CG_Trace(&trace, eye, NULL, NULL, center, ps->clientNum, MASK_SHOT);
++	return (qboolean)( trace.fraction >= 0.99f || trace.entityNum == number );
++}
++
++/* The quiet alarm box nearest a point, within 64 units of it: its entity
++   number, and where to aim. -1 when there is none - broken, ringing, or
++   not sent from here. In sight from the eye, if asked. */
++int CG_AccessibilityAlarmBoxAt(const vec3_t near, vec3_t center, qboolean *inSight)
++{
++	int   i, best = -1;
++	float bestFar = 64.0f;
++
++	if (!cg.snap)
++	{
++		return -1;
++	}
++	for (i = 0; i < cg.snap->numEntities; i++)
++	{
++		const entityState_t *es = &cg.snap->entities[i];
++		vec3_t              mid;
++
++		if (es->eType != ET_ALARMBOX || es->frame != 0)
++		{
++			continue;
++		}
++		ETA_AlarmBoxCenter(&cg_entities[es->number], mid);
++		if (Distance(mid, near) < bestFar)
++		{
++			bestFar = Distance(mid, near);
++			best    = es->number;
++			VectorCopy(mid, center);
++		}
++	}
++	if (best >= 0 && inSight)
++	{
++		*inSight = ETA_AlarmBoxInSight(best, center);
++	}
++	return best;
++}
++
++static void ETA_AlarmBoxesRecord(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 i, j;
++
++	for (i = 0; i < cg.snap->numEntities; i++)
++	{
++		const entityState_t *es = &cg.snap->entities[i];
++		vec3_t              mid;
++
++		if (es->eType != ET_ALARMBOX)
++		{
++			continue;
++		}
++		ETA_AlarmBoxCenter(&cg_entities[es->number], mid);
++		for (j = 0; j < eta_things.count; j++)
++		{
++			if (eta_things.things[j].entityNum == es->number && eta_things.things[j].kind == ETA_THING_BREAKABLE)
++			{
++				break;
++			}
++		}
++		/* Shot out: off the list, and said, wherever it was seen from. */
++		if (es->frame == 2)
++		{
++			if (j < eta_things.count && !eta_things.things[j].done)
++			{
++				eta_things.things[j].done = qtrue;
++				ETA_Speech_Say("Alarm box out");
++			}
++			continue;
++		}
++		if (es->frame != 0 || j < eta_things.count || eta_things.count >= ETA_THINGS_MAX
++		    || Distance(ps->origin, mid) > ETA_ALARM_SEE || !ETA_AlarmBoxInSight(es->number, mid))
++		{
++			continue;
++		}
++		memset(&eta_things.things[j], 0, sizeof(eta_things.things[j]));
++		VectorCopy(mid, eta_things.things[j].point);
++		eta_things.things[j].entityNum = es->number;
++		eta_things.things[j].kind      = ETA_THING_BREAKABLE;
++		eta_things.things[j].known     = qtrue;
++		Q_strncpyz(eta_things.things[j].name, "Alarm box", sizeof(eta_things.things[j].name));
++		eta_things.found++;
++		eta_things.count++;
++	}
++}
++
+ /* What is on K and J's list now, into the level's list. */
+ static void ETA_ThingsRecord(void)
+ {
+@@ -354,6 +481,7 @@ static void ETA_ThingsRecord(void)
+ 	{
+ 		eta_things.things[eta_things.rideThing - 1].done = qtrue;
+ 	}
++	ETA_AlarmBoxesRecord();
+ 	count = CG_AccessibilityUseTargets(list, ARRAY_LEN(list));
+ 
+ 	for (i = 0; i < count; i++)
+@@ -501,6 +629,11 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+ 		}
+ 		if (es->number == thing->entityNum)
+ 		{
++			/* An alarm box shot out is still sent, broken: frame 2. */
++			if (es->eType == ET_ALARMBOX)
++			{
++				return (qboolean)( es->frame != 2 );
++			}
+ 			if (es->eType == ET_ITEM)
+ 			{
+ 				return (qboolean)( !( es->eFlags & EF_NODRAW ) && !CG_AccessibilityItemUsedUp(es) );
+@@ -1285,6 +1418,14 @@ static void ETA_ThingsStep(int step)
+ 		                  why, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)), meters,
+ 		                  meters == 1 ? "meter" : "meters", high, action));
+ 	}
++	else if (thing->kind == ETA_THING_BREAKABLE && !Q_stricmp(thing->name, "Alarm box"))
++	{
++		/* Shot from where it is seen, not walked up to: by the gate its
++		   guards stand beside it. */
++		ETA_Speech_Say(va("%d of %d, %s, %s, %d %s%s. F turns you to it, to shoot it", eta_things.listPos + 1,
++		                  eta_things.listCount, shown, ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(thing->point)),
++		                  meters, meters == 1 ? "meter" : "meters", high));
++	}
+ 	else
+ 	{
+ 		ETA_Speech_Say(va("%d of %d, %s%s, %s, %d %s%s. O leads there", eta_things.listPos + 1, eta_things.listCount,
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index d6666267..e5bcf188 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2296,6 +2296,7 @@ void CG_AccessibilityChosenIsThing( void );
+ void CG_AccessibilityChosenWalkOnto( void );
+ void CG_AccessibilityMarkerWalkOnto( qboolean walkOnto );
+ qboolean CG_AccessibilityThingChoice( vec3_t out, char *name, size_t nameSize, qboolean *pending );
++int CG_AccessibilityAlarmBoxAt( const vec3_t near, vec3_t center, qboolean *inSight );
+ void CG_AccessibilityLedClear( void );
+ void CG_AccessibilityThingsFrame( void );
+ void CG_AccessibilityThingsReset( void );
