@@ -1,0 +1,95 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 5a7a2be4..ff3ff230 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2606,6 +2606,56 @@ static int ETA_LadderPlaces(int n)
+ 	}
+ 	return n;
+ }
++
++/*
++ * The hidden ways of a level, on semicolon's list after the ladders, as
++ * the towers are: "hidden way 2 of 5: down in the river, west of the
++ * bridge". The tester, on the forest's road below the east watchtower,
++ * asked for a way to the tunnel the gate's guards would not see, and
++ * then for every hidden place found. Each was found by walking the
++ * level's ground a step at a time against what every guard sees from
++ * where he stands and as he turns: unseen, or seen least, along the way
++ * to where the truck drives on. They are where a sighted player who has
++ * played it before goes; nothing is said of any guard. Count -2 on the
++ * list: a ladder is -1.
++ */
++typedef struct
++{
++	const char *map;
++	float       at[3];
++	const char *name;
++} etaHiddenPlace_t;
++
++static const etaHiddenPlace_t eta_hiddenPlaces[] =
++{
++	{ "forest", { 2944.0f, -80.0f, 207.0f }, "hidden way 1 of 5: the road south-west of the east watchtower" },
++	{ "forest", { 1088.0f, 1264.0f, 78.0f }, "hidden way 2 of 5: down in the river, west of the bridge" },
++	{ "forest", { 1344.0f, 2544.0f, 245.0f }, "hidden way 3 of 5: the forest north of the river" },
++	{ "forest", { 1088.0f, 3056.0f, 237.0f }, "hidden way 4 of 5: the forest's edge, by the road's bend" },
++	{ "forest", { 640.0f, 3568.0f, 208.0f }, "hidden way 5 of 5: the road's bend, where the truck drives on" },
++	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "hidden place: the riverbed under the bridge" },
++};
++
++static int ETA_HiddenPlaces(int n)
++{
++	char base[MAX_QPATH];
++	int  i;
++
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	for (i = 0; i < (int)ARRAY_LEN(eta_hiddenPlaces) && n < ETA_BACK_OUTDOORS; i++)
++	{
++		if (Q_stricmp(eta_hiddenPlaces[i].map, base))
++		{
++			continue;
++		}
++		VectorCopy(eta_hiddenPlaces[i].at, eta_backOutAt[n]);
++		Q_strncpyz(eta_backOutWhat[n], eta_hiddenPlaces[i].name, sizeof(eta_backOutWhat[n]));
++		eta_backOutCount[n] = -2;
++		n++;
++	}
++	return n;
++}
++
+ void CG_AccessibilityAreasBack(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -2642,6 +2692,7 @@ void CG_AccessibilityAreasBack(void)
+ 		}
+ 
+ 		outdoors = ETA_LadderPlaces(outdoors);
++		outdoors = ETA_HiddenPlaces(outdoors);
+ 
+ 		for (j = 0; j < 2; j++)
+ 		{
+@@ -2738,17 +2789,19 @@ void CG_AccessibilityAreasBack(void)
+ 	ETA_Speech_BeginReport();
+ 	if (fresh)
+ 	{
+-		int ladders = 0, places;
++		int ladders = 0, hidden = 0, places;
+ 
+ 		for (i = 0; i < eta_areas.backCount; i++)
+ 		{
+-			ladders += eta_areas.back[i] < 0 && eta_backOutCount[-1 - eta_areas.back[i]] < 0;
++			ladders += eta_areas.back[i] < 0 && eta_backOutCount[-1 - eta_areas.back[i]] == -1;
++			hidden  += eta_areas.back[i] < 0 && eta_backOutCount[-1 - eta_areas.back[i]] == -2;
+ 		}
+-		places = eta_areas.backCount - ladders;
+-		ETA_Speech_Say(va("%s%s", withThings ? va("%d other %s explored, %d with things left", places,
+-		                                          places == 1 ? "place" : "places", withThings)
++		places = eta_areas.backCount - ladders - hidden;
++		ETA_Speech_Say(va("%s%s%s", withThings ? va("%d other %s explored, %d with things left", places,
++		                                            places == 1 ? "place" : "places", withThings)
+ 		                  : va("%d other %s explored, nothing left in them", places, places == 1 ? "place" : "places"),
+-		                  ladders ? va(", and %d %s up", ladders, ladders == 1 ? "ladder" : "ladders") : ""));
++		                  ladders ? va(", and %d %s up", ladders, ladders == 1 ? "ladder" : "ladders") : "",
++		                  hidden ? va(", and %d hidden %s", hidden, hidden == 1 ? "place" : "places") : ""));
+ 	}
+ 	if (area < 0 && eta_backOutCount[-1 - area] < 0)
+ 	{

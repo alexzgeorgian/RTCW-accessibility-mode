@@ -4496,3 +4496,14 @@ guard who runs to a broken box rings nothing (on_alarm1 in the forest's
 script). Checked at the forest's gate: from the road east of the box,
 T, F and a burst broke it; from the south and the west, where a wall
 hides it, it is not listed.
+
+0263-hidden-ways.patch: a level's hidden ways on semicolon's list after
+the ladders, from a table by map. The forest has six, found by walking
+its ground a 64-unit step at a time against what every guard sees, from
+where he stands and as he turns, in seven moments of the level: the way
+from the east watchtower down into the river west of the bridge, up
+through the forest, to the road's bend where the truck drives on, seen
+least along it; and the riverbed under the bridge, seen by no one. The
+list's summary counts them: "and 6 hidden places". Nothing is said of any
+guard. Checked from the tester's save below the east watchtower: all six
+listed with distance and height, and O sets the marker on each.
