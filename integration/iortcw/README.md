@@ -4516,3 +4516,9 @@ time by the gate's patrolling guard, and the last of them all of the
 time by the north-east watchtower's guard; the tester was spotted at the
 first within seconds. Only the riverbed under the bridge, seen by no one
 in any of the 150 moments, is kept: "and 1 hidden place".
+
+0265-alarm-box-any-area.patch: a quiet alarm box in sight within about
+60 meters is on T's list from whatever area the player is in. It is shot
+from where it is seen, not walked to; from the forest's river west of
+the bridge the gate's box, 26 meters off in the road's area, had been
+known and never offered.

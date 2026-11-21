@@ -1,0 +1,28 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 46f172a2..b404fd0c 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1098,6 +1098,23 @@ static void ETA_ThingsStep(int step)
+ 			{
+ 				continue;   /* not come across yet */
+ 			}
++			/* An alarm box in sight, from whatever area: it is shot from
++			   where it is seen, not walked to. From the forest's east
++			   watchtower the gate's box, 55 metres off in the road's
++			   area, was known and never offered. */
++			if (eta_things.things[i].kind == ETA_THING_BREAKABLE && !eta_things.things[i].done
++			    && !Q_stricmp(eta_things.things[i].name, "Alarm box"))
++			{
++				vec3_t   mid;
++				qboolean inSight = qfalse;
++
++				if (CG_AccessibilityAlarmBoxAt(eta_things.things[i].point, mid, &inSight) >= 0 && inSight
++				    && Distance(ps->origin, mid) <= ETA_ALARM_SEE)
++				{
++					eta_things.list[count++] = i;
++					continue;
++				}
++			}
+ 			if (!ETA_ThingLeadable(&eta_things.things[i]))
+ 			{
+ 				hidden += !eta_things.things[i].done;
