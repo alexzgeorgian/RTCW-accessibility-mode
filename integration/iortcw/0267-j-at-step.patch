@@ -1,0 +1,62 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index a9fa05f0..5a94b618 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1568,7 +1568,28 @@ qboolean CG_AccessibilityInTunnel(const vec3_t at)
+ 	return (qboolean)( !trace.startsolid && trace.fraction < 1.0f && !( trace.surfaceFlags & SURF_SKY ) );
+ }
+ 
++static const char *ETA_HiddenPlaceReached(const vec3_t at);
++static void ETA_AreaTextOnly(char *out, size_t size);
++
++/* With a step of a level's hidden way reached, J and F1 say so first:
++   outdoors one area runs on for a hundred metres and more, and the
++   tester, walking the forest's way round the gate, heard the same place
++   at every step. Said only once there, not as a distance. */
+ void CG_AccessibilityAreaText(char *out, size_t size)
++{
++	const char *step = ETA_HiddenPlaceReached(cg.predictedPlayerState.origin);
++	char        rest[512];
++
++	ETA_AreaTextOnly(rest, sizeof(rest));
++	if (step)
++	{
++		Com_sprintf(out, size, "At %s. %s", step, rest);
++		return;
++	}
++	Q_strncpyz(out, rest, size);
++}
++
++static void ETA_AreaTextOnly(char *out, size_t size)
+ {
+ 	int  area = CG_AccessibilityAreaHere();
+ 	char doors[96], like[128];
+@@ -2657,6 +2678,28 @@ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ 	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "hidden place: the riverbed under the bridge" },
+ };
+ 
++/* The step of the hidden way, or hidden place, the player stands at:
++   within 3 metres across and 2 up or down. */
++static const char *ETA_HiddenPlaceReached(const vec3_t at)
++{
++	char base[MAX_QPATH];
++	int  i;
++
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	for (i = 0; i < (int)ARRAY_LEN(eta_hiddenPlaces); i++)
++	{
++		const float *p = eta_hiddenPlaces[i].at;
++
++		if (!Q_stricmp(eta_hiddenPlaces[i].map, base)
++		    && ( at[0] - p[0] ) * ( at[0] - p[0] ) + ( at[1] - p[1] ) * ( at[1] - p[1] ) < 120.0f * 120.0f
++		    && fabsf(at[2] - 24.0f - p[2]) < 80.0f)
++		{
++			return eta_hiddenPlaces[i].name;
++		}
++	}
++	return NULL;
++}
++
+ static int ETA_HiddenPlaces(int n)
+ {
+ 	char base[MAX_QPATH];

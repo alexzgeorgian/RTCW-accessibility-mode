@@ -4534,3 +4534,9 @@ unseen; then, once that tower's guard is down, west through the woods to
 the road's bend, where the truck drives on. Each step's straight line to
 the next is unseen too. The list holds up to 64 places outdoors, so the
 steps are not pushed off it. The riverbed under the bridge stays listed.
+
+0267-j-at-step.patch: J and F1, standing at a step of a level's hidden
+way (within 3 meters across, 2 up or down), say it first: "At hidden way
+5 of 18: high on the hill. In the grassy street with stairs up...".
+Outdoors one area runs on for a hundred meters and more, and the tester
+heard the same place at every step. Between steps, nothing is added.
