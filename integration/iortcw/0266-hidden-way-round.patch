@@ -1,0 +1,96 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index d8351fb8..a9fa05f0 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2503,7 +2503,7 @@ static qboolean ETA_AreaSpot(int area, vec3_t out)
+  * among those with things left: the tester, in the forest, did not find
+  * the Colt's drop on the list, its health still lying there.
+  */
+-#define ETA_BACK_OUTDOORS 32
++#define ETA_BACK_OUTDOORS 64
+ 
+ static vec3_t eta_backOutAt[ETA_BACK_OUTDOORS];
+ static char   eta_backOutWhat[ETA_BACK_OUTDOORS][96];
+@@ -2617,9 +2617,14 @@ static int ETA_LadderPlaces(int n)
+  * guard saw the first of them within seconds. Measured again from that
+  * save, every spot against every guard as he turns and walks, once every
+  * two and a half seconds for six minutes: only the riverbed under the
+- * bridge is seen by no one, and every way north crosses ground the
+- * gate's second guard watches without a break. Only what no guard saw in
+- * any of those moments is listed. Nothing is said of any guard. Count -2
++ * bridge is seen by no one, and every way north past the gate crosses
++ * ground the gate's second guard watches without a break. Measured again
++ * to the east, beyond his reach: a way round over the hill to the back of
++ * the north-east watchtower that no guard saw at any moment, walked in
++ * the tester's save with the guards seeing; and, once that tower's guard
++ * is down, through the woods to the road's bend. Only what no guard saw
++ * is listed, the straight line between each step and the next too; the
++ * steps come first, in walking order. Nothing is said of any guard. Count -2
+  * on the list: a ladder is -1.
+  */
+ typedef struct
+@@ -2631,6 +2636,24 @@ typedef struct
+ 
+ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ {
++	{ "forest", { 3264.0f, -400.0f, 214.0f }, "hidden way 1 of 18: the road south-east of the east watchtower" },
++	{ "forest", { 4160.0f, -272.0f, 316.0f }, "hidden way 2 of 18: the truck's road, east" },
++	{ "forest", { 4480.0f, 48.0f, 444.0f }, "hidden way 3 of 18: the slope north-east of the road" },
++	{ "forest", { 4608.0f, 240.0f, 492.0f }, "hidden way 4 of 18: further up the slope" },
++	{ "forest", { 4608.0f, 1136.0f, 919.0f }, "hidden way 5 of 18: high on the hill" },
++	{ "forest", { 4864.0f, 1392.0f, 992.0f }, "hidden way 6 of 18: the hilltop" },
++	{ "forest", { 5120.0f, 1776.0f, 805.0f }, "hidden way 7 of 18: down the hill's north side" },
++	{ "forest", { 5120.0f, 2288.0f, 490.0f }, "hidden way 8 of 18: lower down, going north" },
++	{ "forest", { 4544.0f, 2864.0f, 52.0f }, "hidden way 9 of 18: the valley floor" },
++	{ "forest", { 4096.0f, 3376.0f, 248.0f }, "hidden way 10 of 18: the slope up out of the valley" },
++	{ "forest", { 4096.0f, 3824.0f, 527.0f }, "hidden way 11 of 18: higher up the slope" },
++	{ "forest", { 3968.0f, 3888.0f, 541.0f }, "hidden way 12 of 18: the hillside, turning west" },
++	{ "forest", { 2688.0f, 4272.0f, 683.0f }, "hidden way 13 of 18: the hillside near the north-east watchtower" },
++	{ "forest", { 2176.0f, 4592.0f, 696.0f }, "hidden way 14 of 18: the foot of the north-east watchtower's ladder" },
++	{ "forest", { 1792.0f, 4592.0f, 523.0f }, "hidden way 15 of 18: the woods west of the north-east watchtower" },
++	{ "forest", { 1472.0f, 4144.0f, 277.0f }, "hidden way 16 of 18: lower in the woods" },
++	{ "forest", { 768.0f, 3632.0f, 208.0f }, "hidden way 17 of 18: the edge of the woods by the road's bend" },
++	{ "forest", { 640.0f, 3632.0f, 208.0f }, "hidden way 18 of 18: the road's bend, where the truck drives on" },
+ 	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "hidden place: the riverbed under the bridge" },
+ };
+ 
+@@ -2742,6 +2765,39 @@ void CG_AccessibilityAreasBack(void)
+ 				}
+ 			}
+ 		}
++		/* The hidden way's steps first, in the order they are walked,
++		   whatever is nearest: the tester asked for an order that does
++		   not change as X's does, so step 3 is always third. */
++		{
++			int moved[ETA_AREAS_MAX], m = 0, k;
++
++			for (k = 0; k < count; k++)
++			{
++				if (eta_areas.back[k] < 0 && eta_backOutCount[-1 - eta_areas.back[k]] == -2)
++				{
++					moved[m++] = eta_areas.back[k];
++				}
++			}
++			for (k = 1; k < m; k++)
++			{
++				int v = moved[k], q = k - 1;
++
++				while (q >= 0 && moved[q] < v)   /* back[] is -1 - index: a higher value is an earlier step */
++				{
++					moved[q + 1] = moved[q];
++					q--;
++				}
++				moved[q + 1] = v;
++			}
++			for (k = 0; k < count; k++)
++			{
++				if (!( eta_areas.back[k] < 0 && eta_backOutCount[-1 - eta_areas.back[k]] == -2 ))
++				{
++					moved[m++] = eta_areas.back[k];
++				}
++			}
++			memcpy(eta_areas.back, moved, count * sizeof(moved[0]));
++		}
+ 		eta_areas.backCount = count;
+ 		eta_areas.backArea  = here;
+ 		eta_areas.backPos   = -1;

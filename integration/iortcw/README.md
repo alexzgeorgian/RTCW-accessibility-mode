@@ -4522,3 +4522,15 @@ in any of the 150 moments, is kept: "and 1 hidden place".
 from where it is seen, not walked to; from the forest's river west of
 the bridge the gate's box, 26 meters off in the road's area, had been
 known and never offered.
+
+0266-hidden-way-round.patch: the forest's hidden way round the gate, 18
+steps on semicolon's list, first and in walking order however near each
+is - the tester asked for an order that does not change as X's does. It
+was measured east of the gate, beyond the second gate guard's 49 metres,
+every spot against every guard as he turns and walks, and walked in the
+tester's save with the guards seeing: east along the truck's road, over
+the hill and through the valley to the north-east watchtower's ladder,
+unseen; then, once that tower's guard is down, west through the woods to
+the road's bend, where the truck drives on. Each step's straight line to
+the next is unseen too. The list holds up to 64 places outdoors, so the
+steps are not pushed off it. The riverbed under the bridge stays listed.
