@@ -1,0 +1,46 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index ff3ff230..d8351fb8 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2608,16 +2608,19 @@ static int ETA_LadderPlaces(int n)
+ }
+ 
+ /*
+- * The hidden ways of a level, on semicolon's list after the ladders, as
+- * the towers are: "hidden way 2 of 5: down in the river, west of the
+- * bridge". The tester, on the forest's road below the east watchtower,
+- * asked for a way to the tunnel the gate's guards would not see, and
+- * then for every hidden place found. Each was found by walking the
+- * level's ground a step at a time against what every guard sees from
+- * where he stands and as he turns: unseen, or seen least, along the way
+- * to where the truck drives on. They are where a sighted player who has
+- * played it before goes; nothing is said of any guard. Count -2 on the
+- * list: a ladder is -1.
++ * The hidden places of a level, on semicolon's list after the ladders, as
++ * the towers are: "hidden place: the riverbed under the bridge". The
++ * tester, on the forest's road below the east watchtower, asked for a way
++ * past the gate's guards they would not see. A first list, from seven
++ * moments of the level, named five steps of a hidden way; from the
++ * tester's own save the east watchtower's guard and the gate's patrolling
++ * guard saw the first of them within seconds. Measured again from that
++ * save, every spot against every guard as he turns and walks, once every
++ * two and a half seconds for six minutes: only the riverbed under the
++ * bridge is seen by no one, and every way north crosses ground the
++ * gate's second guard watches without a break. Only what no guard saw in
++ * any of those moments is listed. Nothing is said of any guard. Count -2
++ * on the list: a ladder is -1.
+  */
+ typedef struct
+ {
+@@ -2628,11 +2631,6 @@ typedef struct
+ 
+ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ {
+-	{ "forest", { 2944.0f, -80.0f, 207.0f }, "hidden way 1 of 5: the road south-west of the east watchtower" },
+-	{ "forest", { 1088.0f, 1264.0f, 78.0f }, "hidden way 2 of 5: down in the river, west of the bridge" },
+-	{ "forest", { 1344.0f, 2544.0f, 245.0f }, "hidden way 3 of 5: the forest north of the river" },
+-	{ "forest", { 1088.0f, 3056.0f, 237.0f }, "hidden way 4 of 5: the forest's edge, by the road's bend" },
+-	{ "forest", { 640.0f, 3568.0f, 208.0f }, "hidden way 5 of 5: the road's bend, where the truck drives on" },
+ 	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "hidden place: the riverbed under the bridge" },
+ };
+ 

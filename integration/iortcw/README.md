@@ -4507,3 +4507,12 @@ least along it; and the riverbed under the bridge, seen by no one. The
 list's summary counts them: "and 6 hidden places". Nothing is said of any
 guard. Checked from the tester's save below the east watchtower: all six
 listed with distance and height, and O sets the marker on each.
+
+0264-hidden-place-measured.patch: the forest's hidden places measured
+again, from the tester's save, against every guard as he turns and
+walks, once every two and a half seconds for six minutes, rather than at
+seven moments. The five steps of the hidden way were seen part of the
+time by the gate's patrolling guard, and the last of them all of the
+time by the north-east watchtower's guard; the tester was spotted at the
+first within seconds. Only the riverbed under the bridge, seen by no one
+in any of the 150 moments, is kept: "and 1 hidden place".
