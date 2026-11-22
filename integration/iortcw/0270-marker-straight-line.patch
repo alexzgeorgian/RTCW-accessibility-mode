@@ -1,0 +1,47 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index cec2e29f..fb961b32 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2500,7 +2500,7 @@ static int ETA_MarkerDistance(void)
+ 		delta[2] = 0.0f;
+ 	}
+ 
+-	return (int)(VectorLength(delta) * ETA_QU_TO_METERS);
++	return (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ }
+ /**
+  * @brief Which way to turn for the marker, in the words the objective uses.
+@@ -2718,29 +2718,15 @@ static float ETA_MarkerWayLeft(qboolean *byWay)
+  */
+ int CG_AccessibilityMarkerSaidMeters(qboolean *alongWay)
+ {
+-	qboolean byWay = qfalse;
+-	float    left;
+-
++	/* As the crow flies, always: the tester, back on the forest's hidden
++	   way, found the metres along the way harder to judge than the
++	   straight line to the step, and asked for the straight line again.
++	   The way itself is still what the beacon and O follow. */
+ 	*alongWay = qfalse;
+ 	if (!eta_marker.active)
+ 	{
+ 		return 0;
+ 	}
+-	if (eta_route.done)
+-	{
+-		left = ETA_MarkerWayLeft(&byWay);
+-		if (byWay)
+-		{
+-			eta_route.leftKept = left;
+-			*alongWay          = qtrue;
+-			return (int)( left + 0.5f );
+-		}
+-	}
+-	else if (eta_route.known && eta_route.leftKept > 0.0f)
+-	{
+-		*alongWay = qtrue;
+-		return (int)( eta_route.leftKept + 0.5f );
+-	}
+ 	return ETA_MarkerDistance();
+ }
+ 

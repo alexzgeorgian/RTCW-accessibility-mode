@@ -4558,3 +4558,10 @@ for: it had said "Facing toward hidden way 1 of 18: the road south-east
 of the", cut off. Checked with it: the distances said - on semicolon's
 list, and walking in, "45 meters to marker", "22", "7", then "Marker
 reached" - match the map to within a metre.
+
+0270-marker-straight-line.patch: the metres to the marker - as it is
+walked to, and on O's turn - said as the crow flies again, rounded to
+the nearest metre, never along the way. The tester, walking the forest's
+hidden way, found the straight line to the step easier to judge. The way
+is still what the beacon and O follow. Checked: walking in to a step from
+60 metres, "45", "22", "6 meters to marker", then "Marker reached".
