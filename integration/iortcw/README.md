@@ -4540,3 +4540,14 @@ way (within 3 meters across, 2 up or down), say it first: "At hidden way
 5 of 18: high on the hill. In the grassy street with stairs up...".
 Outdoors one area runs on for a hundred meters and more, and the tester
 heard the same place at every step. Between steps, nothing is added.
+
+0268-weapon-reach.patch: the lock (U, and by itself) and Shift+U take
+only enemies within the weapon in hand's reach, by the game's own
+numbers: where, standing still at the steadiest aim, half the shots
+still strike a soldier - Sten and Thompson 37 meters, MP40 and Venom 44,
+FG42 55, Garand 89, Mauser 111, Luger 28, Colt 24, silenced Luger 18;
+scoped rifles the game's longest shot; the knife 1.6 meters; the Tesla
+and the flamethrower their own ranges. Grenades, dynamite and the
+Panzerfaust have none. With only enemies beyond it: "Soldier, ahead, 62
+meters: beyond the Sten's reach, 37 meters". The tester was locked on to
+soldiers a hundred metres off and more.

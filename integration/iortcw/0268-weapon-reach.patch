@@ -1,0 +1,135 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index e694239c..dda5e2a4 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1362,6 +1362,86 @@ static struct
+ /* An enemy for the lock: the nearest in sight - within maxMeters and in
+    view, for the lock by itself; anywhere round, and the one chosen if
+    there is one, for the key. qfalse when there is none. */
++/*
++ * How far the weapon in hand reaches, by the game's own numbers: the lock
++ * and Shift+U take only enemies within it. The tester, in the forest, was
++ * locked on to soldiers a hundred metres off and more, where the Sten
++ * cannot hit and its misses wake other guards; they asked for each
++ * weapon's range as the game has it. A bullet lands within spread times
++ * the steadiest aim scale (0.4 for pistols, 0.15 for the rest:
++ * g_weapon.c) per 8192 units out, either way, across and up; this is
++ * where, standing still, half the shots still strike a soldier, 32 units
++ * of it across. Scoped rifles do not scatter: the game's longest shot.
++ * The knife reaches 48 units; the Tesla and the flamethrower their own
++ * ranges. Grenades, dynamite and the Panzerfaust have none.
++ */
++static float ETA_WeaponReach(int weapon)
++{
++	float spread = 0.0f, steadiest = 0.15f;
++
++	switch (weapon)
++	{
++	case WP_KNIFE:        return 64.0f;
++	case WP_LUGER:        spread = 600.0f;  steadiest = 0.4f; break;
++	case WP_SILENCER:     spread = 900.0f;  steadiest = 0.4f; break;
++	case WP_COLT:
++	case WP_AKIMBO:       spread = 700.0f;  steadiest = 0.4f; break;
++	case WP_VENOM:
++	case WP_MP40:         spread = 1000.0f; break;
++	case WP_FG42:         spread = 800.0f;  break;
++	case WP_THOMPSON:
++	case WP_STEN:         spread = 1200.0f; break;
++	case WP_MAUSER:       spread = 400.0f;  break;
++	case WP_GARAND:       spread = 500.0f;  break;
++	case WP_SNIPERRIFLE:
++	case WP_SNOOPERSCOPE:
++	case WP_FG42SCOPE:    return 16384.0f;
++	case WP_TESLA:        return TESLA_RANGE;
++	case WP_FLAMETHROWER: return Com_GetFlamethrowerRange();
++	default:              return 0.0f;   /* no range of its own */
++	}
++	return 32.0f * 8192.0f / ( spread * steadiest );
++}
++
++/* The enemies within the weapon's reach, nearest first as they were;
++   how many were in sight beyond it, and the nearest of those. */
++static int ETA_EnemiesInReach(etaAimTarget_t *list, int count, etaAimTarget_t *beyond, int *beyondCount)
++{
++	float reach = ETA_WeaponReach(cg.predictedPlayerState.weapon) * ETA_QU_TO_METERS;
++	int   i, kept = 0;
++
++	*beyondCount = 0;
++	for (i = 0; i < count; i++)
++	{
++		if (reach > 0.0f && list[i].meters > reach)
++		{
++			if (!( *beyondCount )++)
++			{
++				*beyond = list[i];
++			}
++			continue;
++		}
++		list[kept++] = list[i];
++	}
++	return kept;
++}
++
++/* "Soldier, ahead, 80 meters: beyond the Sten's reach, 37 meters". */
++static void ETA_BeyondReachSay(const etaAimTarget_t *beyond)
++{
++	gitem_t *item  = BG_FindItemForWeapon((weapon_t)cg.predictedPlayerState.weapon);
++	int      reach = (int)( ETA_WeaponReach(cg.predictedPlayerState.weapon) * ETA_QU_TO_METERS + 0.5f );
++
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("%s, %s, %d meters: beyond the %s's reach, %d %s", beyond->name,
++	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(beyond->point)),
++	                  (int)( beyond->meters + 0.5f ), item && item->pickup_name ? item->pickup_name : "weapon",
++	                  reach < 1 ? 1 : reach, reach == 1 ? "meter" : "meters"));
++}
++
++static etaAimTarget_t eta_lastBeyond;
++static int            eta_lastBeyondCount;
++
+ static qboolean ETA_AimAcquire(float maxMeters)
+ {
+ 	etaAimTarget_t list[ETA_AIM_MAX_TARGETS];
+@@ -1369,6 +1449,8 @@ static qboolean ETA_AimAcquire(float maxMeters)
+ 	int            count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, byKey);
+ 	int            index = 0, i;
+ 
++	count = ETA_EnemiesInReach(list, count, &eta_lastBeyond, &eta_lastBeyondCount);
++
+ 	if (count <= 0 || (!byKey && list[0].meters > maxMeters))
+ 	{
+ 		return qfalse;
+@@ -1426,6 +1508,18 @@ static void ETA_EnemyChooseStep(int step)
+ 	}
+ 
+ 	count = CG_AccessibilityEnemyTargets(list, ETA_AIM_MAX_TARGETS, qtrue);
++	{
++		etaAimTarget_t beyond;
++		int            beyondCount;
++
++		count = ETA_EnemiesInReach(list, count, &beyond, &beyondCount);
++		if (count <= 0 && beyondCount > 0)
++		{
++			eta_enemyChoose.held = qfalse;
++			ETA_BeyondReachSay(&beyond);
++			return;
++		}
++	}
+ 
+ 	if (count <= 0)
+ 	{
+@@ -3256,7 +3350,14 @@ void CG_AccessibilityAimLockDown_f(void)
+ 		eta_aim.entityNum = -1;
+ 		eta_aim.saidLost  = qtrue;
+ 		ETA_AimStop();
+-		ETA_EnemiesElsewhereSay();
++		if (eta_lastBeyondCount > 0)
++		{
++			ETA_BeyondReachSay(&eta_lastBeyond);
++		}
++		else
++		{
++			ETA_EnemiesElsewhereSay();
++		}
+ 	}
+ }
+ 
