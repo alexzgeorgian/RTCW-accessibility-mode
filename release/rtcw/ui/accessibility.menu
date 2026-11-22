@@ -139,7 +139,47 @@ menuDef {
 	ETA_BUTTON(88, "VOLUMES", close eta_accessibility ; open eta_acc_volumes)
 	ETA_BUTTON(112, "MOVING AND AIMING", close eta_accessibility ; open eta_acc_moving)
 	ETA_BUTTON(136, "KEY BINDS", close eta_accessibility ; open eta_acc_keys)
-	ETA_BUTTON(168, "BACK", uiScript etaAccessibilityLeave)
+	ETA_BUTTON(160, "CHECK FOR UPDATES", uiScript etaUpdateCheck)
+	ETA_BUTTON(192, "BACK", uiScript etaAccessibilityLeave)
+}
+
+// A newer test build, offered as the main menu comes up, as the Enemy
+// Territory mode offers its own: Download or Later. Opened by the menus'
+// code (UI_AccessibilityUpdateFrame), never by a key.
+menuDef {
+	name "eta_update"
+	visible 0
+	fullscreen 0
+	popup
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { uiScript etaUpdateLater }
+
+	ETA_WINDOW
+	ETA_TITLE("A NEW VERSION IS AVAILABLE")
+	ETA_BUTTON(40, "DOWNLOAD", uiScript etaUpdateDownload)
+	ETA_BUTTON(64, "LATER", uiScript etaUpdateLater)
+}
+
+// The new test build downloaded and checked: in now, or when the game
+// is quit.
+menuDef {
+	name "eta_update_ready"
+	visible 0
+	fullscreen 0
+	popup
+	ETA_PAGE_RECT
+	focusColor 1 .75 0 1
+	style 1
+	border 1
+	onEsc { uiScript etaUpdateWhenQuit }
+
+	ETA_WINDOW
+	ETA_TITLE("THE NEW VERSION IS DOWNLOADED")
+	ETA_BUTTON(40, "RESTART NOW", uiScript etaUpdateRestart)
+	ETA_BUTTON(64, "WHEN I QUIT", uiScript etaUpdateWhenQuit)
 }
 
 // What you are told: what the mode says as you play, without a key.

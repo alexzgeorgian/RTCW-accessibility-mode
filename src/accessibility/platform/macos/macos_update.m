@@ -431,7 +431,8 @@ int ETA_MacUpdate_SupportPath(const char *name, char *out, size_t size)
 static const char ETA_MacUpdate_AppHelper[] =
     "while kill -0 \"$1\" 2>/dev/null; do sleep 0.5; done\n"
     "zip=\"$2\"; app=\"$3\"; dir=$(dirname \"$app\")\n"
-    "tmp=$(mktemp -d \"${TMPDIR:-/tmp}/eta-update.XXXXXX\") || exec open -n \"$app\"\n"
+    "reopen=\"$4\"\n"
+    "tmp=$(mktemp -d \"${TMPDIR:-/tmp}/eta-update.XXXXXX\") || { [ \"$reopen\" = 1 ] && exec open -n \"$app\"; exit 0; }\n"
     "if ditto -x -k \"$zip\" \"$tmp\"; then\n"
     "  new=$(find \"$tmp\" -maxdepth 3 -name '*.app' -type d | head -n 1)\n"
     "  if [ -n \"$new\" ]; then\n"
@@ -447,13 +448,19 @@ static const char ETA_MacUpdate_AppHelper[] =
     "  fi\n"
     "fi\n"
     "rm -rf \"$tmp\" \"$zip\"\n"
-    "exec open -n \"$app\"\n";
+    "[ \"$reopen\" = 1 ] && exec open -n \"$app\"\n"
+    "exit 0\n";
 
 int ETA_MacUpdate_ScheduleAppReplace(const char *zip)
 {
+    return ETA_MacUpdate_ScheduleAppReplaceThen(zip, 1);
+}
+
+int ETA_MacUpdate_ScheduleAppReplaceThen(const char *zip, int reopen)
+{
     char                       app[4096];
     char                       pid[32];
-    char                      *argv[8];
+    char                      *argv[9];
     pid_t                      helper;
     posix_spawnattr_t          attributes;
     posix_spawn_file_actions_t actions;
@@ -472,7 +479,8 @@ int ETA_MacUpdate_ScheduleAppReplace(const char *zip)
     argv[4] = pid;
     argv[5] = (char *)zip;
     argv[6] = app;
-    argv[7] = NULL;
+    argv[7] = (char *)( reopen ? "1" : "0" );
+    argv[8] = NULL;
 
     /* Its own process group, and only the standard three descriptors,
        as for the pk3 swap above. */

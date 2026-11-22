@@ -36,6 +36,11 @@ int ETA_MacUpdate_SupportPath(const char *name, char *out, size_t size);
    the zip, and opens the new app. 1 when the helper started. */
 int ETA_MacUpdate_ScheduleAppReplace(const char *zip);
 
+/* The same, the new app opened once it is in only when reopen is set:
+   for the update popup's When I quit, the replacement is made as the
+   player quits and nothing is opened after it. */
+int ETA_MacUpdate_ScheduleAppReplaceThen(const char *zip, int reopen);
+
 #ifdef __cplusplus
 }
 #endif

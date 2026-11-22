@@ -1,0 +1,310 @@
+diff --git a/SP/code/ui/ui_main.c b/SP/code/ui/ui_main.c
+index e859a5cc..b193d576 100644
+--- a/SP/code/ui/ui_main.c
++++ b/SP/code/ui/ui_main.c
+@@ -195,7 +195,7 @@ static qboolean UI_AccessibilityKey( int key );
+ static void UI_AccessibilityUpdateFrame( int realtime );
+ static void UI_AccessibilityExtraPaksFrame( int realtime );
+ static qboolean UI_AccessibilityExtraPaksKey( int key );
+-static qboolean UI_AccessibilityUpdateKey( int key );
++static qboolean UI_AccessibilityUpdateScript( const char *name );
+ #endif
+ void _UI_Shutdown( void );
+ void _UI_KeyEvent( int key, qboolean down );
+@@ -4667,6 +4667,9 @@ static void UI_RunMenuScript( char **args ) {
+ 			UI_AccessibilityLeave();
+ 			return;
+ 		}
++		if ( UI_AccessibilityUpdateScript( name ) ) {
++			return;
++		}
+ 		if ( Q_stricmp( name, "etaSavesSay" ) == 0 ) {
+ 			UI_AccessibilitySay( UI_AccessibilitySavesText() );
+ 			return;
+@@ -8753,7 +8756,7 @@ static qboolean UI_AccessibilityKey( int key ) {
+ 		return qfalse;
+ 	}
+ 
+-	if ( UI_AccessibilityUpdateKey( key ) || UI_AccessibilityExtraPaksKey( key ) ) {
++	if ( UI_AccessibilityExtraPaksKey( key ) ) {
+ 		return qtrue;
+ 	}
+ 
+@@ -8775,11 +8778,17 @@ static qboolean UI_AccessibilityKey( int key ) {
+  * (platform/macos/macos_update.h): so a few seconds into the menus the
+  * game asks the downloads page for the newest test build
+  * (rtcw-update.txt, which the test build workflow keeps on a release of
+- * its own, rtcw-updates), says when there is a newer one, and F12
+- * downloads it, checks it against the checksum the page gives, and puts
+- * it in place of this one as the game closes, opening the new one. Only a
+- * build the workflow made checks - one built by hand is "dev" - and only
+- * a newer number is offered.
++ * its own, rtcw-updates). As the Enemy Territory mode does, the answer is
++ * said each time - "Checking for updates", then "You have the newest test
++ * build" or "Could not check for updates" - and a newer one is offered in
++ * a popup: Download or Later. Download fetches it and checks it against
++ * the checksum the page gives; a second popup offers Restart now or When
++ * I quit, and the new build is put in place of this one as the game
++ * closes - opened again at once for Restart now. The tester asked for the
++ * Enemy Territory mode's popup in place of F12. Only a build the workflow
++ * made checks - one built by hand is "dev" - and only a newer number is
++ * offered. Accessibility's first page has Check for updates, to ask
++ * again.
+  */
+ #if defined( __APPLE__ )
+ #include "platform/windows/windows_update.h"
+@@ -8796,14 +8805,18 @@ enum {
+ 	UI_UPDATE_CHECKING,
+ 	UI_UPDATE_OFFERED,
+ 	UI_UPDATE_DOWNLOADING,
++	UI_UPDATE_READY,        /* downloaded and checked: Restart now or When I quit */
+ 	UI_UPDATE_INSTALLING,
+ 	UI_UPDATE_NONE          /* checked: nothing newer, or no check to make */
+ };
+ 
++#define UI_UPDATE_POPUP       "eta_update"
++#define UI_UPDATE_READY_POPUP "eta_update_ready"
++
+ static struct {
+ 	int state;
+ 	int number;             /* of the build offered */
+-	qboolean said;
++	qboolean popped;        /* the offer's popup opened */
+ 	char url[512];
+ 	char sha256[ETA_UPDATE_SHA256_HEX_LENGTH + 1];
+ 	long size;
+@@ -8853,6 +8866,32 @@ static void UI_AccessibilityUpdateRead( const char *text ) {
+ 	}
+ }
+ 
++/* A popup over the menus, only where the menus are up and no level is
++   loaded: an offer is not opened over the game. */
++static qboolean UI_AccessibilityUpdateCanPop( void ) {
++	uiClientState_t cstate;
++
++	trap_GetClientState( &cstate );
++	return (qboolean)( cstate.connState <= CA_DISCONNECTED && ( trap_Key_GetCatcher() & KEYCATCH_UI )
++					   && Menus_FindByName( UI_UPDATE_POPUP ) && Menus_FindByName( UI_UPDATE_READY_POPUP ) );
++}
++
++/* Asked for: from the start, or Check for updates. */
++static void UI_AccessibilityUpdateCheck( void ) {
++	if ( UI_AccessibilityBuildNumber( ETA_Update_InstalledVersion() ) <= 0 ) {
++		uiUpdate.state = UI_UPDATE_NONE;
++		ETA_Speech_Say( "A test build made by hand does not check for updates" );
++		return;
++	}
++	if ( !ETA_WindowsUpdate_StartFetch( UI_UPDATE_MANIFEST_URL ) ) {
++		uiUpdate.state = UI_UPDATE_NONE;
++		ETA_Speech_Say( "Could not check for updates" );
++		return;
++	}
++	uiUpdate.state = UI_UPDATE_CHECKING;
++	ETA_Speech_Say( "Checking for updates" );
++}
++
+ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ 	ETA_WindowsUpdateState state;
+ 
+@@ -8862,12 +8901,11 @@ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ 		if ( realtime < 4000 ) {
+ 			return;
+ 		}
+-		if ( UI_AccessibilityBuildNumber( ETA_Update_InstalledVersion() ) <= 0
+-			 || !ETA_WindowsUpdate_StartFetch( UI_UPDATE_MANIFEST_URL ) ) {
+-			uiUpdate.state = UI_UPDATE_NONE;
++		if ( UI_AccessibilityBuildNumber( ETA_Update_InstalledVersion() ) <= 0 ) {
++			uiUpdate.state = UI_UPDATE_NONE;   /* built by hand: said only when asked */
+ 			return;
+ 		}
+-		uiUpdate.state = UI_UPDATE_CHECKING;
++		UI_AccessibilityUpdateCheck();
+ 		return;
+ 
+ 	case UI_UPDATE_CHECKING:
+@@ -8882,17 +8920,24 @@ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ 				 && strlen( uiUpdate.sha256 ) == ETA_UPDATE_SHA256_HEX_LENGTH
+ 				 && uiUpdate.size > 0 && uiUpdate.size < 512L * 1024 * 1024 ) {
+ 				uiUpdate.state = UI_UPDATE_OFFERED;
+-				uiUpdate.said = qfalse;
++				uiUpdate.popped = qfalse;
+ 				return;
+ 			}
++			uiUpdate.state = UI_UPDATE_NONE;
++			ETA_Speech_Say( "You have the newest test build" );
++			return;
+ 		}
+ 		uiUpdate.state = UI_UPDATE_NONE;
++		ETA_Speech_Say( "Could not check for updates" );
+ 		return;
+ 
+ 	case UI_UPDATE_OFFERED:
+-		if ( !uiUpdate.said && realtime >= 6000 ) {
+-			uiUpdate.said = qtrue;
+-			ETA_Speech_Say( va( "Test build %d is ready. F12 installs it", uiUpdate.number ) );
++		/* Opened once, over the menus; Later closes it, and Check for
++		   updates opens it again. */
++		if ( !uiUpdate.popped && UI_AccessibilityUpdateCanPop() ) {
++			uiUpdate.popped = qtrue;
++			Menus_ActivateByName( UI_UPDATE_POPUP );
++			ETA_Speech_Say( va( "A new version is available: test build %d. Download, or Later", uiUpdate.number ) );
+ 		}
+ 		return;
+ 
+@@ -8903,17 +8948,23 @@ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ 		}
+ 		if ( state == ETA_WINDOWS_UPDATE_DONE
+ 			 && !Q_stricmp( ETA_WindowsUpdate_DownloadSha256(), uiUpdate.sha256 )
+-			 && ETA_WindowsUpdate_DownloadedBytes() == uiUpdate.size
+-			 && ETA_MacUpdate_ScheduleAppReplace( uiUpdate.zip ) ) {
+-			uiUpdate.state = UI_UPDATE_INSTALLING;
+-			ETA_Speech_Say( va( "Test build %d downloaded. The game closes now, and opens again as the new build", uiUpdate.number ) );
+-			trap_Cmd_ExecuteText( EXEC_APPEND, "quit\n" );
++			 && ETA_WindowsUpdate_DownloadedBytes() == uiUpdate.size ) {
++			uiUpdate.state = UI_UPDATE_READY;
++			uiUpdate.popped = qfalse;
+ 			return;
+ 		}
+ 		ETA_WindowsUpdate_RemoveFile( uiUpdate.zip );
+ 		uiUpdate.state = UI_UPDATE_OFFERED;
+-		uiUpdate.said = qtrue;
+-		ETA_Speech_Say( "The download did not come through whole. F12 tries again" );
++		uiUpdate.popped = qtrue;
++		ETA_Speech_Say( "The download did not come through whole, and nothing was changed. Check for updates, on the Accessibility page, tries again" );
++		return;
++
++	case UI_UPDATE_READY:
++		if ( !uiUpdate.popped && UI_AccessibilityUpdateCanPop() ) {
++			uiUpdate.popped = qtrue;
++			Menus_ActivateByName( UI_UPDATE_READY_POPUP );
++			ETA_Speech_Say( va( "Test build %d is downloaded. Restart now, or When I quit", uiUpdate.number ) );
++		}
+ 		return;
+ 
+ 	default:
+@@ -8921,48 +8972,101 @@ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ 	}
+ }
+ 
+-static qboolean UI_AccessibilityUpdateKey( int key ) {
++/* The popups' buttons, and Accessibility's Check for updates. */
++static qboolean UI_AccessibilityUpdateScript( const char *name ) {
+ 	char app[8];
+ 
+-	if ( key != K_F12 ) {
+-		return qfalse;
++	if ( !Q_stricmp( name, "etaUpdateCheck" ) ) {
++		switch ( uiUpdate.state ) {
++		case UI_UPDATE_START:
++		case UI_UPDATE_CHECKING:
++			ETA_Speech_Say( "Checking for updates" );
++			break;
++		case UI_UPDATE_DOWNLOADING:
++			ETA_Speech_Say( "Still downloading" );
++			break;
++		case UI_UPDATE_OFFERED:
++		case UI_UPDATE_READY:
++			uiUpdate.popped = qfalse;
++			break;
++		case UI_UPDATE_INSTALLING:
++			ETA_Speech_Say( "The new test build goes in when you quit the game" );
++			break;
++		default:
++			UI_AccessibilityUpdateCheck();
++			break;
++		}
++		return qtrue;
+ 	}
+ 
+-	switch ( uiUpdate.state ) {
+-	case UI_UPDATE_OFFERED:
+-		break;
+-	case UI_UPDATE_DOWNLOADING:
+-		ETA_Speech_Say( "Still downloading" );
+-		return qtrue;
+-	case UI_UPDATE_NONE:
+-		ETA_Speech_Say( "This is the newest test build" );
++	if ( !Q_stricmp( name, "etaUpdateDownload" ) ) {
++		Menus_CloseByName( UI_UPDATE_POPUP );
++		if ( uiUpdate.state != UI_UPDATE_OFFERED ) {
++			return qtrue;
++		}
++		if ( ETA_MacUpdate_AppPath( app, sizeof( app ) ) < 0 ) {
++			/* The Mac runs an app from a read-only copy until it has been
++			   moved out of the folder it was unzipped in. */
++			ETA_Speech_Say( "First move the game's folder into Applications with Finder, open the game from there, and choose Check for updates on the Accessibility page" );
++			return qtrue;
++		}
++		if ( !ETA_MacUpdate_SupportPath( "rtcw-update.zip", uiUpdate.zip, sizeof( uiUpdate.zip ) )
++			 || !ETA_WindowsUpdate_StartDownload( uiUpdate.url, uiUpdate.zip, uiUpdate.size ) ) {
++			ETA_Speech_Say( "The download could not start. Check for updates, on the Accessibility page, tries again" );
++			return qtrue;
++		}
++		uiUpdate.state = UI_UPDATE_DOWNLOADING;
++		ETA_Speech_Say( va( "Downloading test build %d", uiUpdate.number ) );
+ 		return qtrue;
+-	default:
+-		return qfalse;
+ 	}
+ 
+-	if ( ETA_MacUpdate_AppPath( app, sizeof( app ) ) < 0 ) {
+-		/* The Mac runs an app from a read-only copy until it has been
+-		   moved out of the folder it was unzipped in. */
+-		ETA_Speech_Say( "First move the game's folder into Applications with Finder, open the game from there, and press F12 again" );
++	if ( !Q_stricmp( name, "etaUpdateLater" ) ) {
++		Menus_CloseByName( UI_UPDATE_POPUP );
++		ETA_Speech_Say( "Later. Check for updates, on the Accessibility page, offers it again" );
+ 		return qtrue;
+ 	}
+ 
+-	if ( !ETA_MacUpdate_SupportPath( "rtcw-update.zip", uiUpdate.zip, sizeof( uiUpdate.zip ) )
+-		 || !ETA_WindowsUpdate_StartDownload( uiUpdate.url, uiUpdate.zip, uiUpdate.size ) ) {
+-		ETA_Speech_Say( "The download could not start. F12 tries again" );
++	if ( !Q_stricmp( name, "etaUpdateRestart" ) || !Q_stricmp( name, "etaUpdateWhenQuit" ) ) {
++		qboolean now = (qboolean)!Q_stricmp( name, "etaUpdateRestart" );
++
++		Menus_CloseByName( UI_UPDATE_READY_POPUP );
++		if ( uiUpdate.state != UI_UPDATE_READY ) {
++			return qtrue;
++		}
++		if ( !ETA_MacUpdate_ScheduleAppReplaceThen( uiUpdate.zip, now ) ) {
++			ETA_WindowsUpdate_RemoveFile( uiUpdate.zip );
++			uiUpdate.state = UI_UPDATE_OFFERED;
++			uiUpdate.popped = qtrue;
++			ETA_Speech_Say( "The new build could not be put in place, and nothing was changed. Check for updates, on the Accessibility page, tries again" );
++			return qtrue;
++		}
++		uiUpdate.state = UI_UPDATE_INSTALLING;
++		if ( now ) {
++			ETA_Speech_Say( va( "The game closes now, and opens again as test build %d", uiUpdate.number ) );
++			trap_Cmd_ExecuteText( EXEC_APPEND, "quit\n" );
++		} else {
++			ETA_Speech_Say( va( "Test build %d goes in when you quit the game. Open the game again after that", uiUpdate.number ) );
++		}
+ 		return qtrue;
+ 	}
+ 
+-	uiUpdate.state = UI_UPDATE_DOWNLOADING;
+-	ETA_Speech_Say( va( "Downloading test build %d. The game closes and opens again when it is in", uiUpdate.number ) );
+-	return qtrue;
++	return qfalse;
+ }
+ #else
+ static void UI_AccessibilityUpdateFrame( int realtime ) {
+ }
+ 
+-static qboolean UI_AccessibilityUpdateKey( int key ) {
++/* The game updates itself on the Mac only. */
++static qboolean UI_AccessibilityUpdateScript( const char *name ) {
++	if ( !Q_stricmp( name, "etaUpdateCheck" ) ) {
++		ETA_Speech_Say( "The game updates itself on the Mac. On Windows, a new test build is on the downloads page" );
++		return qtrue;
++	}
++	if ( !Q_stricmpn( name, "etaUpdate", 9 ) ) {
++		Menus_CloseByName( "eta_update" );
++		Menus_CloseByName( "eta_update_ready" );
++		return qtrue;
++	}
+ 	return qfalse;
+ }
+ #endif

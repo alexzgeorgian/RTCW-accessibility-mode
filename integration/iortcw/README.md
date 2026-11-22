@@ -4565,3 +4565,31 @@ the nearest metre, never along the way. The tester, walking the forest's
 hidden way, found the straight line to the step easier to judge. The way
 is still what the beacon and O follow. Checked: walking in to a step from
 60 metres, "45", "22", "6 meters to marker", then "Marker reached".
+
+0271-hidden-step-straight-line.patch: O, with a step of a level's hidden
+way or a hidden place on the marker and no worked-out way to it from
+where the player is - from inside a tree's trunk, or off the ground the
+way is worked out on - turns the player straight at it and says so:
+"Facing hidden way 3 of 18 in a straight line, 20 meters. If a tree or a
+rock stops you, step to one side, and O again". Before, the second
+press went on to the way out, and in the forest that is the tunnel past
+the gate's guards. The tester heard "no way" on hidden way 3. Checked:
+from thirty spots round hidden way 3 and from the tester's save, O found
+the way every time and the step was reached; the straight line was not
+seen, since nowhere tried left O without a way.
+
+0272-update-popup.patch: a newer test build offered as the Enemy
+Territory mode offers its own, in place of F12, which the tester asked
+for. As the main menu comes up, "Checking for updates", then "You have
+the newest test build" or "Could not check for updates"; a newer one
+opens a popup - "A new version is available: test build N" - with
+Download and Later. Download fetches and checks it, then a second popup
+offers Restart now (the game closes and opens again as the new build)
+or When I quit (the new build goes in as the game is quit, and nothing
+is opened after: ETA_MacUpdate_ScheduleAppReplaceThen). Accessibility's
+first page has Check for updates, which offers it again after Later.
+The popups are in release/rtcw/ui/accessibility.menu. Mac only, as
+before; on Windows Check for updates says the new build is on the
+downloads page. Checked: built for Linux, and the Mac code compiled for
+syntax on Linux; the popups not opened in a game here, since the update
+code is the Mac's.

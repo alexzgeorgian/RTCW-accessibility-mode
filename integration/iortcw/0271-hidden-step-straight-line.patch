@@ -1,0 +1,47 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index dda5e2a4..c3cb777f 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7147,6 +7147,42 @@ static void ETA_FaceTheWayUnreachable(void)
+ 
+ 	Q_strncpyz(what, CG_AccessibilityMarkerInfo(origin, &name) && name ? name : "there", sizeof(what));
+ 
++	/* A step of a level's hidden way, or a hidden place: outdoors, open
++	   ground, and no worked-out way to it from here - from inside a
++	   tree's trunk, or off the ground the way is worked out on - faced
++	   in a straight line instead, and never sent on to the way out. The
++	   tester, in the forest, heard "no way" on hidden way 3 and was
++	   turned back toward the tunnel past the gate's guards. */
++	if (!Q_stricmpn(what, "hidden ", 7))
++	{
++		const playerState_t *ps = &cg.predictedPlayerState;
++		etaAimTarget_t      way;
++		vec3_t              flat, dir;
++		int                 meters, up;
++
++		VectorSubtract(origin, ps->origin, flat);
++		up      = (int)(flat[2] * ETA_QU_TO_METERS + ( flat[2] >= 0.0f ? 0.5f : -0.5f ));
++		flat[2] = 0.0f;
++		meters  = (int)(VectorLength(flat) * ETA_QU_TO_METERS + 0.5f);
++		ETA_HudNarrator_HoldPassive(cg.time);
++		if (VectorLength(flat) < 4.0f)
++		{
++			ETA_Speech_Say(va("%s is here", what));
++			return;
++		}
++		memset(&way, 0, sizeof(way));
++		way.entityNum = -1;
++		VectorNormalize2(flat, dir);
++		VectorMA(ps->origin, 256.0f, dir, way.point);
++		way.point[2] = ps->origin[2] + ps->viewheight;
++		ETA_AimStartSnap(&way, NULL);
++		ETA_Speech_Say(va("Facing %s in a straight line, %d %s%s. If a tree or a rock stops you, "
++		                  "step to one side, and O again",
++		                  what, meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++		                  up >= 2 ? va(", %d meters above you", up) : up <= -2 ? va(", %d meters below you", -up) : ""));
++		return;
++	}
++
+ 	/* The level's way out, not open yet - shut until the story opens
+ 	   it: on to the nearest place not explored, as X's first. The
+ 	   tester, in the village, heard O say there was no way, and had

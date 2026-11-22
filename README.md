@@ -24,7 +24,7 @@ License, version 3 (LICENSE).
   (`INSTALL-iortcw.md.in`), the mode's own menus (`rtcw/ui/`) and sounds.
 - `.github/workflows/` - every change is built for the Mac and Windows;
   a push publishes a test build to this repository's releases page,
-  which the game's own updater (F12 in the menus) installs. Builds from
+  which the game's own updater offers in a popup as the menus come up. Builds from
   before the move read which build is the newest from the old releases
   page,
   [Wolfenstein-Enemy-territory-accessibility-releases](https://github.com/alexzgeorgian/Wolfenstein-Enemy-territory-accessibility-releases),

@@ -55,17 +55,28 @@ already have it.
 ### New test builds, on a Mac
 
 The game updates itself, so you only ever do the Open Anyway step once.
-A few seconds into the menus it checks for a newer test build, and if
-there is one you hear "Test build 22 is ready. F12 installs it". Press
-F12: it downloads, the game closes, and it opens again as the new build,
-in the same place. The Mac does not ask about it, because the game
-fetched it itself rather than a browser. F12 with nothing newer says
-"This is the newest test build".
+As soon as the main menu is up, the game says "Checking for updates" and
+asks the downloads page for a newer test build. The answer is said every
+time: "You have the newest test build", or "Could not check for updates"
+- with no internet, say. If there is a newer one, a popup reads out the
+offer - "A new version is available: test build 22" - with two answers,
+Download or Later. Download fetches it and checks it against the
+checksum the page gives; then a second popup offers Restart now or When
+I quit. Restart now closes the game and opens it again as the new build,
+in the same place. When I quit puts the new build in place as you quit,
+and you open the game again yourself. The Mac does not ask about it,
+because the game fetched it itself rather than a browser. Nothing is
+replaced without you choosing Download, and a download that arrives
+damaged is thrown away and your build stays as it was.
+
+Later closes the popup. To be offered it again, open Options,
+Accessibility, and choose Check for updates; it also tells you when you
+already have the newest.
 
 If you hear "First move the game's folder into Applications", the Mac is
 running the game from a temporary copy because it was opened where it
 was unzipped: move the folder into Applications with Finder, open the
-game from there, and press F12 again.
+game from there, and choose Check for updates.
 
 ## Installing on Windows
 
