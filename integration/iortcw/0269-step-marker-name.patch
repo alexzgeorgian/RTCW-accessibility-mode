@@ -1,0 +1,15 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 5a94b618..812a60d9 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2922,7 +2922,9 @@ void CG_AccessibilityAreasBack(void)
+ 
+ 	if (area < 0 && eta_backOutCount[-1 - area] < 0)
+ 	{
+-		char *cut = strstr(name, ", ");
++		/* A hidden way's step by its number alone - "hidden way 3 of
++		   18" - which the marker's name has room for. */
++		char *cut = eta_backOutCount[-1 - area] == -2 && strchr(name, ':') ? strchr(name, ':') : strstr(name, ", ");
+ 
+ 		/* the marker keeps only "the ladder up the north-east watchtower" */
+ 		if (cut)

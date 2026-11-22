@@ -4551,3 +4551,10 @@ and the flamethrower their own ranges. Grenades, dynamite and the
 Panzerfaust have none. With only enemies beyond it: "Soldier, ahead, 62
 meters: beyond the Sten's reach, 37 meters". The tester was locked on to
 soldiers a hundred metres off and more.
+
+0269-step-marker-name.patch: the marker set on a hidden way's step is
+named by its number alone, "hidden way 1 of 18", which its name has room
+for: it had said "Facing toward hidden way 1 of 18: the road south-east
+of the", cut off. Checked with it: the distances said - on semicolon's
+list, and walking in, "45 meters to marker", "22", "7", then "Marker
+reached" - match the map to within a metre.
