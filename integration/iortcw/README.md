@@ -4611,3 +4611,33 @@ the step, 8 and 6 metres off, then reached at 5; and from where the
 save stands, O and forward to "Marker reached, hidden way 3 of 18". The
 "No way found" itself was not seen here, so its new words were not
 heard in a game.
+
+0274-tunnel-side-door.patch: the forest's tunnel the walkthrough's way.
+The tester, having watched a sighted player's run, asked for the way to
+the tunnel to be the one a sighted player takes, and for the waypoint to
+the tunnel to follow it. The walkthrough (Nadia Varkovsky's RTCW FAQ)
+goes as the hidden way already did - the road east, over the hill and
+down the little valley, the north-east watchtower's guard and its box -
+then: "Run all the way to the tunnel then reach the opening to the right
+near the end before B.J. gets spotted. Open the door and travel along
+the long corridor to climb the ladder at the far end." The way-finder
+could not take that door - it swings open for about two seconds and
+shuts - and O's "the tunnel's ladder up" led along the open road past
+the two soldiers at the tunnel's far end, out and up the stairs to the
+ladder's top.
+- The hidden way gains five steps, 19 to 23 of 23: the tunnel's north
+  wall behind the truck; the side door, "F opens it, walk straight in";
+  the corridor behind it; the corridor's turn west; the foot of the
+  ladder up at its end.
+- O, outside the tunnel on the way to it, leads to the side door first
+  (eta_tunnelDoors): "The way goes through the tunnel, by its side door:
+  21 meters, ahead, west. F opens it, then walk straight in: it shuts
+  again", and on reaching it, "Marker reached, the tunnel's side door. F
+  opens it, then walk straight in". Through it, O leads on to the ladder.
+Checked from the tester's save, guards active, the tower's guard taken
+down first: the truck set going at the bend, then along the tunnel's
+north wall 6, 12 and 18 seconds behind it, F at the side door and
+straight in - into the corridor each time, neither soldier seeing the
+player (they face the truck). And O, pressed at the bend and in the
+corridor, gave the words above. The ladder's top, the machine-gun nest
+and its three soldiers, are beyond these steps.
