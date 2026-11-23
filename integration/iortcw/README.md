@@ -4663,3 +4663,26 @@ nobody saw the test player as far as the slope up to hidden way 11,
 where the opening search turned them to and fro - the change to walk
 the line straight came after, and its own run was not completed: the
 test machine's game stopped taking key presses after loading a save.
+
+0276-line-point-by-point.patch: 0275's line, walked. Followed from the
+tester's save by O and short walks, the guards awake:
+- Two points ahead cut the corner after hidden way 11 into a grass bank,
+  and the narrow ridge west of it was overshot, down the slope. The
+  steer point is now the line's next point (some 2 metres), its corners
+  hugged. Three runs from the save reached hidden way 14, the north-east
+  watchtower's foot, nobody seeing the test player; with the tower's
+  guard down, on through the woods to the bend, again unseen.
+- The tunnel's side door: "Marker reached" came three metres off, F
+  said it was too far, and the test player, walking on, was late for
+  the door. Then, right against it, the door would not swing open - it
+  swings away from the one opening it, and has no room. Its point is now
+  1.5 metres in front of it, reached within 24 units, and F opens it at
+  once; the hidden-way steps' five-metre reach leaves it out.
+- Hidden way 19 moves back to the road's north side by the bend, 37
+  metres from the soldiers at the truck, with "wait here a while for
+  the truck to drive into the tunnel": waiting at the old step 19, 12
+  metres on, the test player was seen.
+Not yet sure: from step 19 to the side door the tunnel's two soldiers,
+turning about the truck, saw the test player in one of two runs after
+an 18-second wait; the walkthrough's "before B.J. gets spotted" is a
+matter of timing there.

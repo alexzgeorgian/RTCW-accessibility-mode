@@ -1,0 +1,87 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index d6b1d615..872f1484 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2683,8 +2683,8 @@ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ 	   the truck along the tunnel's north wall, 6 to 18 seconds after it
+ 	   drives on, the two soldiers at the far end facing the truck; the
+ 	   side door stays open some two seconds, so F and straight in. */
+-	{ "forest", { 300.0f, 3780.0f, 208.0f }, "hidden way 19 of 23: the tunnel's north wall, behind the truck" },
+-	{ "forest", { -128.0f, 3770.0f, 208.0f }, "hidden way 20 of 23: the tunnel's side door, F opens it, walk straight in" },
++	{ "forest", { 700.0f, 3780.0f, 208.0f }, "hidden way 19 of 23: the road's north side by the bend, wait here a while for the truck to drive into the tunnel" },
++	{ "forest", { -128.0f, 3755.0f, 208.0f }, "hidden way 20 of 23: the tunnel's side door, F opens it, walk straight in" },
+ 	{ "forest", { -128.0f, 4420.0f, 232.0f }, "hidden way 21 of 23: the corridor behind the side door" },
+ 	{ "forest", { -128.0f, 4990.0f, 232.0f }, "hidden way 22 of 23: the corridor's turn west" },
+ 	{ "forest", { -1400.0f, 4990.0f, 232.0f }, "hidden way 23 of 23: the foot of the ladder up, at the corridor's end" },
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 9425606c..020c3daa 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -66,6 +66,7 @@ static vec3_t eta_ladderReachedFoot;   /* CG_AccessibilityLadderReached */
+ static int    eta_ladderReachedAt;
+ #define ETA_MARKER_ONTO_UNITS    32.0f   /* a thing walked onto: this close, the player touches it, and takes it */
+ #define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
++#define ETA_MARKER_DOOR_UNITS    24.0f   /* a side door: in front of it, within F's reach and clear of its swing */
+ #define ETA_MARKER_HIDDEN_METERS 5.0f    /* a hidden way's step, on open ground: reached this near */
+ #define ETA_MARKER_HIDDEN_RISE_METERS 3.0f
+ 
+@@ -2352,7 +2353,7 @@ static const short eta_forestLine[][3] =
+ 	{ 1088, 3824, 208 }, { 1024, 3760, 208 }, { 960, 3760, 208 }, { 896, 3760, 208 },
+ 	{ 832, 3696, 208 }, { 768, 3632, 208 }, { 704, 3632, 208 }, { 640, 3632, 208 },
+ 	{ 560, 3780, 208 }, { 400, 3780, 208 }, { 240, 3780, 208 }, { 80, 3780, 208 },
+-	{ -60, 3772, 208 }, { -128, 3770, 208 }, { -128, 3900, 232 }, { -128, 4200, 232 },
++	{ -60, 3760, 208 }, { -128, 3755, 208 }, { -128, 3900, 232 }, { -128, 4200, 232 },
+ 	{ -128, 4500, 232 }, { -128, 4800, 232 }, { -128, 4990, 232 }, { -400, 4990, 232 },
+ 	{ -700, 4990, 232 }, { -1000, 4990, 232 }, { -1400, 4990, 232 },
+ };
+@@ -2362,7 +2363,7 @@ static const etaTestedLine_t eta_testedLines[] =
+ 	{ "forest", eta_forestLine, (int)ARRAY_LEN(eta_forestLine) },
+ };
+ 
+-#define ETA_LINE_AHEAD   2        /* points ahead along the line: some 2 to 4 metres */
++#define ETA_LINE_AHEAD   1        /* the line's next point, some 2 metres: its corners hugged */
+ #define ETA_LINE_OFF     256.0f   /* further off it than this: back onto it first */
+ 
+ static int ETA_LineNearest(const etaTestedLine_t *line, const vec3_t at)
+@@ -2998,7 +2999,7 @@ void CG_AccessibilityMarkerFrame(void)
+ 		   metres across and three up or down. The forest's hidden way 3
+ 		   sits up the slope off the road, and the tester, below it,
+ 		   could not get it to count. */
+-		if (!arrived && eta_marker.leftIt && !Q_stricmpn(eta_marker.name, "hidden ", 7))
++		if (!arrived && eta_marker.leftIt && !Q_stricmpn(eta_marker.name, "hidden ", 7) && !strstr(eta_marker.name, "side door"))
+ 		{
+ 			vec3_t flat;
+ 			float  rise = eta_marker.origin[2] - cg.predictedPlayerState.origin[2];
+@@ -3039,6 +3040,19 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_LADDER_UNITS );
+ 	}
+ 
++	/* A side door: reached within F's reach of it, not three metres off.
++	   It shuts two seconds after it opens, and the forest's test player,
++	   told "Marker reached" at three metres, heard F say it was too far,
++	   walked on, and was too late for it. */
++	if (arrived && strstr(eta_marker.name, "side door"))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2] = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
++	}
++
+ 	/* Not arrived standing below it: in the church a large health pack
+ 	   lies on top of a stack of crates, three metres up, and the
+ 	   waypoint put on it said "reached" at the foot of the stack - its
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 32a14a25..76e986e6 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7455,7 +7455,7 @@ typedef struct
+ 
+ static const etaTunnelDoor_t eta_tunnelDoors[] =
+ {
+-	{ "forest", { -128.0f, 3770.0f, 232.0f }, { -128.0f, 4420.0f, 256.0f } },
++	{ "forest", { -128.0f, 3755.0f, 232.0f }, { -128.0f, 4420.0f, 256.0f } },
+ };
+ 
+ static qboolean eta_tunnelDoorDone[ARRAY_LEN(eta_tunnelDoors)];
