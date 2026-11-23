@@ -1,0 +1,66 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c3cb777f..cb1613da 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6978,6 +6978,26 @@ static void ETA_FacePendingFrame(void)
+ 			VectorCopy(origin, aim.point);
+ 			ETA_AimStartSnap(&aim, NULL);
+ 			ETA_HudNarrator_HoldPassive(cg.time);
++			/* A hidden way's step, on open ground: the straight line is
++			   the way, and "No way found" only alarmed. The tester heard
++			   it a few metres from hidden way 3, on the slope below it -
++			   a square the search could not step out of, by a tree or on
++			   the slope itself. */
++			if (name && !Q_stricmpn(name, "hidden ", 7))
++			{
++				vec3_t flat;
++				int    meters, up;
++
++				VectorSubtract(origin, cg.predictedPlayerState.origin, flat);
++				up      = (int)( flat[2] * ETA_QU_TO_METERS + ( flat[2] >= 0.0f ? 0.5f : -0.5f ) );
++				flat[2] = 0.0f;
++				meters  = (int)( VectorLength(flat) * ETA_QU_TO_METERS + 0.5f );
++				ETA_Speech_Say(va("Facing %s in a straight line, %d %s%s. If a tree or a rock stops you, "
++				                  "step to one side, and O again",
++				                  name, meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  up >= 2 ? va(", %d meters above you", up) : up <= -2 ? va(", %d meters below you", -up) : ""));
++				return;
++			}
+ 			ETA_AimSayThen(va("No way found to %s. Turned straight toward it", name ? name : "it"), origin,
+ 			               "X lists the ways out of here, T what is left to do");
+ 			return;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index fb961b32..f1f83788 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -66,6 +66,8 @@ static vec3_t eta_ladderReachedFoot;   /* CG_AccessibilityLadderReached */
+ static int    eta_ladderReachedAt;
+ #define ETA_MARKER_ONTO_UNITS    32.0f   /* a thing walked onto: this close, the player touches it, and takes it */
+ #define ETA_MARKER_ARRIVE_RISE   56.0f   /* above or below by more than a jump: not there yet */
++#define ETA_MARKER_HIDDEN_METERS 5.0f    /* a hidden way's step, on open ground: reached this near */
++#define ETA_MARKER_HIDDEN_RISE_METERS 3.0f
+ 
+ /**
+  * @brief How far toward the marker its sound is placed.
+@@ -2835,6 +2837,21 @@ void CG_AccessibilityMarkerFrame(void)
+ 	else
+ 	{
+ 		arrived = (qboolean)(eta_marker.leftIt && distance <= ETA_MARKER_ARRIVE_METERS);
++		/* A step of a level's hidden way: a place on open ground, often
++		   up a slope, not a thing to stand on. Reached within five
++		   metres across and three up or down. The forest's hidden way 3
++		   sits up the slope off the road, and the tester, below it,
++		   could not get it to count. */
++		if (!arrived && eta_marker.leftIt && !Q_stricmpn(eta_marker.name, "hidden ", 7))
++		{
++			vec3_t flat;
++			float  rise = eta_marker.origin[2] - cg.predictedPlayerState.origin[2];
++
++			VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++			flat[2] = 0.0f;
++			arrived = (qboolean)( VectorLength(flat) * ETA_QU_TO_METERS <= ETA_MARKER_HIDDEN_METERS
++			                      && fabs(rise) * ETA_QU_TO_METERS <= ETA_MARKER_HIDDEN_RISE_METERS );
++		}
+ 		if (eta_marker.walkOnto)
+ 		{
+ 			vec3_t flat;

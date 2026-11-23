@@ -4593,3 +4593,21 @@ before; on Windows Check for updates says the new build is on the
 downloads page. Checked: built for Linux, and the Mac code compiled for
 syntax on Linux; the popups not opened in a game here, since the update
 code is the Mac's.
+
+0273-hidden-step-reach.patch: hidden way 3 in the forest, from the
+tester's own save. Two things kept them from it. A step of the hidden
+way sits on open ground, often up a slope - hidden way 3 is two to five
+metres above the road - and "Marker reached" asked for three metres:
+from below on the slope the tester could not get it to count. A hidden
+step is now reached within five metres across and three up or down.
+And O, a few metres from the step with no way the search could take
+from where the player stood - by a tree, or on the slope - said "No way
+found to hidden way 3. Turned straight toward it", which the tester
+took for the mode giving up. For a hidden step it now says what 0271
+says: "Facing hidden way 3 of 18 in a straight line, 7 meters, 2 meters
+above you. If a tree or a rock stops you, step to one side, and O
+again". Checked from the tester's save: O at spots on the slope below
+the step, 8 and 6 metres off, then reached at 5; and from where the
+save stands, O and forward to "Marker reached, hidden way 3 of 18". The
+"No way found" itself was not seen here, so its new words were not
+heard in a game.
