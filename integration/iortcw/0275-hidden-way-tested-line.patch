@@ -1,0 +1,174 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 5872343a..9425606c 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2292,6 +2292,161 @@ static void ETA_RouteFollow(ETA_PathState state, const vec3_t here)
+ /**
+  * @brief Every frame: a little more searching, and where to point.
+  */
++/*
++ * The line a level's hidden way was tested along, step to step: where
++ * no guard can see. The way-finder's own way between two steps is the
++ * shortest, and in the forest it cut across open ground the guards look
++ * over - the tester, following the sound, was seen, and tried again,
++ * and was seen. A sighted player crosses such ground in a moment; a
++ * player finding the way by ear is there long enough to be spotted. So
++ * with a hidden way's step on the marker, the sound and O follow this
++ * line, a few metres ahead along it toward the step, and lead back onto
++ * it from off it. Walked from the tester's save with the guards awake:
++ * the road east, over the hill, the north-east watchtower, the woods to
++ * the road's bend, behind the truck to the tunnel's side door, and the
++ * corridor to its ladder - not seen.
++ */
++typedef struct
++{
++	const char *map;
++	const short (*at)[3];
++	int         count;
++} etaTestedLine_t;
++
++static const short eta_forestLine[][3] =
++{
++	{ 2880, -208, 208 }, { 2944, -272, 208 }, { 3008, -208, 208 }, { 3072, -272, 208 },
++	{ 3136, -336, 208 }, { 3200, -400, 208 }, { 3264, -400, 214 }, { 3328, -400, 221 },
++	{ 3392, -400, 226 }, { 3456, -400, 230 }, { 3520, -400, 234 }, { 3584, -400, 238 },
++	{ 3648, -400, 242 }, { 3712, -400, 246 }, { 3776, -400, 259 }, { 3840, -400, 275 },
++	{ 3904, -400, 275 }, { 3968, -336, 295 }, { 4032, -336, 296 }, { 4096, -336, 301 },
++	{ 4160, -272, 316 }, { 4224, -208, 341 }, { 4288, -144, 369 }, { 4352, -80, 397 },
++	{ 4416, -16, 425 }, { 4480, 48, 444 }, { 4480, 112, 460 }, { 4544, 176, 476 },
++	{ 4608, 240, 492 }, { 4544, 304, 544 }, { 4608, 368, 587 }, { 4544, 432, 639 },
++	{ 4480, 496, 691 }, { 4544, 560, 716 }, { 4544, 624, 732 }, { 4544, 688, 748 },
++	{ 4544, 752, 782 }, { 4544, 816, 798 }, { 4544, 880, 824 }, { 4544, 944, 856 },
++	{ 4608, 1008, 888 }, { 4608, 1072, 906 }, { 4608, 1136, 919 }, { 4672, 1200, 944 },
++	{ 4736, 1264, 967 }, { 4800, 1328, 981 }, { 4864, 1392, 992 }, { 4864, 1456, 992 },
++	{ 4928, 1520, 989 }, { 4992, 1584, 945 }, { 4992, 1648, 904 }, { 5056, 1712, 854 },
++	{ 5120, 1776, 805 }, { 5120, 1840, 769 }, { 5120, 1904, 736 }, { 5120, 1968, 702 },
++	{ 5120, 2032, 669 }, { 5120, 2096, 626 }, { 5120, 2160, 581 }, { 5120, 2224, 535 },
++	{ 5120, 2288, 490 }, { 5056, 2288, 473 }, { 4992, 2288, 465 }, { 4928, 2288, 458 },
++	{ 4864, 2352, 402 }, { 4864, 2416, 340 }, { 4864, 2480, 278 }, { 4864, 2544, 216 },
++	{ 4800, 2608, 175 }, { 4736, 2672, 139 }, { 4672, 2736, 103 }, { 4608, 2800, 67 },
++	{ 4544, 2864, 52 }, { 4480, 2928, 48 }, { 4416, 2992, 44 }, { 4352, 3056, 40 },
++	{ 4288, 3120, 75 }, { 4224, 3184, 121 }, { 4160, 3248, 167 }, { 4096, 3312, 213 },
++	{ 4096, 3376, 248 }, { 4096, 3440, 280 }, { 4096, 3504, 312 }, { 4096, 3568, 344 },
++	{ 4096, 3632, 387 }, { 4096, 3696, 434 }, { 4096, 3760, 480 }, { 4096, 3824, 527 },
++	{ 4032, 3888, 540 }, { 3968, 3888, 541 }, { 3904, 3888, 542 }, { 3840, 3888, 543 },
++	{ 3776, 3888, 545 }, { 3712, 3888, 547 }, { 3648, 3888, 549 }, { 3584, 3888, 559 },
++	{ 3520, 3888, 573 }, { 3456, 3888, 583 }, { 3392, 3888, 594 }, { 3328, 3888, 604 },
++	{ 3264, 3888, 614 }, { 3200, 3888, 623 }, { 3136, 3888, 633 }, { 3072, 3952, 642 },
++	{ 3008, 3952, 646 }, { 2944, 4016, 656 }, { 2880, 4080, 667 }, { 2816, 4144, 675 },
++	{ 2752, 4208, 679 }, { 2688, 4272, 683 }, { 2624, 4336, 687 }, { 2560, 4400, 693 },
++	{ 2496, 4400, 692 }, { 2432, 4464, 696 }, { 2368, 4528, 700 }, { 2304, 4592, 704 },
++	{ 2240, 4592, 700 }, { 2176, 4592, 696 }, { 2112, 4592, 692 }, { 2048, 4592, 688 },
++	{ 1984, 4592, 648 }, { 1920, 4592, 608 }, { 1856, 4592, 568 }, { 1792, 4592, 523 },
++	{ 1728, 4528, 499 }, { 1728, 4464, 479 }, { 1664, 4400, 455 }, { 1600, 4336, 424 },
++	{ 1536, 4272, 375 }, { 1536, 4208, 329 }, { 1472, 4144, 277 }, { 1408, 4144, 271 },
++	{ 1344, 4080, 228 }, { 1280, 4016, 219 }, { 1216, 3952, 215 }, { 1152, 3888, 211 },
++	{ 1088, 3824, 208 }, { 1024, 3760, 208 }, { 960, 3760, 208 }, { 896, 3760, 208 },
++	{ 832, 3696, 208 }, { 768, 3632, 208 }, { 704, 3632, 208 }, { 640, 3632, 208 },
++	{ 560, 3780, 208 }, { 400, 3780, 208 }, { 240, 3780, 208 }, { 80, 3780, 208 },
++	{ -60, 3772, 208 }, { -128, 3770, 208 }, { -128, 3900, 232 }, { -128, 4200, 232 },
++	{ -128, 4500, 232 }, { -128, 4800, 232 }, { -128, 4990, 232 }, { -400, 4990, 232 },
++	{ -700, 4990, 232 }, { -1000, 4990, 232 }, { -1400, 4990, 232 },
++};
++
++static const etaTestedLine_t eta_testedLines[] =
++{
++	{ "forest", eta_forestLine, (int)ARRAY_LEN(eta_forestLine) },
++};
++
++#define ETA_LINE_AHEAD   2        /* points ahead along the line: some 2 to 4 metres */
++#define ETA_LINE_OFF     256.0f   /* further off it than this: back onto it first */
++
++static int ETA_LineNearest(const etaTestedLine_t *line, const vec3_t at)
++{
++	int   i, best = 0;
++	float bestDistance = 1.0e12f;
++
++	for (i = 0; i < line->count; i++)
++	{
++		float dx = at[0] - line->at[i][0], dy = at[1] - line->at[i][1], dz = at[2] - line->at[i][2];
++		float d  = dx * dx + dy * dy + 4.0f * dz * dz;   /* height counts: the hill's two sides */
++
++		if (d < bestDistance)
++		{
++			bestDistance = d;
++			best         = i;
++		}
++	}
++	return best;
++}
++
++/* With a hidden way's step on the marker, steers along the line. */
++static void ETA_RouteTestedLine(const vec3_t here)
++{
++	char                   base[MAX_QPATH];
++	const etaTestedLine_t *line = NULL;
++	int                    i, near, goal, next;
++	vec3_t                 point;
++
++	if (!eta_marker.active
++	    || ( Q_stricmpn(eta_marker.name, "hidden way", 10) && !strstr(eta_marker.name, "side door") ))
++	{
++		return;
++	}
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	for (i = 0; i < (int)ARRAY_LEN(eta_testedLines); i++)
++	{
++		if (!Q_stricmp(eta_testedLines[i].map, base))
++		{
++			line = &eta_testedLines[i];
++		}
++	}
++	if (!line)
++	{
++		return;
++	}
++
++	near = ETA_LineNearest(line, here);
++	goal = ETA_LineNearest(line, eta_marker.origin);
++	VectorSet(point, line->at[near][0], line->at[near][1], line->at[near][2]);
++
++	if (Distance(here, point) > ETA_LINE_OFF)
++	{
++		next = near;                      /* off the line: back onto it */
++		eta_route.onWay    = qfalse;      /* round what is in the way, as ever */
++		eta_route.overEdge = qfalse;
++	}
++	else if (goal > near)
++	{
++		next = MIN(near + ETA_LINE_AHEAD, goal);
++	}
++	else if (goal < near)
++	{
++		next = MAX(near - ETA_LINE_AHEAD, goal);
++	}
++	else
++	{
++		return;                           /* at the step's own point: straight to it */
++	}
++
++	VectorSet(eta_route.steer, line->at[next][0], line->at[next][1], line->at[next][2] + 24.0f);
++	eta_route.steering   = qtrue;
++	eta_route.steerIndex = 0;             /* not the way-finder's: no turn ahead from its points */
++	/* On the line, its next point is walked to straight - it was walked
++	   so - rather than round to the nearest opening: on the slope up to
++	   hidden way 11 the opening search turned the test player off the
++	   line and back, to and fro. */
++	if (next != near)
++	{
++		eta_route.onWay    = qtrue;
++		eta_route.overEdge = qfalse;
++	}
++}
++
+ static void ETA_RouteFrame(void)
+ {
+ 	ETA_PathState state;
+@@ -2394,6 +2549,7 @@ static void ETA_RouteFrame(void)
+ 
+ 	ETA_RouteFollow(state, here);
+ 	ETA_RouteTunnel(state, here);
++	ETA_RouteTestedLine(here);
+ 
+ 	/* Where the ping wants to be: along the way, or straight at the
+ 	   marker. */

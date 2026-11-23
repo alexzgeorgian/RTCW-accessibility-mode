@@ -4641,3 +4641,25 @@ straight in - into the corridor each time, neither soldier seeing the
 player (they face the truck). And O, pressed at the bend and in the
 corridor, gave the words above. The ladder's top, the machine-gun nest
 and its three soldiers, are beyond these steps.
+
+0275-hidden-way-tested-line.patch: between the forest's hidden-way steps
+the sound and O follow the line the way was tested along, not the
+way-finder's shortest way. The tester, following the sound from their
+save, was still seen. Walked step to step along the tested line with
+the guards awake, nobody saw the test player; the way-finder's own way
+between two steps is the shortest, and cuts across ground the guards
+overlook - a sighted player crosses it in a moment, a player finding the
+way by ear is there long enough to be spotted. With a hidden-way step
+(or the tunnel's side door) on the marker, the steer point is the line
+point two on from the nearest one, toward the step (eta_testedLines:
+route out east, over the hill, the north-east watchtower, the woods to
+the bend, the tunnel's north wall, the side door and the corridor - 159
+points); from further than 256 units off it, back to its nearest point.
+On the line its next point is walked to straight (onWay), not round to
+the nearest opening, which on the slope up to hidden way 11 turned the
+test player off the line and back. Checked: from the tester's save,
+guards awake, following O and the forward key toward hidden way 14,
+nobody saw the test player as far as the slope up to hidden way 11,
+where the opening search turned them to and fro - the change to walk
+the line straight came after, and its own run was not completed: the
+test machine's game stopped taking key presses after loading a save.
