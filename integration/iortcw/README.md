@@ -4844,3 +4844,35 @@ base. O led to an objective only when it was something to pick up.
 Not yet: an objective the script meets with no place - a count of
 enemies, a thing done anywhere - still leaves O on the way out, as
 before.
+
+## 0286-rocket-way-out-after-bridge.patch
+
+The tester, on the rocket base's way out, crossed the hanging bridge;
+it falls, as the level makes it, and they dropped into the train's
+tunnel. O then led back toward the truck - the way out is beside it -
+with no way it could find there on foot, and the tester was lost.
+Played through here: the first two objectives met, the last door let
+open, the bridge crossed and fallen through.
+
+- From the tunnel: "Your next objective: Locate exit ..., 41 meters,
+  13 meters above you", "No way on foot found ...: it goes by a lift,
+  46 meters", then along the tunnel to "Marker reached, the lift's call
+  button"; F there: "The lift is already here ... step in, and F on its
+  lever inside sends it".
+- F, pressed at the call button or the train's lever, lets go of it: in
+  the lift, F on the lever said "A step closer, and F uses it" for the
+  button behind.
+- An objective's place is an invisible strip the script meets it on,
+  across a doorway: reached only on it, within 24 units. "Marker
+  reached" two metres short, again and again, and the objective not
+  met.
+- A lift is the way on only to another floor, more than four metres up
+  or down: from beside the first lift's top, the exit objective on the
+  same floor was sent back down the lift.
+- "Still no way to your next objective. On to the way out instead"
+  goes on to the way out, not straight back to the objective: it went
+  round the two without end.
+
+In game, after the lift: "Objective done: Locate exit and proceed to
+the Outer Compound", then "Way out, 46 meters", to within 4 metres of
+it, where the way goes through a grating to break - said so.

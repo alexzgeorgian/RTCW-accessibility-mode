@@ -1,0 +1,126 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1615a1f9..49888ac6 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6964,6 +6964,7 @@ static void ETA_FacePendingFrame(void)
+ 
+ 				if (CG_AccessibilityMarkerInfo(at, &marked) && marked
+ 				    && ( !Q_stricmp(marked, "your next objective") || !Q_stricmp(marked, "the way out") )
++				    && fabsf(at[2] - cg.predictedPlayerState.origin[2]) > 160.0f
+ 				    && CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift))
+ 				{
+ 					waitedFrom        = 0;
+@@ -7244,7 +7245,13 @@ static void ETA_FaceTheWayUnreachable(void)
+ 
+ 	/* The next objective, or the way out, with no way on foot: on by a
+ 	   lift or the train, the nearest not just ridden. */
+-	if (!Q_stricmp(what, "your next objective") || !Q_stricmp(what, "the way out"))
++	/* Only for a place on another floor, more than four metres up or
++	   down: one on the player's own floor that the search finds no way
++	   to is behind a door, not up a lift - from beside the rocket base's
++	   first lift, its exit objective 14 metres off on the same floor was
++	   sent back down the lift. */
++	if (( !Q_stricmp(what, "your next objective") || !Q_stricmp(what, "the way out") )
++	    && fabsf(origin[2] - cg.predictedPlayerState.origin[2]) > 160.0f)
+ 	{
+ 		vec3_t   by;
+ 		char     byName[32];
+@@ -7544,6 +7551,10 @@ static void ETA_FaceTheWayUnreachable(void)
+ 			thingTries = 0;
+ 			ETA_Speech_Say(va("Still no way to %s from here. On to the way out instead", what));
+ 			CG_AccessibilityMarkerForget();
++			/* Not straight back to the objective found to have no way:
++			   the rocket base's went round "no way", "on to the way
++			   out", "your next objective" without end. */
++			CG_AccessibilityWayOutSkipObjective();
+ 			CG_AccessibilityWayOut();
+ 			return;
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 9d93b9d7..088b5d66 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3053,6 +3053,20 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 	}
+ 
++	/* An objective's place, where the level's script meets it: an
++	   invisible trigger, often a thin strip across a doorway. Reached
++	   two metres short of it, the objective was not met - the rocket
++	   base's "Locate exit" said "Marker reached" again and again, a
++	   step from its strip. Reached on it. */
++	if (arrived && !Q_stricmp(eta_marker.name, "your next objective"))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2] = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
++	}
++
+ 	/* The back of the truck: at the foot of its ramp, so that straight
+ 	   on is up it. */
+ 	if (arrived && !Q_stricmp(eta_marker.name, "the back of the truck"))
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index fb2f9d60..d3d73f1f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5350,6 +5350,8 @@ void CG_AccessibilityRideBoardNow(void)
+ 	at[1]  = ps->origin[1] < mins[1] ? mins[1] + 16.0f : ps->origin[1] > maxs[1] ? maxs[1] - 16.0f : ps->origin[1];
+ 	at[2]  = maxs[2] + 24.0f;
+ 	meters = (int)( Distance(at, ps->origin) * ETA_QU_TO_METERS + 0.5f );
++	CG_AccessibilityLedClear();
++	CG_AccessibilityUseChoiceClear();
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_Speech_Say(va("The train leaves in 2 seconds. Turning you to it: walk %d %s and jump onto it", meters < 1 ? 1 : meters,
+ 	                  meters == 1 ? "meter" : "meters"));
+@@ -6204,6 +6206,11 @@ void CG_AccessibilityLiftCalled(void)
+ 	{
+ 		return;
+ 	}
++	/* Pressed: F is let go of it, for the lever inside. The rocket
++	   base's test player, led to the call button and then in the lift,
++	   heard "A step closer, and F uses it" for the button behind them. */
++	CG_AccessibilityLedClear();
++	CG_AccessibilityUseChoiceClear();
+ 	/* Here already: the tester, the second lift come down with its
+ 	   soldiers, pressed its call button to go up, and it did not start.
+ 	   The button only calls it; the lever inside sends it. */
+@@ -8151,6 +8158,13 @@ static qboolean ETA_ExitPoint(int model, vec3_t out)
+ 	return qtrue;
+ }
+ 
++static qboolean eta_wayOutSkipObjective;
++
++void CG_AccessibilityWayOutSkipObjective(void)
++{
++	eta_wayOutSkipObjective = qtrue;
++}
++
+ void CG_AccessibilityWayOut(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -8299,7 +8313,10 @@ void CG_AccessibilityWayOut(void)
+ 		vec3_t place, exitAt;
+ 		int    objective = 0;
+ 
+-		if (CG_AccessibilityObjectiveInOrder(ps->origin, place, &objective)
++		qboolean skip = eta_wayOutSkipObjective;
++
++		eta_wayOutSkipObjective = qfalse;
++		if (!skip && CG_AccessibilityObjectiveInOrder(ps->origin, place, &objective)
+ 		    && !( CG_AccessibilityExitPoint(place, exitAt) && Distance(exitAt, place) < 256.0f ))
+ 		{
+ 			const char *words = CG_AccessibilityObjectiveText(objective);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c491983d..82ad3b53 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2327,6 +2327,7 @@ void CG_AccessibilityLiftCalled(void);
+ qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where);
+ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *objective);
+ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift);
++void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
