@@ -1,0 +1,91 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index d10b5c87..918e6af6 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -709,7 +709,10 @@ static qboolean ETA_ThingOffLevel(const eta_thing_t *thing)
+ {
+ 	return (qboolean)( ETA_ThingRideControl(thing)
+ 	                   && ( fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]) > 128.0f
+-	                        || ( !Q_stricmpn(thing->name, "Lift lever", 10) && !CG_AccessibilityLeverLiftAt(thing->point) ) ) );
++	                        || ( !Q_stricmpn(thing->name, "Lift lever", 10) && !CG_AccessibilityLeverLiftAt(thing->point) )
++	                        /* The lift here: its call button does nothing. */
++	                        || ( !Q_stricmpn(thing->name, "Lift call button", 16)
++	                             && CG_AccessibilityLeverLiftHere(thing->point, NULL) ) ) );
+ }
+ 
+ /* Those left in an area, or in the whole level for -1. */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 3cd968d3..9c092057 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6138,6 +6138,35 @@ qboolean CG_AccessibilityLeverLiftAt(const vec3_t point)
+ 	return qtrue;   /* no lever lift there: nothing to say */
+ }
+ 
++/* Whether a lift worked by its lever stands near point, at its height:
++   its call button there then does nothing - the lever inside works it. */
++qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where)
++{
++	vec3_t   mins, maxs;
++	qboolean moving;
++	int      i;
++
++	for (i = 0; i < eta_leverLiftCount; i++)
++	{
++		if (point[0] < eta_leverLift[i].mins[0] - 200.0f || point[0] > eta_leverLift[i].maxs[0] + 200.0f
++		    || point[1] < eta_leverLift[i].mins[1] - 200.0f || point[1] > eta_leverLift[i].maxs[1] + 200.0f)
++		{
++			continue;
++		}
++		if (ETA_LeverLiftBox(i, mins, maxs, &moving) && !moving && point[2] > mins[2] - 64.0f && point[2] < mins[2] + 128.0f)
++		{
++			if (where)
++			{
++				VectorAdd(mins, maxs, where);
++				VectorScale(where, 0.5f, where);
++				where[2] = mins[2] + 32.0f;
++			}
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /*
+  * A lift called, and whether it came: the rocket base's second lift does
+  * not answer its call button until the level has sent it down once, with
+@@ -6169,6 +6198,22 @@ void CG_AccessibilityLiftCalled(void)
+ 	{
+ 		return;
+ 	}
++	/* Here already: the tester, the second lift come down with its
++	   soldiers, pressed its call button to go up, and it did not start.
++	   The button only calls it; the lever inside sends it. */
++	{
++		vec3_t at;
++
++		if (CG_AccessibilityLeverLiftHere(cg.predictedPlayerState.origin, at))
++		{
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(va("The lift is already here, %s, %d meters. This button only calls it: step in, and F on its "
++			                  "lever inside sends it. T finds the lever once you are in",
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
++			                  (int)( Distance(at, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f )));
++			return;
++		}
++	}
+ 	eta_liftCalled   = best;
+ 	eta_liftCalledAt = cg.time;
+ 	eta_liftCalledFrom[2] = ETA_LeverLiftBox(best, mins, maxs, &moving) ? mins[2] : 0.0f;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c3a60f77..cd3e6e01 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2324,6 +2324,7 @@ qboolean CG_AccessibilityLiftShaft(const vec3_t mins, const vec3_t maxs);
+ const char *CG_AccessibilityRideControlAhead(void);
+ qboolean CG_AccessibilityLeverLiftAt(const vec3_t point);
+ void CG_AccessibilityLiftCalled(void);
++qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );

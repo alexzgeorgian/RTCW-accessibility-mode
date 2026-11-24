@@ -4797,3 +4797,19 @@ the spot, "The lift is moving, above you", then "The lift is here" with
 its two soldiers; stepped in, "Lift lever, up", F, and up it went -
 "Lift lever, stops or starts it" on the way, "Lift lever, down" at the
 top.
+
+## 0284-lift-here-use-lever.patch
+
+The tester: the second lift did come down, with its soldiers; then,
+to go up, F on its button did not start it. That button only calls the
+lift; with the lift there it does nothing, and the lever inside sends
+it. And T, outside the lift, offered the button, not the lever.
+
+- The call button pressed with the lift there, at its height: "The lift
+  is already here, behind right, 2 meters. This button only calls it:
+  step in, and F on its lever inside sends it. T finds the lever once
+  you are in".
+- With the lift there, the call button is off T's list.
+
+In game: the lift down, F on the button said so; stepped in, T: "Lift
+lever, up, ahead, 1 meter. F uses it".
