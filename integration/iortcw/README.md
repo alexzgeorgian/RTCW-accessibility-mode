@@ -4876,3 +4876,26 @@ open, the bridge crossed and fallen through.
 In game, after the lift: "Objective done: Locate exit and proceed to
 the Outer Compound", then "Way out, 46 meters", to within 4 metres of
 it, where the way goes through a grating to break - said so.
+
+## 0287-lift-as-played.patch
+
+From a test player that plays from the speech alone - O, walking the
+way, doing what it is told - through the rocket base's way out, from
+the fall through the bridge:
+
+- "Marker reached, the lift's call button" three metres off, and F
+  "too far", again and again: the call button and the train's lever
+  are reached within 48 units.
+- Down in the tunnel, led to the lift's button and the train's lever in
+  turn, whichever was nearer as it walked: a lift first; the train only
+  with no lift to take.
+- "The lift is already here, right, 3 meters": left to turn by guess,
+  it walked past. Now "Turning you to the lift: walk straight in, then
+  F on its lever sends it", and it is turned to it.
+- Ridden up, O led back down to the lever at the bottom, chosen with T
+  before the ride: a lift lever pulled lets go of T's choice, and of
+  the marker on it.
+
+In game, the test player, from the tunnel: to the button, turned to
+the lift, in, T, F on the lever, up, and on to "Objective done: Locate
+exit and proceed to the Outer Compound".

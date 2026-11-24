@@ -1,0 +1,108 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 088b5d66..96935e8d 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3053,6 +3053,18 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 	}
+ 
++	/* A lift's call button, the train's lever: reached within F's reach.
++	   The test player, told "Marker reached" three metres off, heard F
++	   say it was too far, again and again. */
++	if (arrived && ( !Q_stricmp(eta_marker.name, "the lift's call button") || !Q_stricmp(eta_marker.name, "the train's lever") ))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2] = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= 2.0f * ETA_MARKER_DOOR_UNITS );
++	}
++
+ 	/* An objective's place, where the level's script meets it: an
+ 	   invisible trigger, often a thin strip across a doorway. Reached
+ 	   two metres short of it, the objective was not met - the rocket
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 918e6af6..30fde96e 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -985,6 +985,11 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 			CG_AccessibilityLiftCalled();
+ 			break;
+ 		}
++		if (!Q_stricmpn(eta_things.things[i].name, "Lift lever", 10) && ETA_ThingNear(eta_things.things[i].point, point, 96.0f))
++		{
++			CG_AccessibilityLiftLeverUsed();
++			break;
++		}
+ 		if (!Q_stricmpn(eta_things.things[i].name, "Train lever", 11) && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
+ 		{
+ 			CG_AccessibilityRideBoardNow();
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index d3d73f1f..0ce96e27 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6220,10 +6220,12 @@ void CG_AccessibilityLiftCalled(void)
+ 		if (CG_AccessibilityLeverLiftHere(cg.predictedPlayerState.origin, at))
+ 		{
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(va("The lift is already here, %s, %d meters. This button only calls it: step in, and F on its "
+-			                  "lever inside sends it. T finds the lever once you are in",
+-			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
++			/* Turned to it: "right, 3 meters" left the test player to turn
++			   by guess, and they walked past it. */
++			ETA_Speech_Say(va("The lift is already here, %d meters. This button only calls it. Turning you to the lift: "
++			                  "walk straight in, then F on its lever sends it. T finds the lever once you are in",
+ 			                  (int)( Distance(at, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f )));
++			CG_AccessibilityFacePoint(at);
+ 			return;
+ 		}
+ 	}
+@@ -6285,7 +6287,11 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ 			}
+ 		}
+ 	}
+-	for (i = 0; i < eta_rideCount; i++)
++	/* A lift first: the way is to another floor, and a lift goes there.
++	   Down in the rocket base's tunnel the test player was sent to the
++	   lift's button and the train's lever in turn, whichever was the
++	   nearer as they walked. */
++	for (i = 0; i < eta_rideCount && !found; i++)
+ 	{
+ 		int k;
+ 
+@@ -9038,6 +9044,23 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 	return qfalse;
+ }
+ 
++/* A lift's lever pulled: what T chose it with, and the marker on it,
++   are let go of. The test player, ridden up, pressed O and was led back
++   down to the lever at the bottom, 14 metres below. */
++void CG_AccessibilityLiftLeverUsed(void)
++{
++	vec3_t      at;
++	const char *name = NULL;
++
++	eta_chosenSet = qfalse;
++	CG_AccessibilityLedClear();
++	CG_AccessibilityUseChoiceClear();
++	if (CG_AccessibilityMarkerInfo(at, &name) && name && !Q_stricmpn(name, "lift lever", 10))
++	{
++		CG_AccessibilityMarkerForget();
++	}
++}
++
+ /* For the ways on (cg_accessibility_ways.c), and T, Y and X: chosen,
+    for O. */
+ void CG_AccessibilityChoose(const vec3_t point, const char *name)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 82ad3b53..a6e2e3e8 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2328,6 +2328,7 @@ qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where);
+ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *objective);
+ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift);
+ void CG_AccessibilityWayOutSkipObjective(void);
++void CG_AccessibilityLiftLeverUsed(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
