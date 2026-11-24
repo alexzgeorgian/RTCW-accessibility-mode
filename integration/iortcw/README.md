@@ -4899,3 +4899,21 @@ the fall through the bridge:
 In game, the test player, from the tunnel: to the button, turned to
 the lift, in, T, F on the lever, up, and on to "Objective done: Locate
 exit and proceed to the Outer Compound".
+
+## 0288-lift-marker-break-ahead.patch
+
+More from the test player, on the rocket base's way out:
+
+- Turned straight at the lift's middle from its call button, it walked
+  into the lift's side: the way in is round a corner. Now "The lift is
+  already here, 3 meters. This button only calls it. The marker is
+  inside the lift: follow it in, then F on its lever sends it", the
+  marker in the lift, and O leads in by the way round its walls;
+  reached within 40 units: "Marker reached, in the lift. T finds its
+  lever; F on it sends the lift".
+- "The way goes through something to break. Break it to get through: T
+  lists it" - and T, in another area, said nothing was left there. It
+  now says where along the way: "The way goes through something to
+  break, 96 meters on along it, right. Once there, T lists it and F
+  turns you to it". The rocket base's way out is that: a metal grating
+  in a crawlway, beside the exit, broken to get out.

@@ -1,0 +1,122 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 96935e8d..8ed089e6 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2529,8 +2529,57 @@ static void ETA_RouteFrame(void)
+ 		eta_routeBreakSay = qfalse;
+ 		if (state == ETA_PATH_FOUND && eta_routeOpenBreakables && ( cg.time - saidAt > 20000 || cg.time < saidAt ))
+ 		{
++			int    count = ETA_PathFinder_PointCount(), i, n, where = -1;
++			float  along = 0.0f, prev[3];
++			vec3_t at;
++
+ 			saidAt = cg.time;
+-			ETA_Speech_Say("The way goes through something to break. Break it to get through: T lists it");
++			/* Where along the way: "T lists it" sent the test player to
++			   T, which, in another area, said nothing was left there. The
++			   first point of the way inside a thing to break. */
++			VectorCopy(cg.predictedPlayerState.origin, prev);
++			for (i = eta_route.along; i < count && where < 0; i++)
++			{
++				float point[3];
++
++				ETA_PathFinder_Point(i, point);
++				along += Distance(prev, point);
++				VectorCopy(point, prev);
++				for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++				{
++					const entityState_t *es = &cg.snap->entities[n];
++					vec3_t               mins, maxs;
++
++					if (es->eType != ET_EXPLOSIVE || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++					    || !cgs.inlineDrawModel[es->modelindex] || !es->solid)
++					{
++						continue;
++					}
++					trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++					VectorAdd(mins, cg_entities[es->number].lerpOrigin, mins);
++					VectorAdd(maxs, cg_entities[es->number].lerpOrigin, maxs);
++					if (point[0] > mins[0] - 24.0f && point[0] < maxs[0] + 24.0f && point[1] > mins[1] - 24.0f
++					    && point[1] < maxs[1] + 24.0f && point[2] > mins[2] - 48.0f && point[2] < maxs[2] + 48.0f)
++					{
++						where = n;
++						VectorAdd(mins, maxs, at);
++						VectorScale(at, 0.5f, at);
++						break;
++					}
++				}
++			}
++			if (where >= 0)
++			{
++				int meters = (int)( along * ETA_QU_TO_METERS + 0.5f );
++
++				ETA_Speech_Say(va("The way goes through something to break, %d %s on along it, %s. Once there, T lists it "
++				                  "and F turns you to it", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at))));
++			}
++			else
++			{
++				ETA_Speech_Say("The way goes through something to break, further on. Once there, T lists it");
++			}
+ 		}
+ 	}
+ 
+@@ -3053,6 +3102,16 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 	}
+ 
++	/* The inside of a lift: in it, not beside it. */
++	if (arrived && !Q_stricmp(eta_marker.name, "the inside of the lift"))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2] = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= 40.0f );
++	}
++
+ 	/* A lift's call button, the train's lever: reached within F's reach.
+ 	   The test player, told "Marker reached" three metres off, heard F
+ 	   say it was too far, again and again. */
+@@ -3142,6 +3201,10 @@ void CG_AccessibilityMarkerFrame(void)
+ 			/* It shuts two seconds after it opens: through at once. */
+ 			ETA_Speech_Say(va("Marker reached, %s. F opens it, then walk straight in", eta_marker.name));
+ 		}
++		else if (!Q_stricmp(eta_marker.name, "the inside of the lift"))
++		{
++			ETA_Speech_Say("Marker reached, in the lift. T finds its lever; F on it sends the lift");
++		}
+ 		else if (!Q_stricmp(eta_marker.name, "the lift's call button"))
+ 		{
+ 			ETA_Speech_Say("Marker reached, the lift's call button. F calls the lift; once it is here, step in, "
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 0ce96e27..16424bb0 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6184,6 +6184,8 @@ qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where)
+ static int    eta_liftCalledAt = -1, eta_liftCalled = -1;
+ static vec3_t eta_liftCalledFrom;
+ 
++static void ETA_MarkerSetByO(const vec3_t point, const char *name);
++
+ void CG_AccessibilityLiftCalled(void)
+ {
+ 	vec3_t   mins, maxs, mid;
+@@ -6222,10 +6224,14 @@ void CG_AccessibilityLiftCalled(void)
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			/* Turned to it: "right, 3 meters" left the test player to turn
+ 			   by guess, and they walked past it. */
+-			ETA_Speech_Say(va("The lift is already here, %d meters. This button only calls it. Turning you to the lift: "
+-			                  "walk straight in, then F on its lever sends it. T finds the lever once you are in",
++			/* Led in by the way round its walls: turned straight at its
++			   middle from the button, the test player walked into the
++			   lift's side, its way in being round the corner. */
++			ETA_Speech_Say(va("The lift is already here, %d meters. This button only calls it. The marker is inside "
++			                  "the lift: follow it in, then F on its lever sends it",
+ 			                  (int)( Distance(at, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f )));
+-			CG_AccessibilityFacePoint(at);
++			ETA_MarkerSetByO(at, "the inside of the lift");
++			CG_AccessibilityFaceTheWay();
+ 			return;
+ 		}
+ 	}
