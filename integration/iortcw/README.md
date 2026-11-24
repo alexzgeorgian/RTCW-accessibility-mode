@@ -4917,3 +4917,32 @@ More from the test player, on the rocket base's way out:
   break, 96 meters on along it, right. Once there, T lists it and F
   turns you to it". The rocket base's way out is that: a metal grating
   in a crawlway, beside the exit, broken to get out.
+
+## 0289-rocket-start-truck.patch
+
+The tester, at the start of the rocket base, went round in circles. The
+level starts in the back of a truck, its tailgate up: a script mover,
+opened from an invisible trigger with the door's crosshair. The way
+went through it as through nothing, and nothing said to open it: the
+test player walked against it for eight minutes.
+
+- A script mover that an invisible trigger with the door's crosshair
+  opens is a door: the tailgate. Shut while not tipped down.
+- A shut door ahead is looked for low down too, not only at eye
+  height: the tailgate stands knee high above the truck's floor.
+- Shut in, with no way anywhere: "A shut door, ahead right, is the way
+  out of here. Turning you to it: F opens it"; or, further off, past
+  the crates on the truck's floor, "Shut in: the way out of here is a
+  shut door, 2 meters, behind left. O leads to it, and F opens it
+  there", and on reaching it "Marker reached, the shut door out of
+  here. F opens it".
+- A lift is kept as ridden from the moment its lever is pulled: the
+  frames that see the ride are not all run, and ridden down, the test
+  player was sent straight back up the same lift.
+- The call button's and the train's lever's own reach, from 0287, is
+  undone: on the first lift's top floor the way ends three metres from
+  the button, and "Marker reached" never came. F there says how much
+  closer to step.
+
+In game, from the start: the test player was led out of the truck by
+its tailgate, to the first lift's call button, and in.

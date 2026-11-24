@@ -1,0 +1,331 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 49888ac6..90657a63 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6006,6 +6006,7 @@ static int eta_facePendingAt;
+ 
+ static void ETA_FaceTheWayNow(void);
+ static void ETA_FaceTheWayUnreachable(void);
++static qboolean ETA_ShutInByDoor(void);
+ static qboolean ETA_OpeningToward(float wanted, float *yaw);
+ 
+ /*
+@@ -7042,6 +7043,10 @@ static void ETA_FacePendingFrame(void)
+ 			               "X lists the ways out of here, T what is left to do");
+ 			return;
+ 		}
++		if (ETA_ShutInByDoor())
++		{
++			return;
++		}
+ 		ETA_Speech_Say("No way found from here yet. X lists the ways out of here, and T what is left to do");
+ 		return;
+ 	}
+@@ -7125,7 +7130,8 @@ static qboolean ETA_OpeningToward(float wanted, float *yaw)
+ 
+ /* The door, if one stands closed just ahead along a yaw: its entity, or
+    -1. */
+-#define ETA_DOOR_TOWARD 96.0f
++#define ETA_DOOR_TOWARD eta_doorToward
++static float eta_doorToward = 96.0f;
+ 
+ static int ETA_DoorToward(float yaw)
+ {
+@@ -7135,15 +7141,30 @@ static int ETA_DoorToward(float yaw)
+ 	qboolean            opens;
+ 	int                 model;
+ 
+-	VectorCopy(ps->origin, eye);
+-	eye[2] += ps->viewheight;
+-	VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
+-	VectorMA(eye, ETA_DOOR_TOWARD, dir, end);
+-	CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_PLAYERSOLID);
+-	if (trace.fraction >= 1.0f || trace.entityNum >= ENTITYNUM_WORLD
+-	    || cg_entities[trace.entityNum].currentState.eType != ET_MOVER)
++	/* At eye height, and low down: the rocket base's truck tailgate,
++	   shut, stands knee high above the truck's floor, and the way was
++	   looked along over it. */
+ 	{
+-		return -1;
++		static const float heights[3] = { -1.0f, 0.0f, -16.0f };   /* eye; the middle; near the feet */
++		int                h;
++
++		VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++		for (h = 0; h < 3; h++)
++		{
++			VectorCopy(ps->origin, eye);
++			eye[2] += heights[h] < 0.0f && h == 0 ? ps->viewheight : heights[h];
++			VectorMA(eye, ETA_DOOR_TOWARD, dir, end);
++			CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_PLAYERSOLID);
++			if (trace.fraction < 1.0f && trace.entityNum < ENTITYNUM_WORLD
++			    && cg_entities[trace.entityNum].currentState.eType == ET_MOVER)
++			{
++				break;
++			}
++		}
++		if (h == 3)
++		{
++			return -1;
++		}
+ 	}
+ 	model = cg_entities[trace.entityNum].currentState.modelindex;
+ 	/* Moving, or a turning door already turned open: F would shut it.
+@@ -7152,6 +7173,14 @@ static int ETA_DoorToward(float yaw)
+ 	{
+ 		const entityState_t *es = &cg_entities[trace.entityNum].currentState;
+ 
++		/* A door the script works - the truck's tailgate, turned to face
++		   along the truck: open once tipped down, its yaw is no sign. */
++		if (CG_AccessibilityScriptDoor(model))
++		{
++			return ( es->apos.trType != TR_STATIONARY && es->apos.trDuration )
++			       || fabsf(AngleNormalize180(es->apos.trBase[PITCH])) > 30.0f
++			       || fabsf(AngleNormalize180(es->apos.trBase[ROLL])) > 30.0f ? -1 : trace.entityNum;
++		}
+ 		if (( es->apos.trType != TR_STATIONARY && es->apos.trDuration ) || ( es->pos.trType != TR_STATIONARY && es->pos.trDuration )
+ 		    || VectorLength(es->apos.trBase) > 5.0f)
+ 		{
+@@ -7161,6 +7190,96 @@ static int ETA_DoorToward(float yaw)
+ 	return CG_AccessibilityDoorModel(model, &opens) ? trace.entityNum : -1;
+ }
+ 
++/* Shut in by a door close by - the truck the rocket base starts in, its
++   tailgate up: no way anywhere until it is opened, and O said only "No
++   way found". The door, any way round within reach: turned to it, and
++   said. qfalse with none. */
++static qboolean ETA_ShutInByDoor(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	float               yaw;
++
++	for (yaw = 0.0f; yaw < 360.0f; yaw += 22.5f)
++	{
++		int door;
++
++		eta_doorToward = 224.0f;   /* the truck's floor, its tailgate at its end: some steps */
++		door           = ETA_DoorToward(yaw);
++		eta_doorToward = 96.0f;
++		if (door >= 0)
++		{
++			etaAimTarget_t way;
++			vec3_t         dir;
++
++			memset(&way, 0, sizeof(way));
++			way.entityNum = -1;
++			VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
++			VectorMA(ps->origin, 256.0f, dir, way.point);
++			way.point[2] = ps->origin[2] + ps->viewheight;
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(va("A shut door, %s, is the way out of here. Turning you to it: F opens it",
++			                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(yaw - ps->viewangles[YAW]))));
++			ETA_AimStartSnap(&way, NULL);
++			return qtrue;
++		}
++	}
++
++	/* Further off - the truck's floor is stacked with crates between the
++	   player and the tailgate: a shut door the level's script opens, the
++	   nearest within some steps. Led to, and F opens it there. */
++	{
++		int    n, best = -1;
++		float  bestFar = 480.0f;
++		vec3_t at, bestAt;
++
++		for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++		{
++			const entityState_t *es = &cg.snap->entities[n];
++			vec3_t               mins, maxs;
++
++			if (es->eType != ET_MOVER || !CG_AccessibilityScriptDoor(es->modelindex)
++			    || ( es->apos.trType != TR_STATIONARY && es->apos.trDuration )
++			    || fabsf(AngleNormalize180(es->apos.trBase[PITCH])) > 30.0f
++			    || fabsf(AngleNormalize180(es->apos.trBase[ROLL])) > 30.0f)
++			{
++				continue;
++			}
++			trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++			VectorAdd(mins, maxs, at);
++			VectorScale(at, 0.5f, at);
++			VectorAdd(at, cg_entities[es->number].lerpOrigin, at);
++			if (Distance(at, ps->origin) < bestFar)
++			{
++				bestFar = Distance(at, ps->origin);
++				best    = n;
++				VectorCopy(at, bestAt);
++			}
++		}
++		if (best >= 0)
++		{
++			vec3_t stand, toward;
++			int    meters;
++
++			/* Where to stand: a step short of it, on the player's side. */
++			VectorSubtract(ps->origin, bestAt, toward);
++			toward[2] = 0.0f;
++			VectorNormalize(toward);
++			VectorMA(bestAt, 40.0f, toward, stand);
++			stand[2] = ps->origin[2];
++			meters = (int)( Distance(stand, ps->origin) * ETA_QU_TO_METERS + 0.5f );
++			CG_AccessibilityChoose(stand, "the shut door out of here");
++			CG_AccessibilityChosenIsThing();
++			CG_AccessibilityChosenAimAt(bestAt);
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say(va("Shut in: the way out of here is a shut door, %d %s, %s. O leads to it, and F opens it there",
++			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestAt))));
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* A drop the way goes down, deeper than a stair: faced and said. */
+ #define ETA_CLIMB_DROP_SAID 80.0f
+ 
+@@ -7243,6 +7362,11 @@ static void ETA_FaceTheWayUnreachable(void)
+ 		return;
+ 	}
+ 
++	if (ETA_ShutInByDoor())
++	{
++		return;
++	}
++
+ 	/* The next objective, or the way out, with no way on foot: on by a
+ 	   lift or the train, the nearest not just ridden. */
+ 	/* Only for a place on another floor, more than four metres up or
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 8ed089e6..5c7e60bf 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3112,18 +3112,6 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= 40.0f );
+ 	}
+ 
+-	/* A lift's call button, the train's lever: reached within F's reach.
+-	   The test player, told "Marker reached" three metres off, heard F
+-	   say it was too far, again and again. */
+-	if (arrived && ( !Q_stricmp(eta_marker.name, "the lift's call button") || !Q_stricmp(eta_marker.name, "the train's lever") ))
+-	{
+-		vec3_t flat;
+-
+-		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
+-		flat[2] = 0.0f;
+-		arrived = (qboolean)( VectorLength(flat) <= 2.0f * ETA_MARKER_DOOR_UNITS );
+-	}
+-
+ 	/* An objective's place, where the level's script meets it: an
+ 	   invisible trigger, often a thin strip across a doorway. Reached
+ 	   two metres short of it, the objective was not met - the rocket
+@@ -3201,6 +3189,10 @@ void CG_AccessibilityMarkerFrame(void)
+ 			/* It shuts two seconds after it opens: through at once. */
+ 			ETA_Speech_Say(va("Marker reached, %s. F opens it, then walk straight in", eta_marker.name));
+ 		}
++		else if (!Q_stricmp(eta_marker.name, "the shut door out of here"))
++		{
++			ETA_Speech_Say("Marker reached, the shut door out of here. F opens it");
++		}
+ 		else if (!Q_stricmp(eta_marker.name, "the inside of the lift"))
+ 		{
+ 			ETA_Speech_Say("Marker reached, in the lift. T finds its lever; F on it sends the lift");
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 16424bb0..3d7e969f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5557,6 +5557,12 @@ static struct
+ 	vec3_t origin;    /* where the map puts it */
+ } eta_scriptMovers[ETA_MAX_SCRIPT_MOVERS];
+ static int eta_scriptMoverCount;
++static qboolean eta_scriptDoor[MAX_MODELS];   /* a script mover opened as a door */
++
++qboolean CG_AccessibilityScriptDoor(int model)
++{
++	return (qboolean)( model > 0 && model < MAX_MODELS && eta_scriptDoor[model] );
++}
+ static struct
+ {
+ 	char   targetname[48];
+@@ -6528,6 +6534,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_orderBroken = qfalse;
+ 	eta_orderPending[0] = '\0';
+ 	memset(eta_lifts, 0, sizeof(eta_lifts));
++	memset(eta_scriptDoor, 0, sizeof(eta_scriptDoor));
+ 	eta_scriptTriggerCount = eta_scriptMoverCount = eta_cornerCount = 0;
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+@@ -7208,6 +7215,40 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* A door the level works by its script - the rocket base's truck
++		   tailgate, a script mover the player starts shut behind, opened
++		   from an invisible trigger with the door's crosshair. The way
++		   went through it as through nothing, and the test player walked
++		   against it for eight minutes. */
++		if (users[i].hint[0] && !Q_stricmp(users[i].hint, "hint_door") && users[i].model > 0 && users[i].model < MAX_MODELS)
++		{
++			int m;
++
++			for (m = 0; m < eta_scriptMoverCount; m++)
++			{
++				vec3_t mins, maxs;
++				int    mm = eta_scriptMovers[m].model, k;
++
++				if (mm <= 0 || mm >= MAX_MODELS || !cgs.inlineDrawModel[mm])
++				{
++					continue;
++				}
++				trap_R_ModelBounds(cgs.inlineDrawModel[mm], mins, maxs);
++				for (k = 0; k < 3; k++)
++				{
++					if (cgs.inlineModelMidpoints[users[i].model][k] < eta_scriptMovers[m].origin[k] + mins[k] - 64.0f
++					    || cgs.inlineModelMidpoints[users[i].model][k] > eta_scriptMovers[m].origin[k] + maxs[k] + 64.0f)
++					{
++						break;
++					}
++				}
++				if (k == 3)
++				{
++					eta_scriptDoor[mm] = qtrue;
++				}
++			}
++		}
++
+ 		/* By the tram's way: its button. */
+ 		if (users[i].model > 0 && users[i].model < MAX_MODELS && ETA_ByTramWay(cgs.inlineModelMidpoints[users[i].model]))
+ 		{
+@@ -9061,6 +9102,22 @@ void CG_AccessibilityLiftLeverUsed(void)
+ 	eta_chosenSet = qfalse;
+ 	CG_AccessibilityLedClear();
+ 	CG_AccessibilityUseChoiceClear();
++	/* Ridden: not the way on again for a while. Kept here too, as it is
++	   pulled - the frames that see the ride are not all run, and the test
++	   player, ridden down, was sent straight back up the same lift. */
++	{
++		const float *me = cg.predictedPlayerState.origin;
++		int          i;
++
++		for (i = 0; i < eta_leverLiftCount; i++)
++		{
++			if (me[0] > eta_leverLift[i].mins[0] - 32.0f && me[0] < eta_leverLift[i].maxs[0] + 32.0f
++			    && me[1] > eta_leverLift[i].mins[1] - 32.0f && me[1] < eta_leverLift[i].maxs[1] + 32.0f)
++			{
++				eta_leverLiftUsedAt[i] = cg.time ? cg.time : 1;
++			}
++		}
++	}
+ 	if (CG_AccessibilityMarkerInfo(at, &name) && name && !Q_stricmpn(name, "lift lever", 10))
+ 	{
+ 		CG_AccessibilityMarkerForget();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index a6e2e3e8..0fe98880 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2329,6 +2329,7 @@ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *ob
+ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift);
+ void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityLiftLeverUsed(void);
++qboolean CG_AccessibilityScriptDoor(int model);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
