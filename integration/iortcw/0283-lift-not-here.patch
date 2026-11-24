@@ -1,0 +1,242 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index dd0ac8f4..d10b5c87 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -707,7 +707,9 @@ static qboolean ETA_ThingReusable(const eta_thing_t *thing)
+ 
+ static qboolean ETA_ThingOffLevel(const eta_thing_t *thing)
+ {
+-	return (qboolean)( ETA_ThingRideControl(thing) && fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]) > 128.0f );
++	return (qboolean)( ETA_ThingRideControl(thing)
++	                   && ( fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]) > 128.0f
++	                        || ( !Q_stricmpn(thing->name, "Lift lever", 10) && !CG_AccessibilityLeverLiftAt(thing->point) ) ) );
+ }
+ 
+ /* Those left in an area, or in the whole level for -1. */
+@@ -971,9 +973,15 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ {
+ 	int i;
+ 
+-	/* The train's lever: it leaves two seconds later - on at once. */
++	/* The train's lever: it leaves two seconds later - on at once. A
++	   lift's call button: whether the lift comes. */
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
++		if (!Q_stricmpn(eta_things.things[i].name, "Lift call button", 16) && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
++		{
++			CG_AccessibilityLiftCalled();
++			break;
++		}
+ 		if (!Q_stricmpn(eta_things.things[i].name, "Train lever", 11) && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
+ 		{
+ 			CG_AccessibilityRideBoardNow();
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index d26cfd42..3cd968d3 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5354,6 +5354,8 @@ void CG_AccessibilityRideBoardNow(void)
+ 	CG_AccessibilityFacePoint(at);
+ }
+ 
++static void ETA_LeverLiftFrame(void);
++
+ void CG_AccessibilityRideFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -5361,6 +5363,8 @@ void CG_AccessibilityRideFrame(void)
+ 	qboolean            moving;
+ 	int                 i, in, meters;
+ 
++	ETA_LeverLiftFrame();
++
+ 	for (i = 0; i < eta_rideCount; i++)
+ 	{
+ 		if (!ETA_RideBox(i, mins, maxs, &moving))
+@@ -6088,6 +6092,147 @@ static struct
+ } eta_leverLift[ETA_LEVER_LIFTS];
+ static int eta_leverLiftCount;
+ 
++/* A lever lift's box as it is now, and whether it moves: qfalse when it
++   is not in the snapshot. */
++static qboolean ETA_LeverLiftBox(int i, vec3_t mins, vec3_t maxs, qboolean *moving)
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++
++		if (es->eType != ET_MOVER || es->modelindex != eta_leverLift[i].model)
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[eta_leverLift[i].model], mins, maxs);
++		VectorAdd(mins, cg_entities[es->number].lerpOrigin, mins);
++		VectorAdd(maxs, cg_entities[es->number].lerpOrigin, maxs);
++		*moving = (qboolean)( es->pos.trType != TR_STATIONARY && es->pos.trDuration != 0
++		                      && cg.time < es->pos.trTime + es->pos.trDuration + 100 );
++		return qtrue;
++	}
++	return qfalse;
++}
++
++/* Whether the lift a lever of it at point works is there, at the
++   lever's height: the rocket base's second lift stood at the top, and
++   its lever at the bottom - in the empty shaft - was on T's list, and F
++   on it did nothing. */
++qboolean CG_AccessibilityLeverLiftAt(const vec3_t point)
++{
++	vec3_t   mins, maxs;
++	qboolean moving;
++	int      i;
++
++	for (i = 0; i < eta_leverLiftCount; i++)
++	{
++		if (point[0] < eta_leverLift[i].mins[0] - 48.0f || point[0] > eta_leverLift[i].maxs[0] + 48.0f
++		    || point[1] < eta_leverLift[i].mins[1] - 48.0f || point[1] > eta_leverLift[i].maxs[1] + 48.0f)
++		{
++			continue;
++		}
++		return (qboolean)( ETA_LeverLiftBox(i, mins, maxs, &moving) && point[2] > mins[2] - 64.0f && point[2] < maxs[2] + 16.0f );
++	}
++	return qtrue;   /* no lever lift there: nothing to say */
++}
++
++/*
++ * A lift called, and whether it came: the rocket base's second lift does
++ * not answer its call button until the level has sent it down once, with
++ * two soldiers in it. The tester pressed F there again and again, and
++ * nothing happened, and nothing was said. Its going and coming, near.
++ */
++static int    eta_liftCalledAt = -1, eta_liftCalled = -1;
++static vec3_t eta_liftCalledFrom;
++
++void CG_AccessibilityLiftCalled(void)
++{
++	vec3_t   mins, maxs, mid;
++	qboolean moving;
++	int      i, best = -1;
++	float    bestFar = 0.0f;
++
++	for (i = 0; i < eta_leverLiftCount; i++)
++	{
++		VectorAdd(eta_leverLift[i].mins, eta_leverLift[i].maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		mid[2] = cg.predictedPlayerState.origin[2];
++		if (best < 0 || Distance(mid, cg.predictedPlayerState.origin) < bestFar)
++		{
++			best    = i;
++			bestFar = Distance(mid, cg.predictedPlayerState.origin);
++		}
++	}
++	if (best < 0 || bestFar > 600.0f)
++	{
++		return;
++	}
++	eta_liftCalled   = best;
++	eta_liftCalledAt = cg.time;
++	eta_liftCalledFrom[2] = ETA_LeverLiftBox(best, mins, maxs, &moving) ? mins[2] : 0.0f;
++	(void)moving;
++}
++
++static void ETA_LeverLiftFrame(void)
++{
++	static int      state[ETA_LEVER_LIFTS];
++	static qboolean seen[ETA_LEVER_LIFTS];
++	const float     *me = cg.predictedPlayerState.origin;
++	vec3_t          mins, maxs, mid;
++	qboolean        moving;
++	int             i;
++
++	for (i = 0; i < eta_leverLiftCount; i++)
++	{
++		qboolean near, in;
++
++		if (!ETA_LeverLiftBox(i, mins, maxs, &moving))
++		{
++			seen[i] = qfalse;
++			continue;
++		}
++		near = (qboolean)( me[0] > mins[0] - 400.0f && me[0] < maxs[0] + 400.0f && me[1] > mins[1] - 400.0f
++		                   && me[1] < maxs[1] + 400.0f );
++		in   = (qboolean)( me[0] > mins[0] && me[0] < maxs[0] && me[1] > mins[1] && me[1] < maxs[1]
++		                   && me[2] > mins[2] - 8.0f && me[2] < maxs[2] );
++		if (seen[i] && state[i] != (int)moving && near && !in && cg.predictedPlayerState.pm_type == PM_NORMAL)
++		{
++			VectorAdd(mins, maxs, mid);
++			VectorScale(mid, 0.5f, mid);
++			mid[2] = mins[2] + 40.0f;
++			if (moving)
++			{
++				ETA_Speech_Say(va("The lift is moving, %s", mid[2] > me[2] + 64.0f ? "above you" : mid[2] < me[2] - 64.0f
++				                                                                     ? "below you" : "at your level"));
++			}
++			else if (fabsf(mins[2] + 8.0f - me[2] + 24.0f) < 96.0f)
++			{
++				ETA_Speech_Say(va("The lift is here, %s, %d meters", ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(mid)),
++				                  (int)( Distance(mid, me) * ETA_QU_TO_METERS + 0.5f )));
++			}
++			else
++			{
++				ETA_Speech_Say(mid[2] > me[2] ? "The lift has stopped, above you" : "The lift has stopped, below you");
++			}
++		}
++		seen[i]  = qtrue;
++		state[i] = moving;
++
++		/* Called, and not come within three seconds. */
++		if (i == eta_liftCalled && eta_liftCalledAt >= 0 && cg.time - eta_liftCalledAt > 3000)
++		{
++			eta_liftCalledAt = -1;
++			if (!moving && fabsf(mins[2] - eta_liftCalledFrom[2]) < 1.0f && !in)
++			{
++				ETA_Speech_Say("The lift did not come. The level holds it where it is for now: something else sends it, "
++				               "later. Wait nearby and listen for it moving, or find another way");
++			}
++		}
++	}
++}
++
+ qboolean CG_AccessibilityLiftShaft(const vec3_t mins, const vec3_t maxs)
+ {
+ 	int i;
+@@ -7183,7 +7328,7 @@ static void ETA_WorldRead(void);
+    rocket base, heard only "Button" at each. NULL for none. */
+ const char *CG_AccessibilityRideControlAhead(void)
+ {
+-	vec3_t      forward, to;
++	vec3_t      forward, to, nearest;
+ 	const char *best    = NULL;
+ 	float       bestDot = 0.85f;
+ 	int         i;
+@@ -7211,13 +7356,16 @@ const char *CG_AccessibilityRideControlAhead(void)
+ 				to[k] = cg.refdef.vieworg[k] < mins[k] ? mins[k] : cg.refdef.vieworg[k] > maxs[k] ? maxs[k] : cg.refdef.vieworg[k];
+ 			}
+ 		}
++		VectorCopy(to, nearest);
+ 		VectorSubtract(to, cg.refdef.vieworg, to);
+ 		far = VectorNormalize(to);
+ 		dot = far < 1.0f ? 1.0f : DotProduct(to, forward);
+ 		if (far < 160.0f && dot > bestDot)
+ 		{
+ 			bestDot = dot;
+-			best    = eta_users[i].name;
++			best    = !Q_stricmpn(eta_users[i].name, "Lift lever", 10)
++			          && !CG_AccessibilityLeverLiftAt(nearest)
++			          ? "Lift lever, but the lift is not here" : eta_users[i].name;
+ 		}
+ 	}
+ 	return best;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index fee65837..c3a60f77 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2322,6 +2322,8 @@ const char *CG_AccessibilityRideAction(void);
+ void CG_AccessibilityRideBoardNow(void);
+ qboolean CG_AccessibilityLiftShaft(const vec3_t mins, const vec3_t maxs);
+ const char *CG_AccessibilityRideControlAhead(void);
++qboolean CG_AccessibilityLeverLiftAt(const vec3_t point);
++void CG_AccessibilityLiftCalled(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );

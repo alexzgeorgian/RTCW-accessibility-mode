@@ -4771,3 +4771,29 @@ up onto it.
 
 In game: the lever pulled, walking on and jumping put the test player on
 the train, which carried them to its far end.
+
+## 0283-lift-not-here.patch
+
+The tester, past the train in the rocket base, pressed F at the second
+lift again and again, and nothing happened. That lift starts at the
+top, and the level does not let its call button bring it down until it
+has sent it down once itself - with two soldiers in it, a few seconds
+after the player passes a spot on the bottom floor. Its lever at the
+bottom, in the empty shaft, was on T's list all the while.
+
+- A lift's lever is on T's list only with the lift there, at its
+  height; at the crosshair, without it: "Lift lever, but the lift is
+  not here".
+- A call button pressed, and the lift not moving within three seconds:
+  "The lift did not come. The level holds it where it is for now:
+  something else sends it, later. Wait nearby and listen for it
+  moving, or find another way".
+- Near a lift worked by its lever, not in it: "The lift is moving,
+  above you", "The lift is here, ahead right, 3 meters", "The lift has
+  stopped, above you".
+
+In game: the call button at the bottom said the lift did not come; past
+the spot, "The lift is moving, above you", then "The lift is here" with
+its two soldiers; stepped in, "Lift lever, up", F, and up it went -
+"Lift lever, stops or starts it" on the way, "Lift lever, down" at the
+top.
