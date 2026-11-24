@@ -1,0 +1,604 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 62c0a436..82b8cfdd 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1569,6 +1569,15 @@ void CG_AccessibilityFrame( void ) {
+ 			name = NULL;
+ 		}
+ 
++		/* A lift's lever or call button, the train's lever: by name. */
++		if ( hint == HINT_BUTTON || hint == HINT_ACTIVATE ) {
++			const char *control = CG_AccessibilityRideControlAhead();
++
++			if ( control ) {
++				name = control;
++			}
++		}
++
+ 		/* A door already open, or swinging: F would shut it. */
+ 		if ( hint == HINT_DOOR || hint == HINT_DOOR_ROTATING ) {
+ 			trace_t trace;
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index c980259f..2003e87a 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1246,6 +1246,13 @@ static void ETA_AreaNameWork(int area, char *out, size_t size)
+ 		}
+ 	}
+ 
++	/* A lift's shaft: the lift. */
++	if (CG_AccessibilityLiftShaft(mins, maxs))
++	{
++		Q_strncpyz(out, "the lift", size);
++		return;
++	}
++
+ 	/* What kind of place. */
+ 	CG_AccessibilityPlace(at, &place);
+ 	kind = ETA_Place_KindName(place.kind);
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index b404fd0c..dd0ac8f4 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -468,7 +468,7 @@ static void ETA_ThingsRecord(void)
+ 			t->entityNum = -1;
+ 			t->kind      = ETA_THING_SWITCH;
+ 			t->ride      = qtrue;
+-			Q_strncpyz(t->name, "Tram, walk in", sizeof(t->name));
++			Q_strncpyz(t->name, CG_AccessibilityRideThingName(), sizeof(t->name));
+ 			eta_things.rideThing = ++eta_things.count;
+ 		}
+ 		if (eta_things.rideThing)
+@@ -688,6 +688,28 @@ static qboolean ETA_ThingBehindShutDoor(const eta_thing_t *thing)
+ 	                   && CG_AccessibilityDoorModel(cg_entities[trace.entityNum].currentState.modelindex, &opens) );
+ }
+ 
++/*
++ * A control of something ridden - the rocket base's lift levers and call
++ * buttons, its train's lever: used again and again, never done, and one
++ * of a lift's levers only at the height the lift stands at. The tester
++ * heard "Button" three times over for one lever, at three heights, and
++ * "Done" once it was pulled.
++ */
++static qboolean ETA_ThingRideControl(const eta_thing_t *thing)
++{
++	return (qboolean)( !Q_stricmpn(thing->name, "Lift ", 5) || !Q_stricmpn(thing->name, "Train lever", 11) );
++}
++
++static qboolean ETA_ThingReusable(const eta_thing_t *thing)
++{
++	return (qboolean)( !Q_stricmpn(thing->name, "Tram button", 11) || ETA_ThingRideControl(thing) );
++}
++
++static qboolean ETA_ThingOffLevel(const eta_thing_t *thing)
++{
++	return (qboolean)( ETA_ThingRideControl(thing) && fabsf(thing->point[2] - cg.predictedPlayerState.origin[2]) > 128.0f );
++}
++
+ /* Those left in an area, or in the whole level for -1. */
+ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ {
+@@ -698,7 +720,7 @@ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+ 		if (!eta_things.things[i].done && !eta_things.things[i].pressed && !eta_things.things[i].ride
+-		    && eta_things.things[i].known
++		    && !ETA_ThingOffLevel(&eta_things.things[i]) && eta_things.things[i].known
+ 		    && ( CG_AccessibilityAreaHolds(area, eta_things.things[i].point)
+ 		         || ( area >= 0 && area == CG_AccessibilityAreaHere() && ETA_ThingHereInSight(eta_things.things[i].point) ) ))
+ 		{
+@@ -949,6 +971,16 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ {
+ 	int i;
+ 
++	/* The train's lever: it leaves two seconds later - on at once. */
++	for (i = 0; i < eta_things.count; i++)
++	{
++		if (!Q_stricmpn(eta_things.things[i].name, "Train lever", 11) && ETA_ThingNear(eta_things.things[i].point, point, 64.0f))
++		{
++			CG_AccessibilityRideBoardNow();
++			break;
++		}
++	}
++
+ 	for (i = 0; i < eta_things.count; i++)
+ 	{
+ 		eta_thing_t *thing = &eta_things.things[i];
+@@ -957,7 +989,7 @@ void CG_AccessibilityThingUsed(int entityNum, const vec3_t point)
+ 		   switch pressed stays on the list, said pressed, after the rest:
+ 		   the tester pressed a door's switch, lost their way, and could
+ 		   not find the switch again on T to open the door. */
+-		if (thing->kind == ETA_THING_SWITCH && !thing->done && Q_stricmpn(thing->name, "Tram button", 11)
++		if (thing->kind == ETA_THING_SWITCH && !thing->done && !ETA_ThingReusable(thing)
+ 		    && Q_stricmpn(thing->name, "Spot ", 5)
+ 		    && ( ( entityNum >= 0 && thing->entityNum == entityNum ) || ETA_ThingNear(thing->point, point, 64.0f) ))
+ 		{
+@@ -1087,6 +1119,10 @@ static void ETA_ThingsStep(int step)
+ 			{
+ 				continue;   /* a puzzle's: all of it below, if any of it is here */
+ 			}
++			if (ETA_ThingOffLevel(&eta_things.things[i]))
++			{
++				continue;   /* a lift's lever at another height */
++			}
+ 			if (!eta_things.things[i].known && !eta_things.things[i].ride
+ 			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+ 			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
+@@ -1410,9 +1446,11 @@ static void ETA_ThingsStep(int step)
+ 		};
+ 		const char *action;
+ 
+-		action = thing->ride ? "Walk in, and stay inside"
++		action = thing->ride ? CG_AccessibilityRideAction()
+ 		                  : trapUnder ? "Walk up to it, and the moment you have it, step straight back"
+-		                  : !Q_stricmpn(thing->name, "Tram button", 11) && !CG_AccessibilitySwitchOffAt(thing->point)
++		                  : !Q_stricmpn(thing->name, "Train lever", 11)
++		                  ? "F starts the train, which leaves 2 seconds later: be by it, and jump on at once"
++		                  : ETA_ThingReusable(thing) && !CG_AccessibilitySwitchOffAt(thing->point)
+ 		                  ? "F uses it"
+ 		                  : isPuzzle && thing->pressed ? "Pressing it again does nothing: it counts once"
+ 		                  : isPuzzle && Q_stristr(why, "in order,") ? "F presses it: it counts, but the hidden doors stay shut"
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 004ec44c..d26cfd42 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4933,12 +4933,18 @@ static int eta_secretCount;
+ static struct
+ {
+ 	int model;
++	qboolean train; /* the rocket base's train, stood on: jumped onto */
+ 	int state;    /* -1 not yet seen, 0 standing, 1 moving */
+ 	int playerIn; /* the player in it when last looked at */
+ 	int arrivedAt;
+ }          eta_rides[ETA_MAX_RIDES];
+ static int eta_rideCount;
+ 
++static const char *ETA_RideName(int i)
++{
++	return i >= 0 && i < eta_rideCount && eta_rides[i].train ? "train" : "tram";
++}
++
+ /* The corners of a tram's way, and the switches by them: its buttons, at
+    each station, which call it and send it on. */
+ #define ETA_MAX_TRAM_CORNERS 64
+@@ -5117,6 +5123,17 @@ static qboolean ETA_RideHolds(const vec3_t mins, const vec3_t maxs, const vec3_t
+ }
+ 
+ /* For J: "You are in the tram, moving". qfalse when not in one. */
++/* On it: a tram holds the player inside, the train carries them on top. */
++static qboolean ETA_RideCarries(int i, const vec3_t mins, const vec3_t maxs, const vec3_t at)
++{
++	if (eta_rides[i].train)
++	{
++		return (qboolean)( at[0] > mins[0] - 8.0f && at[0] < maxs[0] + 8.0f && at[1] > mins[1] - 8.0f
++		                   && at[1] < maxs[1] + 8.0f && at[2] > maxs[2] - 8.0f && at[2] < maxs[2] + 64.0f );
++	}
++	return ETA_RideHolds(mins, maxs, at);
++}
++
+ qboolean CG_AccessibilityInRide(char *out, size_t size)
+ {
+ 	vec3_t   mins, maxs;
+@@ -5125,13 +5142,14 @@ qboolean CG_AccessibilityInRide(char *out, size_t size)
+ 
+ 	for (i = 0; i < eta_rideCount; i++)
+ 	{
+-		if (ETA_RideBox(i, mins, maxs, &moving) && ETA_RideHolds(mins, maxs, cg.predictedPlayerState.origin))
++		if (ETA_RideBox(i, mins, maxs, &moving) && ETA_RideCarries(i, mins, maxs, cg.predictedPlayerState.origin))
+ 		{
+ 			char station[64];
+ 
+ 			CG_AccessibilityTramStationText(cg.predictedPlayerState.origin, station, sizeof(station));
+-			Com_sprintf(out, size, moving ? "You are in the tram, moving. Stay inside" : "You are in the tram, standing%s",
+-			            station);
++			Com_sprintf(out, size, moving ? "You are %s the %s, moving. Stay %s" : "You are %s the %s, standing%s",
++			            eta_rides[i].train ? "on" : "in", ETA_RideName(i),
++			            moving ? ( eta_rides[i].train ? "on" : "inside" ) : station);
+ 			return qtrue;
+ 		}
+ 	}
+@@ -5241,12 +5259,21 @@ qboolean CG_AccessibilityRideAt(vec3_t point)
+ 	for (i = 0; i < eta_rideCount; i++)
+ 	{
+ 		if (!ETA_RideBox(i, mins, maxs, &moving) || moving
+-		    || ETA_RideHolds(mins, maxs, cg.predictedPlayerState.origin))
++		    || ETA_RideCarries(i, mins, maxs, cg.predictedPlayerState.origin))
+ 		{
+ 			continue;
+ 		}
++		/* The train: its side nearest the player, at its top - jumped onto. */
++		if (eta_rides[i].train)
++		{
++			const float *me = cg.predictedPlayerState.origin;
++
++			point[0] = me[0] < mins[0] ? mins[0] + 16.0f : me[0] > maxs[0] ? maxs[0] - 16.0f : me[0];
++			point[1] = me[1] < mins[1] ? mins[1] + 16.0f : me[1] > maxs[1] ? maxs[1] - 16.0f : me[1];
++			point[2] = maxs[2] + 24.0f;
++		}
+ 		/* Its way in, where there is one: led there, not into its side. */
+-		if (!ETA_RideEntrance(i, mins, maxs, point))
++		else if (!ETA_RideEntrance(i, mins, maxs, point))
+ 		{
+ 			point[0] = ( mins[0] + maxs[0] ) * 0.5f;
+ 			point[1] = ( mins[1] + maxs[1] ) * 0.5f;
+@@ -5261,6 +5288,72 @@ qboolean CG_AccessibilityRideAt(vec3_t point)
+ }
+ 
+ /* Its coming and going, as it changes. */
++/* For T: the ride near, by its name, and what to do. */
++static int ETA_RideNear(void)
++{
++	vec3_t   mins, maxs;
++	qboolean moving;
++	int      i, best = -1;
++	float    bestFar = 0.0f;
++
++	for (i = 0; i < eta_rideCount; i++)
++	{
++		vec3_t mid;
++
++		if (!ETA_RideBox(i, mins, maxs, &moving))
++		{
++			continue;
++		}
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		if (best < 0 || Distance(mid, cg.predictedPlayerState.origin) < bestFar)
++		{
++			best    = i;
++			bestFar = Distance(mid, cg.predictedPlayerState.origin);
++		}
++	}
++	return best;
++}
++
++const char *CG_AccessibilityRideThingName(void)
++{
++	return eta_rideCount && ETA_RideNear() >= 0 && eta_rides[ETA_RideNear()].train ? "Train, jump onto it" : "Tram, walk in";
++}
++
++const char *CG_AccessibilityRideAction(void)
++{
++	return eta_rideCount && ETA_RideNear() >= 0 && eta_rides[ETA_RideNear()].train
++	       ? "Pull its lever first: it leaves 2 seconds later. Then jump onto it, and stay on"
++	       : "Walk in, and stay inside";
++}
++
++/*
++ * The train's lever pulled: it leaves two seconds later, and the lever is
++ * four metres from it. The tester pulled it, and it left without them;
++ * its top is a little higher than a step, and they could not get up. Said
++ * at once, with where it is, and turned toward it.
++ */
++void CG_AccessibilityRideBoardNow(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	vec3_t               mins, maxs, at;
++	qboolean             moving;
++	int                  i = ETA_RideNear(), meters;
++
++	if (i < 0 || !eta_rides[i].train || !ETA_RideBox(i, mins, maxs, &moving) || ETA_RideCarries(i, mins, maxs, ps->origin))
++	{
++		return;
++	}
++	at[0]  = ps->origin[0] < mins[0] ? mins[0] + 16.0f : ps->origin[0] > maxs[0] ? maxs[0] - 16.0f : ps->origin[0];
++	at[1]  = ps->origin[1] < mins[1] ? mins[1] + 16.0f : ps->origin[1] > maxs[1] ? maxs[1] - 16.0f : ps->origin[1];
++	at[2]  = maxs[2] + 24.0f;
++	meters = (int)( Distance(at, ps->origin) * ETA_QU_TO_METERS + 0.5f );
++	ETA_HudNarrator_HoldPassive(cg.time);
++	ETA_Speech_Say(va("The train leaves in 2 seconds. Turning you to it: walk %d %s and jump onto it", meters < 1 ? 1 : meters,
++	                  meters == 1 ? "meter" : "meters"));
++	CG_AccessibilityFacePoint(at);
++}
++
+ void CG_AccessibilityRideFrame(void)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -5275,7 +5368,7 @@ void CG_AccessibilityRideFrame(void)
+ 			eta_rides[i].state = -1;
+ 			continue;
+ 		}
+-		in        = ETA_RideHolds(mins, maxs, ps->origin) ? 1 : 0;
++		in        = ETA_RideCarries(i, mins, maxs, ps->origin) ? 1 : 0;
+ 		middle[0] = ( mins[0] + maxs[0] ) * 0.5f;
+ 		middle[1] = ( mins[1] + maxs[1] ) * 0.5f;
+ 		middle[2] = mins[2] + 40.0f;
+@@ -5289,13 +5382,16 @@ void CG_AccessibilityRideFrame(void)
+ 				char station[64];
+ 
+ 				CG_AccessibilityTramStationText(ps->origin, station, sizeof(station));
+-				ETA_Speech_Say(moving ? "The tram is moving. Stay inside"
+-				               : va("The tram has stopped%s. J says where you are", station));
++				ETA_Speech_Say(moving ? va("The %s is moving. Stay %s", ETA_RideName(i), eta_rides[i].train ? "on it" : "inside")
++				               : va("The %s has stopped%s. J says where you are", ETA_RideName(i), station));
+ 			}
+ 			else if (meters <= 40)
+ 			{
+-				ETA_Speech_Say(moving ? va("The tram is leaving, %d meters, %s", meters,
++				ETA_Speech_Say(moving ? va("The %s is leaving, %d meters, %s", ETA_RideName(i), meters,
+ 				                           ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle)))
++				               : eta_rides[i].train
++				               ? va("The train has stopped, %d meters, %s", meters,
++				                    ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle)))
+ 				               : va("The tram has arrived, %d meters, %s. T finds it. Get in first, then press its button "
+ 				                    "from inside", meters,
+ 				                    ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(middle))));
+@@ -5304,7 +5400,8 @@ void CG_AccessibilityRideFrame(void)
+ 		else if (eta_rides[i].playerIn != in && eta_rides[i].state >= 0 && ps->pm_type == PM_NORMAL
+ 		         && ps->stats[STAT_HEALTH] > 0)
+ 		{
+-			ETA_Speech_Say(in ? "In the tram" : "Out of the tram");
++			ETA_Speech_Say(eta_rides[i].train ? ( in ? "On the train" : "Off the train" )
++			               : in ? "In the tram" : "Out of the tram");
+ 		}
+ 		if (eta_rides[i].state == 1 && !moving)
+ 		{
+@@ -5316,7 +5413,7 @@ void CG_AccessibilityRideFrame(void)
+ 			static int doorSaidAt = -100000;
+ 			vec3_t     door;
+ 
+-			if (!in && !moving && ps->pm_type == PM_NORMAL && ETA_RideEntrance(i, mins, maxs, door)
++			if (!in && !moving && !eta_rides[i].train && ps->pm_type == PM_NORMAL && ETA_RideEntrance(i, mins, maxs, door)
+ 			    && Distance(ps->origin, door) < 80.0f && fabsf(ps->origin[2] - door[2]) < 48.0f
+ 			    && ( cg.time - doorSaidAt > 6000 || cg.time < doorSaidAt ))
+ 			{
+@@ -5979,6 +6076,33 @@ static int    eta_postCount;
+ static vec3_t eta_mountedGun[ETA_MOUNTED_GUNS];
+ static int    eta_mountedGunCount;
+ 
++/* The level's lifts worked by a lever (script movers named "elevator"),
++   their footprint: the shaft's areas are named "the lift" - the tester
++   heard "the small room with 2 ways out" in the rocket base's. */
++#define ETA_LEVER_LIFTS 8
++
++static struct
++{
++	vec3_t mins, maxs;
++	int    model;
++} eta_leverLift[ETA_LEVER_LIFTS];
++static int eta_leverLiftCount;
++
++qboolean CG_AccessibilityLiftShaft(const vec3_t mins, const vec3_t maxs)
++{
++	int i;
++
++	for (i = 0; i < eta_leverLiftCount; i++)
++	{
++		if (mins[0] >= eta_leverLift[i].mins[0] - 64.0f && maxs[0] <= eta_leverLift[i].maxs[0] + 64.0f
++		    && mins[1] >= eta_leverLift[i].mins[1] - 64.0f && maxs[1] <= eta_leverLift[i].maxs[1] + 64.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ int CG_AccessibilityMountedGuns(vec3_t *out, int max)
+ {
+ 	int i;
+@@ -6124,6 +6248,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_weakRailCount   = 0;
+ 	eta_postCount       = 0;
+ 	eta_mountedGunCount = 0;
++	eta_leverLiftCount  = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
+@@ -6208,6 +6333,24 @@ static void ETA_ReadMapEntities(void)
+ 			eta_postCount++;
+ 		}
+ 
++		if (!Q_stricmp(classname, "script_mover") && Q_stristr(scriptname, "elevator") && model[0] == '*' && origin[0]
++		    && eta_leverLiftCount < ETA_LEVER_LIFTS)
++		{
++			int    index = atoi(model + 1);
++			vec3_t o;
++
++			if (index > 0 && index < MAX_MODELS && cgs.inlineDrawModel[index]
++			    && sscanf(origin, "%f %f %f", &o[0], &o[1], &o[2]) == 3)
++			{
++				trap_R_ModelBounds(cgs.inlineDrawModel[index], eta_leverLift[eta_leverLiftCount].mins,
++				                   eta_leverLift[eta_leverLiftCount].maxs);
++				VectorAdd(eta_leverLift[eta_leverLiftCount].mins, o, eta_leverLift[eta_leverLiftCount].mins);
++				VectorAdd(eta_leverLift[eta_leverLiftCount].maxs, o, eta_leverLift[eta_leverLiftCount].maxs);
++				eta_leverLift[eta_leverLiftCount].model = index;
++				eta_leverLiftCount++;
++			}
++		}
++
+ 		if (!Q_stricmp(classname, "misc_mg42") && origin[0] && eta_mountedGunCount < ETA_MOUNTED_GUNS
+ 		    && sscanf(origin, "%f %f %f", &eta_mountedGun[eta_mountedGunCount][0], &eta_mountedGun[eta_mountedGunCount][1],
+ 		              &eta_mountedGun[eta_mountedGunCount][2]) == 3)
+@@ -6250,18 +6393,23 @@ static void ETA_ReadMapEntities(void)
+ 			eta_tramCornerCount++;
+ 		}
+ 
+-		/* A tram: a script mover the level names so, big enough to ride. */
+-		if (!Q_stricmp(classname, "script_mover") && Q_stristr(scriptname, "tram") && model[0] == '*'
+-		    && eta_rideCount < ETA_MAX_RIDES)
++		/* A tram: a script mover the level names so, big enough to ride.
++		   Or a train - the rocket base's "train1", ridden on top. */
++		if (!Q_stricmp(classname, "script_mover") && model[0] == '*' && eta_rideCount < ETA_MAX_RIDES
++		    && ( Q_stristr(scriptname, "tram")
++		         || ( !Q_stricmpn(scriptname, "train", 5) && scriptname[5] >= '0' && scriptname[5] <= '9' ) ))
+ 		{
+-			int    index = atoi(model + 1);
+-			vec3_t mins, maxs;
++			int      index = atoi(model + 1);
++			qboolean train = (qboolean)!Q_stricmpn(scriptname, "train", 5);
++			vec3_t   mins, maxs;
+ 
+ 			if (index > 0 && index < MAX_MODELS && cgs.inlineDrawModel[index])
+ 			{
+ 				trap_R_ModelBounds(cgs.inlineDrawModel[index], mins, maxs);
+-				if (maxs[0] - mins[0] >= 128.0f && maxs[1] - mins[1] >= 96.0f)
++				if (train ? ( maxs[0] - mins[0] >= 64.0f && maxs[1] - mins[1] >= 64.0f )
++				    : ( maxs[0] - mins[0] >= 128.0f && maxs[1] - mins[1] >= 96.0f ))
+ 				{
++					eta_rides[eta_rideCount].train     = train;
+ 					eta_rides[eta_rideCount].model     = index;
+ 					eta_rides[eta_rideCount].state     = -1;
+ 					eta_rides[eta_rideCount].playerIn  = 0;
+@@ -6730,6 +6878,35 @@ static void ETA_ReadMapEntities(void)
+ 			}
+ 		}
+ 
++		/* A lift's lever and call buttons, the train's lever: named by
++		   what the level's script calls what they work. The tester, in
++		   the rocket base, heard "Button" for each. */
++		if (users[i].target[0])
++		{
++			const char *t = users[i].target;
++
++			if (Q_stristr(t, "uplever"))
++			{
++				name = "Lift lever, down";
++			}
++			else if (Q_stristr(t, "downlever"))
++			{
++				name = "Lift lever, up";
++			}
++			else if (Q_stristr(t, "lever") && Q_stristr(t, "toggle"))
++			{
++				name = "Lift lever, stops or starts it";
++			}
++			else if (Q_stristr(t, "toggle_upbtn") || Q_stristr(t, "toggle_dwnbtn"))
++			{
++				name = "Lift call button";
++			}
++			else if (!Q_stricmp(t, "train_button"))
++			{
++				name = "Train lever";
++			}
++		}
++
+ 		/* By the tram's way: its button. */
+ 		if (users[i].model > 0 && users[i].model < MAX_MODELS && ETA_ByTramWay(cgs.inlineModelMidpoints[users[i].model]))
+ 		{
+@@ -7001,6 +7178,51 @@ qboolean CG_AccessibilityDoorBox(int model, vec3_t mins, vec3_t maxs, qboolean *
+ 
+ static void ETA_WorldRead(void);
+ 
++/* The lift's lever or call button, or the train's lever, the crosshair
++   is on: its name for the crosshair's "Button" - the tester, in the
++   rocket base, heard only "Button" at each. NULL for none. */
++const char *CG_AccessibilityRideControlAhead(void)
++{
++	vec3_t      forward, to;
++	const char *best    = NULL;
++	float       bestDot = 0.85f;
++	int         i;
++
++	AngleVectors(cg.refdefViewAngles, forward, NULL, NULL);
++	for (i = 0; i < eta_userCount; i++)
++	{
++		float far, dot;
++
++		if (Q_stricmpn(eta_users[i].name, "Lift ", 5) && Q_stricmpn(eta_users[i].name, "Train lever", 11))
++		{
++			continue;
++		}
++		/* Its nearest part: the lift's lever, while it moves, is one
++		   trigger the whole height of the shaft. */
++		VectorCopy(cgs.inlineModelMidpoints[eta_users[i].model], to);
++		if (cgs.inlineDrawModel[eta_users[i].model])
++		{
++			vec3_t mins, maxs;
++			int    k;
++
++			trap_R_ModelBounds(cgs.inlineDrawModel[eta_users[i].model], mins, maxs);
++			for (k = 0; k < 3; k++)
++			{
++				to[k] = cg.refdef.vieworg[k] < mins[k] ? mins[k] : cg.refdef.vieworg[k] > maxs[k] ? maxs[k] : cg.refdef.vieworg[k];
++			}
++		}
++		VectorSubtract(to, cg.refdef.vieworg, to);
++		far = VectorNormalize(to);
++		dot = far < 1.0f ? 1.0f : DotProduct(to, forward);
++		if (far < 160.0f && dot > bestDot)
++		{
++			bestDot = dot;
++			best    = eta_users[i].name;
++		}
++	}
++	return best;
++}
++
+ /* Whether one of the tram's buttons is this near a point. */
+ qboolean CG_AccessibilityTramButtonNear(const vec3_t point, float range)
+ {
+@@ -9954,6 +10176,34 @@ static void ETA_CrushFrame(void)
+ 	{
+ 		return;
+ 	}
++	/* Riding the train, or a lift worked by its lever: its wheels, its
++	   load, move along with the player. The rocket base's train, ridden,
++	   was "Run behind left! Walls closing". */
++	{
++		vec3_t   rmins, rmaxs;
++		qboolean rmoving;
++		int      t;
++
++		for (t = 0; t < eta_rideCount; t++)
++		{
++			if (ETA_RideBox(t, rmins, rmaxs, &rmoving) && ETA_RideCarries(t, rmins, rmaxs, ps->origin))
++			{
++				return;
++			}
++		}
++	}
++	if (ps->groundEntityNum > 0 && ps->groundEntityNum < ENTITYNUM_WORLD)
++	{
++		int ground = cg_entities[ps->groundEntityNum].currentState.modelindex, t;
++
++		for (t = 0; t < eta_leverLiftCount; t++)
++		{
++			if (eta_leverLift[t].model == ground)
++			{
++				return;
++			}
++		}
++	}
+ 	VectorSet(body[0], ps->origin[0] - 16.0f, ps->origin[1] - 16.0f, ps->origin[2] - 16.0f);
+ 	VectorSet(body[1], ps->origin[0] + 16.0f, ps->origin[1] + 16.0f, ps->origin[2] + 32.0f);
+ 
+@@ -11282,6 +11532,23 @@ static void ETA_FloorFrame(void)
+ 			return;   /* carried: said as a lift */
+ 		}
+ 	}
++	/* Ridden: a tram, the train, a lift worked by its lever. The
++	   rocket base's train, starting, was "The floor under you is
++	   cracking and tilting". */
++	for (t = 0; t < eta_rideCount; t++)
++	{
++		if (eta_rides[t].model == es->modelindex)
++		{
++			return;
++		}
++	}
++	for (t = 0; t < eta_leverLiftCount; t++)
++	{
++		if (eta_leverLift[t].model == es->modelindex)
++		{
++			return;
++		}
++	}
+ 	kind = es->pos.trType != TR_STATIONARY && cg.time < es->pos.trTime + es->pos.trDuration && es->pos.trDelta[2] < -1.0f ? 2
+ 	       : es->apos.trType != TR_STATIONARY && cg.time < es->apos.trTime + es->apos.trDuration ? 1 : 0;
+ 	if (kind && ( saidFor != es->number || kind > saidKind ))
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 33f8243e..fee65837 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,11 @@ const char *CG_AccessibilityWeaponName( int weapon );
+ int CG_AccessibilityMountedGuns(vec3_t *out, int max);
+ qboolean CG_AccessibilityBoardingInside(const vec3_t point, vec3_t inside);
+ void CG_AccessibilityFacePoint(const vec3_t point);
++const char *CG_AccessibilityRideThingName(void);
++const char *CG_AccessibilityRideAction(void);
++void CG_AccessibilityRideBoardNow(void);
++qboolean CG_AccessibilityLiftShaft(const vec3_t mins, const vec3_t maxs);
++const char *CG_AccessibilityRideControlAhead(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );

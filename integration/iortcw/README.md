@@ -4741,3 +4741,33 @@ reached, the back of the truck. Facing up its ramp: walk straight in,
 then stand still, and it leaves with you", and turns the player up the
 ramp. From the tester's own save: O led round to the back, walking
 straight on met "Stowaway" and "no alarms", and the ending began.
+
+## 0282-rocket-lift-and-train.patch
+
+The tester, in the rocket base, found the level almost playable, but:
+the lift's controls were each only "Button", the lift hard to work, and
+the train left without them - pulled, it went, and they could not get
+up onto it.
+
+- The lift. Its lever is three invisible triggers, one for each height
+  the lift stands at, and two call buttons outside: they were three
+  "switches" left, "Button" at the crosshair, and "Done" once pulled.
+  Named now by what the level's script calls what they work: "Lift
+  lever, up" at the bottom, "Lift lever, down" at the top, "Lift lever,
+  stops or starts it" on the way, "Lift call button". Said at the
+  crosshair in place of "Button", never done, and only the lever at
+  the player's own height is on T's list. The shaft's areas are "the
+  lift", not "the small room with 2 ways out".
+- The train ("train1"), a ride as the first mission's tram is, ridden
+  on top: T lists "Train, jump onto it" and "Train lever". Its lever is
+  four metres from it, and it leaves two seconds after it is pulled;
+  its top is a little higher than a step. F on the lever says "The
+  train leaves in 2 seconds. Turning you to it: walk 4 meters and jump
+  onto it", and turns the player to it. Then "On the train", "The
+  train is moving. Stay on it", and J says "You are on the train".
+- Riding the train, its wheels and load moving along were "Run behind
+  left! Walls closing", and its start "The floor under you is cracking
+  and tilting": not said while carried by the train or a lift.
+
+In game: the lever pulled, walking on and jumping put the test player on
+the train, which carried them to its far end.
