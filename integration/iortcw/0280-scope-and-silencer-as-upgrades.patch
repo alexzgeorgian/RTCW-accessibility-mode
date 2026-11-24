@@ -1,0 +1,64 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 286e4764..62c0a436 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -253,6 +253,8 @@ const char *CG_AccessibilityWeaponName( int weapon ) {
+ 		return "Snooper rifle, scope";
+ 	case WP_FG42SCOPE:
+ 		return "FG42, scope";
++	case WP_SILENCER:
++		return "Luger, silencer";
+ 	case WP_AKIMBO:
+ 		return "Two Colts";
+ 	default:
+@@ -260,6 +262,36 @@ const char *CG_AccessibilityWeaponName( int weapon ) {
+ 	}
+ }
+ 
++/*
++ * A scope or a silencer put on or taken off: the same weapon, upgraded,
++ * not another one. The tester asked for them to be said so - "Scope on",
++ * not "Snooper rifle, scope, 5, 999 more" as if a new weapon were taken
++ * up. NULL for any other change of weapon.
++ */
++static const char *CG_AccessibilityAttachmentText( int from, int to ) {
++	qboolean scopedFrom, scopedTo;
++
++	if ( from <= WP_NONE || from >= WP_NUM_WEAPONS || to <= WP_NONE || to >= WP_NUM_WEAPONS
++		 || ( weapAlts[from] != to && weapAlts[to] != from ) ) {
++		return NULL;
++	}
++	scopedFrom = (qboolean)( from == WP_SNIPERRIFLE || from == WP_SNOOPERSCOPE || from == WP_FG42SCOPE );
++	scopedTo = (qboolean)( to == WP_SNIPERRIFLE || to == WP_SNOOPERSCOPE || to == WP_FG42SCOPE );
++	if ( scopedTo ) {
++		return "Scope on";
++	}
++	if ( scopedFrom ) {
++		return "Scope off";
++	}
++	if ( to == WP_SILENCER ) {
++		return "Silencer on";
++	}
++	if ( from == WP_SILENCER ) {
++		return "Silencer off";
++	}
++	return NULL;
++}
++
+ /* What the weapon has: in the clip and in reserve, as the HUD counts. */
+ static const char *CG_AccessibilityAmmoText( playerState_t *ps, int weapon ) {
+ 	int clip, reserve;
+@@ -1510,8 +1542,12 @@ void CG_AccessibilityFrame( void ) {
+ 	eta.health = health;
+ 
+ 	if ( ps->weapon != eta.weapon ) {
++		const char *attachment = CG_AccessibilityAttachmentText( eta.weapon, ps->weapon );
++
+ 		eta.weapon = ps->weapon;
+-		if ( ps->weapon > WP_NONE ) {
++		if ( attachment ) {
++			CG_AccessibilitySay( attachment );
++		} else if ( ps->weapon > WP_NONE ) {
+ 			const char *ammo = CG_AccessibilityAmmoText( ps, ps->weapon );
+ 
+ 			CG_AccessibilitySay( ammo[0] ? va( "%s, %s", CG_AccessibilityWeaponName( ps->weapon ), ammo )

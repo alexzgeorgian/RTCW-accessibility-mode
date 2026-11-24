@@ -4708,3 +4708,23 @@ whose item has an empty name, kept so it can't be given on its own.
 The weapon's name now says "Snooper rifle" for it, an empty item name
 falls back to "something", and "beyond the ...'s reach" takes the same
 name as the weapon switch.
+
+## 0279-machine-gun-nest-named.patch
+
+The tester, sent back to the forest's machine gun nest for a helmet,
+could not find it on semicolon's list: it was there, as "the grassy
+open ground with a ladder up", behind the way's 24 steps. A place
+outdoors with a mounted gun (misc_mg42) in it is now "the machine gun
+nest"; indoors, "the room with a mounted gun". And the list starts with
+the places that have things left, nearest first, then the way's steps
+in their fixed order, then the rest: in game, "1 of 35, the machine gun
+nest, 3 things left".
+
+## 0280-scope-and-silencer-as-upgrades.patch
+
+The tester asked for the Snooper's scope, and the Luger's silencer, to
+be said as an upgrade of the weapon in hand rather than as another
+weapon. Putting one on or taking it off now says "Scope on", "Scope
+off", "Silencer on", "Silencer off". Switching to the silenced Luger
+from another weapon names it "Luger, silencer", in the same way as
+"Snooper rifle, scope".

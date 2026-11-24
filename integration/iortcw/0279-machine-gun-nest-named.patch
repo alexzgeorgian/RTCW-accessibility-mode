@@ -1,0 +1,157 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 666251cd..c980259f 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -1307,6 +1307,29 @@ static void ETA_AreaNameWork(int area, char *out, size_t size)
+ 	{
+ 		Q_strncpyz(mark, station + 2, sizeof(mark));   /* past ", " */
+ 	}
++	/* A mounted gun: outdoors, a machine gun nest; indoors, the room
++	   with one. */
++	{
++		vec3_t guns[32];
++		int    n = CG_AccessibilityMountedGuns(guns, 32);
++
++		for (i = 0; !mark[0] && i < n; i++)
++		{
++			if (ETA_AreaOf(guns[i]) == area)
++			{
++				if (!Q_stricmp(kind, "room") || !Q_stricmp(kind, "small room") || strstr(kind, "upstairs")
++				    || strstr(kind, "attic") || !ETA_AreaGround(at))
++				{
++					Q_strncpyz(mark, "with a mounted gun", sizeof(mark));
++				}
++				else
++				{
++					Com_sprintf(out, size, "the machine gun nest");
++					return;
++				}
++			}
++		}
++	}
+ 	if (!mark[0] && CG_AccessibilityExitPoint(cg.predictedPlayerState.origin, wayOut) && ETA_AreaOf(wayOut) == area)
+ 	{
+ 		Q_strncpyz(mark, "with the way out", sizeof(mark));
+@@ -2848,12 +2871,25 @@ void CG_AccessibilityAreasBack(void)
+ 				}
+ 			}
+ 		}
+-		/* The hidden way's steps first, in the order they are walked,
+-		   whatever is nearest: the tester asked for an order that does
+-		   not change as X's does, so step 3 is always third. */
++		/* The places with things left first, nearest first as they
++		   are: the tester, sent back for a helmet, could not find the
++		   place it was in behind the way's 24 steps. Then the way's
++		   steps, in the order they are walked, whatever is nearest: the
++		   tester asked for an order that does not change as X's does,
++		   so step 3 is always the third of them. Then the rest. */
+ 		{
+-			int moved[ETA_AREAS_MAX], m = 0, k;
++			int moved[ETA_AREAS_MAX], m = 0, first, k;
++
++			for (k = 0; k < count; k++)
++			{
++				int b = eta_areas.back[k];
+ 
++				if (b < 0 ? eta_backOutCount[-1 - b] > 0 : CG_AccessibilityThingsLeftIn(b) > 0)
++				{
++					moved[m++] = b;
++				}
++			}
++			first = m;
+ 			for (k = 0; k < count; k++)
+ 			{
+ 				if (eta_areas.back[k] < 0 && eta_backOutCount[-1 - eta_areas.back[k]] == -2)
+@@ -2861,11 +2897,11 @@ void CG_AccessibilityAreasBack(void)
+ 					moved[m++] = eta_areas.back[k];
+ 				}
+ 			}
+-			for (k = 1; k < m; k++)
++			for (k = first + 1; k < m; k++)
+ 			{
+ 				int v = moved[k], q = k - 1;
+ 
+-				while (q >= 0 && moved[q] < v)   /* back[] is -1 - index: a higher value is an earlier step */
++				while (q >= first && moved[q] < v)   /* back[] is -1 - index: a higher value is an earlier step */
+ 				{
+ 					moved[q + 1] = moved[q];
+ 					q--;
+@@ -2874,9 +2910,12 @@ void CG_AccessibilityAreasBack(void)
+ 			}
+ 			for (k = 0; k < count; k++)
+ 			{
+-				if (!( eta_areas.back[k] < 0 && eta_backOutCount[-1 - eta_areas.back[k]] == -2 ))
++				int b = eta_areas.back[k];
++
++				if (!( b < 0 && eta_backOutCount[-1 - b] == -2 )
++				    && !( b < 0 ? eta_backOutCount[-1 - b] > 0 : CG_AccessibilityThingsLeftIn(b) > 0 ))
+ 				{
+-					moved[m++] = eta_areas.back[k];
++					moved[m++] = b;
+ 				}
+ 			}
+ 			memcpy(eta_areas.back, moved, count * sizeof(moved[0]));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 76e986e6..44613bc7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5971,6 +5971,25 @@ static int eta_weakRailCount;
+ static vec3_t eta_post[ETA_POSTS];
+ static int    eta_postCount;
+ 
++/* The level's mounted guns (misc_mg42), where they stand: a place with
++   one is named by it - the tester knew the forest's "machine gun nest",
++   but semicolon called it "the grassy open ground with a ladder up". */
++#define ETA_MOUNTED_GUNS 32
++
++static vec3_t eta_mountedGun[ETA_MOUNTED_GUNS];
++static int    eta_mountedGunCount;
++
++int CG_AccessibilityMountedGuns(vec3_t *out, int max)
++{
++	int i;
++
++	for (i = 0; i < eta_mountedGunCount && i < max; i++)
++	{
++		VectorCopy(eta_mountedGun[i], out[i]);
++	}
++	return i;
++}
++
+ qboolean CG_AccessibilityPostNear(const vec3_t at, float across, float up)
+ {
+ 	int i;
+@@ -6104,6 +6123,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_modelPropCount  = 0;
+ 	eta_weakRailCount   = 0;
+ 	eta_postCount       = 0;
++	eta_mountedGunCount = 0;
+ 	eta_rideCount       = 0;
+ 	eta_tramCornerCount = 0;
+ 	eta_tramStationCount = -1;
+@@ -6188,6 +6208,13 @@ static void ETA_ReadMapEntities(void)
+ 			eta_postCount++;
+ 		}
+ 
++		if (!Q_stricmp(classname, "misc_mg42") && origin[0] && eta_mountedGunCount < ETA_MOUNTED_GUNS
++		    && sscanf(origin, "%f %f %f", &eta_mountedGun[eta_mountedGunCount][0], &eta_mountedGun[eta_mountedGunCount][1],
++		              &eta_mountedGun[eta_mountedGunCount][2]) == 3)
++		{
++			eta_mountedGunCount++;
++		}
++
+ 		if (!Q_stricmp(classname, "trigger_deathCheck") && model[0] == '*' && eta_weakRailCount < ETA_WEAK_RAILS)
+ 		{
+ 			eta_weakRail[eta_weakRailCount++] = atoi(model + 1);
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index faef57d9..028b9d94 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2314,6 +2314,7 @@ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
+ qboolean CG_AccessibilityWayPlaceNamed(const char *name);
+ const char *CG_AccessibilityWeaponName( int weapon );
++int CG_AccessibilityMountedGuns(vec3_t *out, int max);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
