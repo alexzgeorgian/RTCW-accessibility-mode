@@ -4699,3 +4699,12 @@ name up to its first comma. What steered by the "hidden" in the name -
 the straight-line facing, the five-metre reach, the tested line - now
 asks whether the name is one of the level's steps
 (CG_AccessibilityWayPlaceNamed).
+
+## 0278-snooper-rifle-named.patch
+
+The tester, taking up the Snooper rifle, heard only its rounds - "4, 0
+more" - and no name. With its scope off the rifle is the game's Garand,
+whose item has an empty name, kept so it can't be given on its own.
+The weapon's name now says "Snooper rifle" for it, an empty item name
+falls back to "something", and "beyond the ...'s reach" takes the same
+name as the weapon switch.

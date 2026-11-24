@@ -1,0 +1,57 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index cca2b790..286e4764 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -234,14 +234,19 @@ static const char *CG_AccessibilityItemName( gitem_t *item ) {
+ 	if ( index > 0 && index < bg_numItems && cgs.itemPrintNames[index][0] ) {
+ 		return cgs.itemPrintNames[index];
+ 	}
+-	return item->pickup_name ? item->pickup_name : "something";
++	return item->pickup_name && item->pickup_name[0] ? item->pickup_name : "something";
+ }
+ 
+-static const char *CG_AccessibilityWeaponName( int weapon ) {
++const char *CG_AccessibilityWeaponName( int weapon ) {
+ 	if ( weapon <= WP_NONE || weapon >= WP_NUM_WEAPONS ) {
+ 		return "no weapon";
+ 	}
+ 	switch ( weapon ) {
++	/* The Snooper with its scope off: the game's item for it has no
++	   name at all, so the tester, taking the rifle up in the forest,
++	   heard only its rounds - "4, 0 more". */
++	case WP_GARAND:
++		return "Snooper rifle";
+ 	case WP_SNIPERRIFLE:
+ 		return "Mauser, scope";
+ 	case WP_SNOOPERSCOPE:
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 6ea1b106..9669b4ee 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1429,13 +1429,12 @@ static int ETA_EnemiesInReach(etaAimTarget_t *list, int count, etaAimTarget_t *b
+ /* "Soldier, ahead, 80 meters: beyond the Sten's reach, 37 meters". */
+ static void ETA_BeyondReachSay(const etaAimTarget_t *beyond)
+ {
+-	gitem_t *item  = BG_FindItemForWeapon((weapon_t)cg.predictedPlayerState.weapon);
+ 	int      reach = (int)( ETA_WeaponReach(cg.predictedPlayerState.weapon) * ETA_QU_TO_METERS + 0.5f );
+ 
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	ETA_Speech_Say(va("%s, %s, %d meters: beyond the %s's reach, %d %s", beyond->name,
+ 	                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(beyond->point)),
+-	                  (int)( beyond->meters + 0.5f ), item && item->pickup_name ? item->pickup_name : "weapon",
++	                  (int)( beyond->meters + 0.5f ), CG_AccessibilityWeaponName(cg.predictedPlayerState.weapon),
+ 	                  reach < 1 ? 1 : reach, reach == 1 ? "meter" : "meters"));
+ }
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c4d88946..faef57d9 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2313,6 +2313,7 @@ qboolean CG_AccessibilityLevelStart( vec3_t out );
+ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
+ qboolean CG_AccessibilityWayPlaceNamed(const char *name);
++const char *CG_AccessibilityWeaponName( int weapon );
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
