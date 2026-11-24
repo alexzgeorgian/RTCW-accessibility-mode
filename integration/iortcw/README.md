@@ -4813,3 +4813,34 @@ it. And T, outside the lift, offered the button, not the lever.
 
 In game: the lift down, F on the button said so; stepped in, T: "Lift
 lever, up, ahead, 1 meter. F uses it".
+
+## 0285-objectives-before-way-out.patch
+
+The tester felt the way out did not follow the level's script, in the
+whole game. In the rocket base it did not: at the start O said "Way
+out, 16 meters" - the exit right by the truck the player arrives in,
+shut until the rocket's launch is stopped, at the other end of the
+base. O led to an objective only when it was something to pick up.
+
+- O now leads to the next objective in the notebook's order that the
+  script meets at a place - the lowest-numbered not met yet, the
+  nearest of its places - before the way out: "Your next objective:
+  Locate Main Control Room, 76 meters, behind, west, 11 meters above
+  you. The way out comes after it". A place that meets two objectives
+  at once and ends the level, the forest's truck, still comes last; an
+  objective met at the way out itself is the way out.
+- The way to it is worked out over the floors alone, and the rocket
+  base's goes down a lift, along by the train and up another lift. With
+  no way on foot - or ten seconds' search without one, with a lift or
+  the train at the player's own level - O leads on by the nearest lift
+  or train not just ridden: "No way on foot found to your next
+  objective from here: it goes by a lift, 4 meters, ahead right. O
+  again leads there". To the lift's call button at the player's level,
+  or the train's lever; reached: "Marker reached, the lift's call
+  button. F calls the lift; once it is here, step in, and F on its
+  lever sends it", or "Marker reached, the train's lever. F pulls it;
+  then at once walk to the train and jump on".
+
+Not yet: an objective the script meets with no place - a count of
+enemies, a thing done anywhere - still leaves O on the way out, as
+before.
