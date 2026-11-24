@@ -4728,3 +4728,16 @@ weapon. Putting one on or taking it off now says "Scope on", "Scope
 off", "Silencer on", "Silencer off". Switching to the silenced Luger
 from another weapon names it "Luger, silencer", in the same way as
 "Snooper rifle, scope".
+
+## 0281-truck-boarded-from-behind.patch
+
+The tester, at the end of the forest, could not get into the supply
+truck. O had put the marker on the way out, in the truck's bed, and
+said "Marker reached, the way out" two metres from it - at the truck's
+side, through its side wall. The truck is boarded from behind, up its
+ramp. O now says "Way out: the truck, boarded from behind. To the back
+of it", and leads there; reached within 48 units, it says "Marker
+reached, the back of the truck. Facing up its ramp: walk straight in,
+then stand still, and it leaves with you", and turns the player up the
+ramp. From the tester's own save: O led round to the back, walking
+straight on met "Stowaway" and "no alarms", and the ending began.

@@ -1,0 +1,180 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9669b4ee..0bb61b53 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6072,6 +6072,23 @@ static void ETA_FaceTheWayGuess(void)
+ 	ETA_Speech_Say(va("Facing toward %s%s%s", what, height[0] ? ", " : "", height));
+ }
+ 
++/* Turned toward a point, at eye height: the back of the truck's
++   marker, reached, turns the player up its ramp. */
++void CG_AccessibilityFacePoint(const vec3_t point)
++{
++	etaAimTarget_t aim;
++
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	memset(&aim, 0, sizeof(aim));
++	aim.entityNum = -1;
++	VectorCopy(point, aim.point);
++	aim.point[2] = cg.predictedPlayerState.origin[2] + cg.predictedPlayerState.viewheight;
++	ETA_AimStartSnap(&aim, NULL);
++}
++
+ void CG_AccessibilityFaceTheWay(void)
+ {
+ 	char run[128];
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index a7bfe2ba..2a1c30bf 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3053,6 +3053,17 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 	}
+ 
++	/* The back of the truck: at the foot of its ramp, so that straight
++	   on is up it. */
++	if (arrived && !Q_stricmp(eta_marker.name, "the back of the truck"))
++	{
++		vec3_t flat;
++
++		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++		flat[2] = 0.0f;
++		arrived = (qboolean)( VectorLength(flat) <= 2.0f * ETA_MARKER_DOOR_UNITS );
++	}
++
+ 	/* Not arrived standing below it: in the church a large health pack
+ 	   lies on top of a stack of crates, three metres up, and the
+ 	   waypoint put on it said "reached" at the foot of the stack - its
+@@ -3105,6 +3116,17 @@ void CG_AccessibilityMarkerFrame(void)
+ 			/* It shuts two seconds after it opens: through at once. */
+ 			ETA_Speech_Say(va("Marker reached, %s. F opens it, then walk straight in", eta_marker.name));
+ 		}
++		else if (!Q_stricmp(eta_marker.name, "the back of the truck"))
++		{
++			vec3_t inside;
++
++			ETA_Speech_Say("Marker reached, the back of the truck. Facing up its ramp: walk straight in, "
++			               "then stand still, and it leaves with you");
++			if (CG_AccessibilityBoardingInside(eta_marker.origin, inside))
++			{
++				CG_AccessibilityFacePoint(inside);
++			}
++		}
+ 		else if (eta_marker.objective)
+ 		{
+ 			ETA_Speech_Say(va("Marker reached, %s", eta_marker.name));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 44613bc7..004ec44c 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -7581,6 +7581,59 @@ static void ETA_MarkerSetByO(const vec3_t point, const char *name)
+ 	Q_strncpyz(eta_oName, name, sizeof(eta_oName));
+ }
+ 
++/*
++ * A way out boarded from one side only: the forest's supply truck,
++ * parked in the compound, is stowed away in from behind, up its ramp.
++ * O put the marker on the way out in the truck's bed, and said "Marker
++ * reached" two metres from it - beside the truck, through its side: the
++ * tester stood there and could not get in. O now leads to the back of
++ * it first, and turns the player up the ramp.
++ */
++typedef struct
++{
++	const char *map;
++	float       behind[3];    /* where to stand: at the foot of the ramp */
++	float       inside[3];    /* in the back of it */
++} etaBoarding_t;
++
++static const etaBoarding_t eta_boardings[] =
++{
++	{ "forest", { -5120.0f, 40.0f, 232.0f }, { -5120.0f, -144.0f, 240.0f } },
++};
++
++static const etaBoarding_t *ETA_BoardingNear(const vec3_t point)
++{
++	char base[MAX_QPATH];
++	int  i;
++
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	for (i = 0; i < (int)ARRAY_LEN(eta_boardings); i++)
++	{
++		vec3_t in;
++
++		VectorCopy(eta_boardings[i].inside, in);
++		if (!Q_stricmp(eta_boardings[i].map, base) && Distance(point, in) < 192.0f)
++		{
++			return &eta_boardings[i];
++		}
++	}
++	return NULL;
++}
++
++/* The inside of what is boarded from the back, near point: for the
++   marker's arrival at its back, which turns the player toward it. */
++qboolean CG_AccessibilityBoardingInside(const vec3_t point, vec3_t inside)
++{
++	const etaBoarding_t *b = ETA_BoardingNear(point);
++
++	if (!b)
++	{
++		return qfalse;
++	}
++	VectorCopy(b->inside, inside);
++	return qtrue;
++}
++
+ static qboolean ETA_ExitPoint(int model, vec3_t out)
+ {
+ 	if (model <= 0 || model >= MAX_MODELS)
+@@ -7750,6 +7803,34 @@ void CG_AccessibilityWayOut(void)
+ 		return;
+ 	}
+ 
++	/* Boarded from behind: to the foot of its ramp first, unless in it
++	   already. */
++	{
++		const etaBoarding_t *b = ETA_BoardingNear(best);
++
++		if (b)
++		{
++			vec3_t behind, inside, flat;
++
++			VectorCopy(b->behind, behind);
++			VectorCopy(b->inside, inside);
++			VectorSubtract(inside, ps->origin, flat);
++			flat[2] = 0.0f;
++			if (VectorLength(flat) > 64.0f)
++			{
++				VectorSubtract(behind, ps->origin, delta);
++				meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++				ETA_Speech_Say(va("Way out: the truck, boarded from behind. To the back of it, %d %s, %s, %s. "
++				                  "O again turns you toward it",
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++				                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta)))));
++				ETA_MarkerSetByO(behind, "the back of the truck");
++				return;
++			}
++		}
++	}
++
+ 	VectorSubtract(best, ps->origin, delta);
+ 	meters = (int)(bestDistance * ETA_QU_TO_METERS + 0.5f);
+ 	ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 028b9d94..33f8243e 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2315,6 +2315,8 @@ void CG_AccessibilityAreasFrame( void );
+ qboolean CG_AccessibilityWayPlaceNamed(const char *name);
+ const char *CG_AccessibilityWeaponName( int weapon );
+ int CG_AccessibilityMountedGuns(vec3_t *out, int max);
++qboolean CG_AccessibilityBoardingInside(const vec3_t point, vec3_t inside);
++void CG_AccessibilityFacePoint(const vec3_t point);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
