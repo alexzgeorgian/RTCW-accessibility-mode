@@ -4686,3 +4686,16 @@ Not yet sure: from step 19 to the side door the tunnel's two soldiers,
 turning about the truck, saw the test player in one of two runs after
 an 18-second wait; the walkthrough's "before B.J. gets spotted" is a
 matter of timing there.
+
+## 0277-way-steps-named-as-places.patch
+
+The tester: there is no hideout in this level, so "hidden way" and
+"hidden place" mean nothing. The 23 steps of the forest's way, and the
+riverbed under the bridge, are now named as places look, like every
+other place on the list: "the road south-east of the east watchtower",
+"the tunnel's side door", "the riverbed under the bridge". Semicolon's
+summary says "and 24 places along the way". The marker keeps a step's
+name up to its first comma. What steered by the "hidden" in the name -
+the straight-line facing, the five-metre reach, the tested line - now
+asks whether the name is one of the level's steps
+(CG_AccessibilityWayPlaceNamed).

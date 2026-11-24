@@ -1,0 +1,187 @@
+diff --git a/SP/code/cgame/cg_accessibility_areas.c b/SP/code/cgame/cg_accessibility_areas.c
+index 872f1484..666251cd 100644
+--- a/SP/code/cgame/cg_accessibility_areas.c
++++ b/SP/code/cgame/cg_accessibility_areas.c
+@@ -2630,7 +2630,7 @@ static int ETA_LadderPlaces(int n)
+ 
+ /*
+  * The hidden places of a level, on semicolon's list after the ladders, as
+- * the towers are: "hidden place: the riverbed under the bridge". The
++ * the towers are: "the riverbed under the bridge". The
+  * tester, on the forest's road below the east watchtower, asked for a way
+  * past the gate's guards they would not see. A first list, from seven
+  * moments of the level, named five steps of a hidden way; from the
+@@ -2657,24 +2657,24 @@ typedef struct
+ 
+ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ {
+-	{ "forest", { 3264.0f, -400.0f, 214.0f }, "hidden way 1 of 23: the road south-east of the east watchtower" },
+-	{ "forest", { 4160.0f, -272.0f, 316.0f }, "hidden way 2 of 23: the truck's road, east" },
+-	{ "forest", { 4480.0f, 48.0f, 444.0f }, "hidden way 3 of 23: the slope north-east of the road" },
+-	{ "forest", { 4608.0f, 240.0f, 492.0f }, "hidden way 4 of 23: further up the slope" },
+-	{ "forest", { 4608.0f, 1136.0f, 919.0f }, "hidden way 5 of 23: high on the hill" },
+-	{ "forest", { 4864.0f, 1392.0f, 992.0f }, "hidden way 6 of 23: the hilltop" },
+-	{ "forest", { 5120.0f, 1776.0f, 805.0f }, "hidden way 7 of 23: down the hill's north side" },
+-	{ "forest", { 5120.0f, 2288.0f, 490.0f }, "hidden way 8 of 23: lower down, going north" },
+-	{ "forest", { 4544.0f, 2864.0f, 52.0f }, "hidden way 9 of 23: the valley floor" },
+-	{ "forest", { 4096.0f, 3376.0f, 248.0f }, "hidden way 10 of 23: the slope up out of the valley" },
+-	{ "forest", { 4096.0f, 3824.0f, 527.0f }, "hidden way 11 of 23: higher up the slope" },
+-	{ "forest", { 3968.0f, 3888.0f, 541.0f }, "hidden way 12 of 23: the hillside, turning west" },
+-	{ "forest", { 2688.0f, 4272.0f, 683.0f }, "hidden way 13 of 23: the hillside near the north-east watchtower" },
+-	{ "forest", { 2176.0f, 4592.0f, 696.0f }, "hidden way 14 of 23: the foot of the north-east watchtower's ladder" },
+-	{ "forest", { 1792.0f, 4592.0f, 523.0f }, "hidden way 15 of 23: the woods west of the north-east watchtower" },
+-	{ "forest", { 1472.0f, 4144.0f, 277.0f }, "hidden way 16 of 23: lower in the woods" },
+-	{ "forest", { 768.0f, 3632.0f, 208.0f }, "hidden way 17 of 23: the edge of the woods by the road's bend" },
+-	{ "forest", { 640.0f, 3632.0f, 208.0f }, "hidden way 18 of 23: the road's bend, where the truck drives on" },
++	{ "forest", { 3264.0f, -400.0f, 214.0f }, "the road south-east of the east watchtower" },
++	{ "forest", { 4160.0f, -272.0f, 316.0f }, "the truck's road, east" },
++	{ "forest", { 4480.0f, 48.0f, 444.0f }, "the slope north-east of the road" },
++	{ "forest", { 4608.0f, 240.0f, 492.0f }, "further up the slope" },
++	{ "forest", { 4608.0f, 1136.0f, 919.0f }, "high on the hill" },
++	{ "forest", { 4864.0f, 1392.0f, 992.0f }, "the hilltop" },
++	{ "forest", { 5120.0f, 1776.0f, 805.0f }, "down the hill's north side" },
++	{ "forest", { 5120.0f, 2288.0f, 490.0f }, "lower down, going north" },
++	{ "forest", { 4544.0f, 2864.0f, 52.0f }, "the valley floor" },
++	{ "forest", { 4096.0f, 3376.0f, 248.0f }, "the slope up out of the valley" },
++	{ "forest", { 4096.0f, 3824.0f, 527.0f }, "higher up the slope" },
++	{ "forest", { 3968.0f, 3888.0f, 541.0f }, "the hillside, turning west" },
++	{ "forest", { 2688.0f, 4272.0f, 683.0f }, "the hillside near the north-east watchtower" },
++	{ "forest", { 2176.0f, 4592.0f, 696.0f }, "the foot of the north-east watchtower's ladder" },
++	{ "forest", { 1792.0f, 4592.0f, 523.0f }, "the woods west of the north-east watchtower" },
++	{ "forest", { 1472.0f, 4144.0f, 277.0f }, "lower in the woods" },
++	{ "forest", { 768.0f, 3632.0f, 208.0f }, "the edge of the woods by the road's bend" },
++	{ "forest", { 640.0f, 3632.0f, 208.0f }, "the road's bend, where the truck drives on" },
+ 	/* Then the walkthrough's way into the tunnel (Nadia Varkovsky's
+ 	   RTCW FAQ: "Run all the way to the tunnel then reach the opening to
+ 	   the right near the end before B.J. gets spotted. Open the door and
+@@ -2683,12 +2683,12 @@ static const etaHiddenPlace_t eta_hiddenPlaces[] =
+ 	   the truck along the tunnel's north wall, 6 to 18 seconds after it
+ 	   drives on, the two soldiers at the far end facing the truck; the
+ 	   side door stays open some two seconds, so F and straight in. */
+-	{ "forest", { 700.0f, 3780.0f, 208.0f }, "hidden way 19 of 23: the road's north side by the bend, wait here a while for the truck to drive into the tunnel" },
+-	{ "forest", { -128.0f, 3755.0f, 208.0f }, "hidden way 20 of 23: the tunnel's side door, F opens it, walk straight in" },
+-	{ "forest", { -128.0f, 4420.0f, 232.0f }, "hidden way 21 of 23: the corridor behind the side door" },
+-	{ "forest", { -128.0f, 4990.0f, 232.0f }, "hidden way 22 of 23: the corridor's turn west" },
+-	{ "forest", { -1400.0f, 4990.0f, 232.0f }, "hidden way 23 of 23: the foot of the ladder up, at the corridor's end" },
+-	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "hidden place: the riverbed under the bridge" },
++	{ "forest", { 700.0f, 3780.0f, 208.0f }, "the road's north side by the bend, wait here a while for the truck to drive into the tunnel" },
++	{ "forest", { -128.0f, 3755.0f, 208.0f }, "the tunnel's side door, F opens it, walk straight in" },
++	{ "forest", { -128.0f, 4420.0f, 232.0f }, "the corridor behind the side door" },
++	{ "forest", { -128.0f, 4990.0f, 232.0f }, "the corridor's turn west" },
++	{ "forest", { -1400.0f, 4990.0f, 232.0f }, "the foot of the ladder up, at the corridor's end" },
++	{ "forest", { 1984.0f, 1648.0f, 42.0f }, "the riverbed under the bridge" },
+ };
+ 
+ /* The step of the hidden way, or hidden place, the player stands at:
+@@ -2713,6 +2713,33 @@ static const char *ETA_HiddenPlaceReached(const vec3_t at)
+ 	return NULL;
+ }
+ 
++/*
++ * Whether a marker's name is one of this level's places along the way -
++ * or the start of one, as the marker keeps it. Named as places look, like
++ * every other place on the list: the tester found "hidden way" and
++ * "hidden place" meant nothing in a level with no hideout in it.
++ */
++qboolean CG_AccessibilityWayPlaceNamed(const char *name)
++{
++	char base[MAX_QPATH];
++	int  i, length;
++
++	if (!name || !( length = strlen(name) ))
++	{
++		return qfalse;
++	}
++	COM_StripExtension(COM_SkipPath(cgs.mapname), base, sizeof(base));
++	for (i = 0; i < (int)ARRAY_LEN(eta_hiddenPlaces); i++)
++	{
++		if (!Q_stricmp(eta_hiddenPlaces[i].map, base) && !Q_stricmpn(eta_hiddenPlaces[i].name, name, length)
++		    && ( !eta_hiddenPlaces[i].name[length] || eta_hiddenPlaces[i].name[length] == ',' ))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static int ETA_HiddenPlaces(int n)
+ {
+ 	char base[MAX_QPATH];
+@@ -2911,7 +2938,7 @@ void CG_AccessibilityAreasBack(void)
+ 		                                            places == 1 ? "place" : "places", withThings)
+ 		                  : va("%d other %s explored, nothing left in them", places, places == 1 ? "place" : "places"),
+ 		                  ladders ? va(", and %d %s up", ladders, ladders == 1 ? "ladder" : "ladders") : "",
+-		                  hidden ? va(", and %d hidden %s", hidden, hidden == 1 ? "place" : "places") : ""));
++		                  hidden ? va(", and %d %s along the way", hidden, hidden == 1 ? "place" : "places") : ""));
+ 	}
+ 	if (area < 0 && eta_backOutCount[-1 - area] < 0)
+ 	{
+@@ -2935,9 +2962,9 @@ void CG_AccessibilityAreasBack(void)
+ 
+ 	if (area < 0 && eta_backOutCount[-1 - area] < 0)
+ 	{
+-		/* A hidden way's step by its number alone - "hidden way 3 of
+-		   18" - which the marker's name has room for. */
+-		char *cut = eta_backOutCount[-1 - area] == -2 && strchr(name, ':') ? strchr(name, ':') : strstr(name, ", ");
++		/* A step of the way, or a tower: up to its first comma - "the
++		   tunnel's side door", not what to do there. */
++		char *cut = strstr(name, ", ");
+ 
+ 		/* the marker keeps only "the ladder up the north-east watchtower" */
+ 		if (cut)
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index cb1613da..6ea1b106 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6983,7 +6983,7 @@ static void ETA_FacePendingFrame(void)
+ 			   it a few metres from hidden way 3, on the slope below it -
+ 			   a square the search could not step out of, by a tree or on
+ 			   the slope itself. */
+-			if (name && !Q_stricmpn(name, "hidden ", 7))
++			if (name && CG_AccessibilityWayPlaceNamed(name))
+ 			{
+ 				vec3_t flat;
+ 				int    meters, up;
+@@ -7173,7 +7173,7 @@ static void ETA_FaceTheWayUnreachable(void)
+ 	   in a straight line instead, and never sent on to the way out. The
+ 	   tester, in the forest, heard "no way" on hidden way 3 and was
+ 	   turned back toward the tunnel past the gate's guards. */
+-	if (!Q_stricmpn(what, "hidden ", 7))
++	if (CG_AccessibilityWayPlaceNamed(what))
+ 	{
+ 		const playerState_t *ps = &cg.predictedPlayerState;
+ 		etaAimTarget_t      way;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 020c3daa..a7bfe2ba 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -2394,7 +2394,7 @@ static void ETA_RouteTestedLine(const vec3_t here)
+ 	vec3_t                 point;
+ 
+ 	if (!eta_marker.active
+-	    || ( Q_stricmpn(eta_marker.name, "hidden way", 10) && !strstr(eta_marker.name, "side door") ))
++	    || ( !CG_AccessibilityWayPlaceNamed(eta_marker.name) && !strstr(eta_marker.name, "side door") ))
+ 	{
+ 		return;
+ 	}
+@@ -2999,7 +2999,7 @@ void CG_AccessibilityMarkerFrame(void)
+ 		   metres across and three up or down. The forest's hidden way 3
+ 		   sits up the slope off the road, and the tester, below it,
+ 		   could not get it to count. */
+-		if (!arrived && eta_marker.leftIt && !Q_stricmpn(eta_marker.name, "hidden ", 7) && !strstr(eta_marker.name, "side door"))
++		if (!arrived && eta_marker.leftIt && CG_AccessibilityWayPlaceNamed(eta_marker.name) && !strstr(eta_marker.name, "side door"))
+ 		{
+ 			vec3_t flat;
+ 			float  rise = eta_marker.origin[2] - cg.predictedPlayerState.origin[2];
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index e5bcf188..c4d88946 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2312,6 +2312,7 @@ int CG_AccessibilityMarkerSaidMeters( qboolean *alongWay );
+ qboolean CG_AccessibilityLevelStart( vec3_t out );
+ qboolean CG_AccessibilityAreaHolds( int area, const vec3_t at );
+ void CG_AccessibilityAreasFrame( void );
++qboolean CG_AccessibilityWayPlaceNamed(const char *name);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
