@@ -1,0 +1,82 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 0a1f0e6d..4b1a352f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4941,6 +4941,7 @@ static struct
+ static int eta_rideCount;
+ 
+ static int eta_rideUsedAt[ETA_MAX_RIDES];   /* when the player was last carried by it */
++static void ETA_ConnectorRidden(int lift, int ride);
+ 
+ static const char *ETA_RideName(int i)
+ {
+@@ -5437,7 +5438,7 @@ void CG_AccessibilityRideFrame(void)
+ 		eta_rides[i].playerIn = in;
+ 		if (in && moving)
+ 		{
+-			eta_rideUsedAt[i] = cg.time ? cg.time : 1;
++			ETA_ConnectorRidden(-1, i);
+ 		}
+ 	}
+ }
+@@ -6251,6 +6252,24 @@ void CG_AccessibilityLiftCalled(void)
+ 
+ static int eta_leverLiftUsedAt[ETA_LEVER_LIFTS];
+ 
++/* Ridden: the last lift or ride the player was carried by is not the way
++   on again until another has carried them - not for a while only: the
++   tester, slow at the rocket base's first lift's bottom, was sent back up
++   it three minutes on, toward the bedroom it starts by. */
++static void ETA_ConnectorRidden(int lift, int ride)
++{
++	int i;
++
++	for (i = 0; i < ETA_LEVER_LIFTS; i++)
++	{
++		eta_leverLiftUsedAt[i] = i == lift ? ( cg.time ? cg.time : 1 ) : 0;
++	}
++	for (i = 0; i < ETA_MAX_RIDES; i++)
++	{
++		eta_rideUsedAt[i] = i == ride ? ( cg.time ? cg.time : 1 ) : 0;
++	}
++}
++
+ /*
+  * The way on by a lift or a ride, when there is no way on foot: the way
+  * to the next objective is worked out over the floors alone, and the
+@@ -6269,7 +6288,7 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ 	{
+ 		vec3_t at;
+ 
+-		if (eta_leverLiftUsedAt[i] && cg.time >= eta_leverLiftUsedAt[i] && cg.time - eta_leverLiftUsedAt[i] < 180000)
++		if (eta_leverLiftUsedAt[i])
+ 		{
+ 			continue;
+ 		}
+@@ -6321,7 +6340,7 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ 		int k;
+ 
+ 		if (!eta_rides[i].train
+-		    || ( eta_rideUsedAt[i] && cg.time >= eta_rideUsedAt[i] && cg.time - eta_rideUsedAt[i] < 180000 ))
++		    || eta_rideUsedAt[i])
+ 		{
+ 			continue;
+ 		}
+@@ -6400,7 +6419,7 @@ static void ETA_LeverLiftFrame(void)
+ 		}
+ 		if (in && moving)
+ 		{
+-			eta_leverLiftUsedAt[i] = cg.time ? cg.time : 1;
++			ETA_ConnectorRidden(i, -1);
+ 		}
+ 
+ 		/* Called, and not come within three seconds. */
+@@ -9161,7 +9180,7 @@ void CG_AccessibilityLiftLeverUsed(void)
+ 			if (me[0] > eta_leverLift[i].mins[0] - 32.0f && me[0] < eta_leverLift[i].maxs[0] + 32.0f
+ 			    && me[1] > eta_leverLift[i].mins[1] - 32.0f && me[1] < eta_leverLift[i].maxs[1] + 32.0f)
+ 			{
+-				eta_leverLiftUsedAt[i] = cg.time ? cg.time : 1;
++				ETA_ConnectorRidden(i, -1);
+ 			}
+ 		}
+ 	}

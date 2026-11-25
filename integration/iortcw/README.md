@@ -4999,3 +4999,14 @@ by a lift: to its call button first, 13 meters, ahead left. O again
 leads there" (or "by the train: to its lever first"), and at it, "The
 way to your next objective goes by this lift. If it is not here, its
 call button brings it; step in, and F on its lever sends it".
+
+## 0294-last-ridden-lift.patch
+
+The tester, down the rocket base's first lift and on toward the train,
+was turned back toward the bedroom by the lift's top. A lift ridden was
+kept from being the way on for three minutes only; slow at the bottom,
+fighting or looking for the train, the tester was offered the same lift
+back up. Now the lift or ride last carried by is not the way on until
+another has carried the player. In game: up the first lift and down
+again, O at its bottom: "The way to your next objective goes by a lift:
+to its call button first, 78 meters, left" - the second lift's.
