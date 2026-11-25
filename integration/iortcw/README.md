@@ -4956,3 +4956,22 @@ lever, down, ahead, 13 meters", the lever at the top, and F turned
 toward it rather than pulling the one in front. T's list is made again
 once the player is more than 96 units higher or lower than when it was
 made. In game: up, T, F, down, T, F, up again.
+
+## 0291-whole-script-lift-sender.patch
+
+- The level's scripts were read 64 KB at a time, and their lines kept up
+  to 1024: nine of the game's are longer (the dam's is 110 KB), and the
+  rocket base's two have 1533 such lines. What came after - who rides
+  the second lift down, objectives and unlocks late in the file - was
+  not read. Now 160 KB, and 4096 lines.
+- The tester, at the rocket base's second lift, pressed its call button
+  again and again and got stuck: it starts at the top and comes down
+  only with two soldiers in it, sent by the script once the player
+  passes a spot nearby. Read from the script - the lift's lever, the
+  soldier whose spawn pulls it ("toggle_by_ai"), the player event that
+  alerts him, the trigger that fires it - the call button now says
+  "The lift did not come: the level sends it down by itself, with
+  soldiers in it, once you pass a spot 20 meters away, behind. O leads
+  there; then come back here, ready for them. Passing it also starts a
+  countdown: the rocket launches about 2 minutes later unless its
+  launch is stopped" - the last when that event starts a countdown.

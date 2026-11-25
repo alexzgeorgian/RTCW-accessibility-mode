@@ -1,0 +1,171 @@
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 5377e7d1..4d8ace32 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -30,7 +30,7 @@
+  */
+ 
+ #define ETA_UNLOCK_RECORDS 2048
+-#define ETA_UNLOCK_LINES   1024
++#define ETA_UNLOCK_LINES   4096   /* the rocket base's two scripts: 1533 */
+ #define ETA_UNLOCK_SPOTS   32
+ #define ETA_UNLOCK_DEPTH   6
+ 
+@@ -217,7 +217,10 @@ static void ETA_UnlockObjectiveAt(const vec3_t at)
+    its lines in braces. */
+ static void ETA_UnlockReadScript(const char *file)
+ {
+-	static char  text[65536];
++	/* The largest of the game's scripts, the dam's, is 110 KB: at 64 KB
++	   the rocket base's was cut off, the lift's soldiers and more not
++	   read. */
++	static char  text[160 * 1024];
+ 	fileHandle_t f;
+ 	int          length, depth = 0;
+ 	char         owner[32], event[48];
+@@ -928,6 +931,78 @@ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *ob
+ 	return (qboolean)found;
+ }
+ 
++/*
++ * What sends a lift worked by its lever, when its call button will not:
++ * the rocket base's second lift comes down only with two soldiers in it,
++ * a soldier whose spawn pulls the lever ("toggle_by_ai"), alerted by a
++ * player trigger at a spot nearby. Read from the script: the lift's own
++ * lever (what the lift's events trigger), the soldier who pulls it, the
++ * player event that alerts him, and the trigger that fires that event.
++ * Where the trigger is; qfalse with none.
++ */
++/* Whether the player event that fired at a spot also starts a countdown
++   - the rocket base's launch: "trigger counter2 v2_countdown". */
++static char eta_senderEvent[48];
++
++qboolean CG_AccessibilityLiftSenderCountdown(void)
++{
++	int i;
++
++	for (i = 0; eta_senderEvent[0] && i < eta_unlockLineCount; i++)
++	{
++		if (eta_unlockLines[i].verb == 't' && !Q_stricmp(eta_unlockLines[i].owner, "player")
++		    && !Q_stricmp(eta_unlockLines[i].event, eta_senderEvent) && Q_stristr(eta_unlockLines[i].whatEvent, "countdown"))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out)
++{
++	char lever[48] = "", ai[32] = "", event[48] = "";
++	int  i;
++
++	for (i = 0; i < eta_unlockLineCount && !lever[0]; i++)
++	{
++		if (eta_unlockLines[i].verb == 't' && !Q_stricmp(eta_unlockLines[i].owner, liftScript)
++		    && Q_stristr(eta_unlockLines[i].what, "lever"))
++		{
++			Q_strncpyz(lever, eta_unlockLines[i].what, sizeof(lever));
++		}
++	}
++	for (i = 0; lever[0] && i < eta_unlockLineCount && !ai[0]; i++)
++	{
++		if (eta_unlockLines[i].verb == 't' && !Q_stricmp(eta_unlockLines[i].what, lever)
++		    && !Q_stricmp(eta_unlockLines[i].whatEvent, "toggle_by_ai"))
++		{
++			Q_strncpyz(ai, eta_unlockLines[i].owner, sizeof(ai));
++		}
++	}
++	for (i = 0; ai[0] && i < eta_unlockLineCount && !event[0]; i++)
++	{
++		if (eta_unlockLines[i].verb == 'a' && !Q_stricmp(eta_unlockLines[i].owner, "player")
++		    && !Q_stricmp(eta_unlockLines[i].what, ai))
++		{
++			Q_strncpyz(event, eta_unlockLines[i].event, sizeof(event));
++		}
++	}
++	for (i = 0; event[0] && i < eta_unlockRecordCount; i++)
++	{
++		const eta_unlockRecord_t *r = &eta_unlockRecords[i];
++
++		if (!Q_stricmp(r->classname, "ai_trigger") && !Q_stricmp(r->ainame, "player") && !Q_stricmp(r->target, event)
++		    && r->model > 0 && r->model < MAX_MODELS)
++		{
++			VectorCopy(cgs.inlineModelMidpoints[r->model], out);
++			Q_strncpyz(eta_senderEvent, event, sizeof(eta_senderEvent));
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* The nearest place where something an objective needs is picked up,
+    not met yet. The forest's way out is the supply truck in the compound,
+    and O led there - past the tunnel the tester remembered, by which the
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 3d7e969f..7ea640af 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6103,6 +6103,7 @@ static struct
+ {
+ 	vec3_t mins, maxs;
+ 	int    model;
++	char   script[48];   /* its scriptname */
+ } eta_leverLift[ETA_LEVER_LIFTS];
+ static int eta_leverLiftCount;
+ 
+@@ -6388,8 +6389,31 @@ static void ETA_LeverLiftFrame(void)
+ 			eta_liftCalledAt = -1;
+ 			if (!moving && fabsf(mins[2] - eta_liftCalledFrom[2]) < 1.0f && !in)
+ 			{
+-				ETA_Speech_Say("The lift did not come. The level holds it where it is for now: something else sends it, "
+-				               "later. Wait nearby and listen for it moving, or find another way");
++				vec3_t spot;
++
++				/* What sends it, from the script: the rocket base's
++				   second lift comes down with soldiers in it once the
++				   player passes a spot nearby. The tester pressed the
++				   button again and again, and got stuck. */
++				if (CG_AccessibilityLiftSenderSpot(eta_leverLift[i].script, spot)
++				    && Distance(spot, cg.predictedPlayerState.origin) > 96.0f)
++				{
++					int meters = (int)( Distance(spot, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f );
++
++					CG_AccessibilityChoose(spot, "the spot that sends the lift");
++					ETA_Speech_Say(va("The lift did not come: the level sends it down by itself, with soldiers in it, "
++					                  "once you pass a spot %d %s away, %s. O leads there; then come back here, ready "
++					                  "for them.%s", meters, meters == 1 ? "meter" : "meters",
++					                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(spot)),
++					                  CG_AccessibilityLiftSenderCountdown()
++					                  ? " Passing it also starts a countdown: the rocket launches about 2 minutes later "
++					                    "unless its launch is stopped" : ""));
++				}
++				else
++				{
++					ETA_Speech_Say("The lift did not come. The level holds it where it is for now: something else sends it, "
++					               "later. Wait nearby and listen for it moving, or find another way");
++				}
+ 			}
+ 		}
+ 	}
+@@ -6655,6 +6679,7 @@ static void ETA_ReadMapEntities(void)
+ 				VectorAdd(eta_leverLift[eta_leverLiftCount].mins, o, eta_leverLift[eta_leverLiftCount].mins);
+ 				VectorAdd(eta_leverLift[eta_leverLiftCount].maxs, o, eta_leverLift[eta_leverLiftCount].maxs);
+ 				eta_leverLift[eta_leverLiftCount].model = index;
++				Q_strncpyz(eta_leverLift[eta_leverLiftCount].script, scriptname, sizeof(eta_leverLift[0].script));
+ 				eta_leverLiftCount++;
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 0fe98880..ac7db695 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2330,6 +2330,8 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityLiftLeverUsed(void);
+ qboolean CG_AccessibilityScriptDoor(int model);
++qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out);
++qboolean CG_AccessibilityLiftSenderCountdown(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
