@@ -5115,3 +5115,45 @@ the "Abort launch button, objective 2", where the tester heard
 stays "Button, objective N". In game, from the bedroom save: T says
 "Nothing left in this area. 1 thing in other areas", and the test
 player is at the lift, in it and down in 47 seconds.
+
+## 0303-level-trail.patch
+
+The tester, past the rocket base's abort button, could not find the way
+on, and asked for the game's own data to be used. O aimed straight at
+the exit objective, a hundred metres off, and the way-finder, which sees
+the map's stone but not its movers, found none. The level's script has
+the way: the player's own triggers, numbered in the order they are
+walked into - "action11" down by the rocket, "action12", "13", "14"
+past the soldiers, "action18" by the front doors, "18a" and "18b" at
+each end of the hanging bridge, "action20", and "action21" where the
+exit objective is met. From the objective last met, O now leads by
+them, one at a time: "Your next objective: Locate exit and proceed to
+the Outer Compound, 102 meters. The way there goes on as the level
+leads: 7 meters, right, 7 meters below you". A step is reached by
+walking into it; how far along is kept by map in a cvar, so a save
+loaded again keeps it. Before the first objective, and to an objective
+met at no numbered trigger - the abort button - O leads as before.
+
+Where the map shows no way to the next step, on the same floor and
+near, it is over something that moves: O faces it in a straight line,
+"the map shows no way there, so it goes over something that moves, a
+bridge or a platform. Walk at it; the marker sounds from there" - so
+over the hanging bridge. On another floor - the bridge fallen under the
+player into the train tunnel - the trail is let go of for the objective,
+which O reaches by the first lift. No way to a step is never traded for
+the way out.
+
+The way down from the control room is the ladder in the room south of
+it, and getting onto it from the top failed three ways: led to it, the
+climb faced its top and walked backward, away from it; come at from one
+side, the player backed off against the railing beside its head; and the
+way there goes under the rock, where the climb walked into the ceiling
+standing. The climb now walks forward to where the ladder is got onto,
+lines up with its middle before backing off, and crouches where the
+ceiling is too low.
+
+In game, with the test player from a save just after the abort: down
+the ladder, through the moving door into the rocket room, the tunnel,
+the stairs, the front doors' corridor, over the bridge, and the exit
+objective met, in a minute from the front doors. Still open: past the
+objective, the exit door and the vent to the outside.

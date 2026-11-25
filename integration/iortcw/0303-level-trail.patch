@@ -1,0 +1,465 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 9a55fd34..1eb8c754 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -573,6 +573,7 @@ typedef struct
+ 	int      sideAxis;
+ 	float    middle;
+ 	int      strafe;    /* the step key held: 1 right, -1 left */
++	qboolean crouched;  /* the climb's own crouch held, under a low ceiling on the way to the ladder */
+ 	float    bestZ;     /* highest yet, going up */
+ 	int      bestAt;
+ } eta_climb_t;
+@@ -640,6 +641,22 @@ static void ETA_ClimbStrafe(int dir)
+ 	eta_climb.strafe = dir;
+ }
+ 
++/* Crouched on the way to the ladder, under a ceiling too low to walk
++   under standing: the rocket base's way to its ladder down from the
++   control room goes under the rock, and the climb, walked at it
++   standing, never got there - "Could not get onto the ladder". */
++#define ETA_CLIMB_KEY_CROUCH "977"
++
++static void ETA_ClimbCrouch(qboolean on)
++{
++	if (on == eta_climb.crouched)
++	{
++		return;
++	}
++	trap_SendConsoleCommand(va("%smovedown " ETA_CLIMB_KEY_CROUCH "\n", on ? "+" : "-"));
++	eta_climb.crouched = on;
++}
++
+ /* Walking, not running: backing off an edge onto a ladder under it. */
+ #define ETA_CLIMB_KEY_WALK "989"
+ static qboolean eta_climbWalk;
+@@ -663,6 +680,7 @@ static void ETA_ClimbStop(const char *say)
+ 	ETA_ClimbWalk(qfalse);
+ 	ETA_ClimbMove(0);
+ 	ETA_ClimbStrafe(0);
++	ETA_ClimbCrouch(qfalse);
+ 	ETA_AimKeys(0, 0);
+ 	ETA_TurnBoost(qfalse);
+ 	eta_climb.active = qfalse;
+@@ -827,6 +845,7 @@ static void ETA_ClimbFrame(void)
+ 	qboolean            onGround  = (qboolean)(ps->groundEntityNum != ENTITYNUM_NONE);
+ 	vec3_t              wanted, toLadder;
+ 	float               yawError;
++	qboolean            aligning, approaching;
+ 
+ 	if (!cg.snap || ps->pm_type != PM_NORMAL || cg.cameraMode)
+ 	{
+@@ -1005,6 +1024,38 @@ static void ETA_ClimbFrame(void)
+ 	}
+ 	toLadder[2] = 0.0f;
+ 
++	/* A ceiling too low to stand under, here or a step on: crouched. */
++	if (!eta_climb.latched && onGround)
++	{
++		vec3_t  stand = { 18.0f, 18.0f, 48.0f }, low = { 18.0f, 18.0f, 0.0f }, step, ahead;
++		vec3_t  bmins = { -18.0f, -18.0f, -24.0f };
++		trace_t tr;
++		qboolean under;
++
++		low[2] = (float)ps->crouchMaxZ;
++		VectorCopy(toLadder, step);
++		VectorNormalize(step);
++		VectorMA(ps->origin, 32.0f, step, ahead);
++		CG_Trace(&tr, ps->origin, bmins, stand, ps->origin, ps->clientNum, MASK_PLAYERSOLID);
++		under = (qboolean)tr.startsolid;
++		if (!under)
++		{
++			CG_Trace(&tr, ps->origin, bmins, stand, ahead, ps->clientNum, MASK_PLAYERSOLID);
++			if (tr.fraction < 1.0f)
++			{
++				trace_t tr2;
++
++				CG_Trace(&tr2, ps->origin, bmins, low, ahead, ps->clientNum, MASK_PLAYERSOLID);
++				under = (qboolean)( tr2.fraction > tr.fraction + 0.1f );
++			}
++		}
++		ETA_ClimbCrouch(under);
++	}
++	else
++	{
++		ETA_ClimbCrouch(qfalse);
++	}
++
+ 	wanted[YAW]  = vectoyaw(toLadder);
+ 	wanted[ROLL] = 0.0f;
+ 
+@@ -1038,7 +1089,14 @@ static void ETA_ClimbFrame(void)
+ 	   side, the player slid along it as they climbed, off its edge, and
+ 	   at the forest's watchtower's top climbed into the wall beside the
+ 	   way up, under the roof. */
+-	if (eta_climb.hasMiddle && eta_climb.latched && onLadder)
++	/* Going down, before getting on: to the middle first. At the
++	   rocket base's ladder down from the control room, come at from one
++	   side, the player backed off the edge against the railing beside the
++	   ladder's head and never got onto it. */
++	aligning = (qboolean)( eta_climb.hasMiddle && !eta_climb.latched && !eta_climb.goesUp && onGround
++	                       && !eta_climb.hasRoundFirst && !eta_climb.hasRound && !eta_climb.hasStand
++	                       && fabsf(ps->origin[eta_climb.sideAxis] - eta_climb.middle) > 6.0f );
++	if (eta_climb.hasMiddle && ( ( eta_climb.latched && onLadder ) || aligning ))
+ 	{
+ 		vec3_t right;
+ 		float  off = ps->origin[eta_climb.sideAxis] - eta_climb.middle;
+@@ -1058,8 +1116,22 @@ static void ETA_ClimbFrame(void)
+ 		ETA_ClimbStrafe(0);
+ 	}
+ 
+-	ETA_ClimbWalk((qboolean)( eta_climb.behind && !eta_climb.latched && onGround ));
+-	if (eta_climb.behind && !eta_climb.latched && !onGround && !onLadder)
++	/* On the way to where it is got onto - its stand, or round it -
++	   forward, facing there, even for a ladder backed down: backing
++	   toward the stand walked the player away from the rocket base's
++	   ladder, facing it, and "Could not get onto the ladder". */
++	approaching = (qboolean)( !eta_climb.latched
++	                          && ( eta_climb.hasRoundFirst || eta_climb.hasRound || eta_climb.hasStand ) );
++	ETA_ClimbWalk((qboolean)( eta_climb.behind && !eta_climb.latched && onGround && !approaching ));
++	if (aligning)
++	{
++		ETA_ClimbMove(0);
++	}
++	else if (approaching)
++	{
++		ETA_ClimbMove(Q_fabs(yawError) < ETA_CLIMB_FACING ? 1 : 0);
++	}
++	else if (eta_climb.behind && !eta_climb.latched && !onGround && !onLadder)
+ 	{
+ 		ETA_ClimbMove(1);
+ 	}
+@@ -7382,6 +7454,52 @@ static void ETA_FaceTheWayUnreachable(void)
+ 		return;
+ 	}
+ 
++	/* The level's way on, near and on this floor, with no way the map
++	   shows: across something that moves - the rocket base's hanging
++	   bridge, which the way-finder, knowing the map's stone and not its
++	   movers, does not see. Faced in a straight line, the marker kept. */
++	if (!Q_stricmp(what, "the way on"))
++	{
++		const playerState_t *ps = &cg.predictedPlayerState;
++		vec3_t              flat, dir;
++		int                 meters;
++
++		VectorSubtract(origin, ps->origin, flat);
++		if (fabsf(flat[2]) < 96.0f)
++		{
++			etaAimTarget_t way;
++
++			flat[2] = 0.0f;
++			meters  = (int)(VectorLength(flat) * ETA_QU_TO_METERS + 0.5f);
++			if (meters <= 40)
++			{
++				memset(&way, 0, sizeof(way));
++				way.entityNum = -1;
++				VectorNormalize2(flat, dir);
++				VectorMA(ps->origin, 256.0f, dir, way.point);
++				way.point[2] = ps->origin[2] + ps->viewheight;
++				ETA_AimStartSnap(&way, NULL);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("Facing the way on in a straight line, %d %s: the map shows no way there, so it "
++				                  "goes over something that moves, a bridge or a platform. Walk at it; the marker "
++				                  "sounds from there", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++				return;
++			}
++		}
++		else
++		{
++			/* Up or down, with no way there: the level's way on let go
++			   of, for the objective - by a lift, when it is on another
++			   floor. */
++			CG_AccessibilityStepGiveUp();
++			CG_AccessibilityMarkerForget();
++			ETA_HudNarrator_HoldPassive(cg.time);
++			ETA_Speech_Say("No way from here to the level's way on, on another floor. On to your next objective");
++			CG_AccessibilityWayOut();
++			return;
++		}
++	}
++
+ 	if (ETA_ShutInByDoor())
+ 	{
+ 		return;
+@@ -7683,11 +7801,11 @@ static void ETA_FaceTheWayUnreachable(void)
+ 	   the control room, the way out, the bedroom - and the tester found
+ 	   it confused. Said once what to do, and O tries again from wherever
+ 	   the player goes next. */
+-	if (!Q_stricmp(what, "your next objective"))
++	if (!Q_stricmp(what, "your next objective") || !Q_stricmp(what, "the way on"))
+ 	{
+ 		ETA_HudNarrator_HoldPassive(cg.time);
+-		ETA_Speech_Say("No way found to your next objective from here yet. X lists the ways out of here, and T what "
+-		               "is left to do; O tries again from wherever you go");
++		ETA_Speech_Say(va("No way found to %s from here yet. X lists the ways out of here, and T what "
++		                  "is left to do; O tries again from wherever you go", what));
+ 		return;
+ 	}
+ 	CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 78102265..f9ab19b1 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3102,6 +3102,12 @@ void CG_AccessibilityMarkerFrame(void)
+ 		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 	}
+ 
++	/* The level's way on: walked into, not beside it. */
++	if (arrived && !Q_stricmp(eta_marker.name, "the way on") && !CG_AccessibilityStepLedPassed())
++	{
++		arrived = qfalse;
++	}
++
+ 	/* The inside of a lift: in it, not beside it. */
+ 	if (arrived && !Q_stricmp(eta_marker.name, "the inside of the lift"))
+ 	{
+@@ -3197,6 +3203,10 @@ void CG_AccessibilityMarkerFrame(void)
+ 		{
+ 			ETA_Speech_Say("Marker reached, in the lift. T finds its lever; F on it sends the lift");
+ 		}
++		else if (!Q_stricmp(eta_marker.name, "the way on"))
++		{
++			ETA_Speech_Say("Marker reached, the way on. O leads on");
++		}
+ 		else if (!Q_stricmp(eta_marker.name, "the lift's call button"))
+ 		{
+ 			ETA_Speech_Say("Marker reached, the lift's call button. F calls the lift; once it is here, step in, "
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index f53b1af2..abf665a2 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8314,6 +8314,188 @@ static void ETA_MarkerSetByO(const vec3_t point, const char *name)
+ 	Q_strncpyz(eta_oName, name, sizeof(eta_oName));
+ }
+ 
++/*
++ * The level's trail: the player's own script triggers, numbered in the
++ * order the level means them to be walked into - "action11", "action12"
++ * and on - between one objective and the next. In the rocket base, after
++ * the abort, the way to the exit goes down from the control room, past
++ * the soldiers, through the front doors and over the hanging bridge,
++ * every step of it one of these, and O, aiming straight at the exit,
++ * found no way and went from door to door. O leads by them now, one at a
++ * time: from the last objective met, or the last of them walked into, on
++ * to the next objective.
++ */
++/* Its number, times 8, and a letter after it one more each: "action18",
++   "action18a", "action18b" - the rocket base's front door, then each end
++   of its hanging bridge - in that order. */
++static int ETA_StepOrder(const char *event)
++{
++	const char *c;
++
++	if (Q_stricmpn(event, "action", 6) || !isdigit((unsigned char)event[6]))
++	{
++		return -1;
++	}
++	for (c = event + 6; isdigit((unsigned char)*c); c++)
++	{
++	}
++	return atoi(event + 6) * 8 + ( *c >= 'a' && *c <= 'g' ? *c - 'a' + 1 : 0 );
++}
++
++static int eta_stepPassedMax = -1;   /* the furthest walked into, this level */
++static int eta_stepLed = -1;         /* the one O last led to */
++static int eta_stepGaveUp;           /* the objective the trail was given up for, from another floor */
++static int eta_stepStart;
++
++static void ETA_StepBox(int i, vec3_t mins, vec3_t maxs)
++{
++	trap_R_ModelBounds(cgs.inlineDrawModel[eta_playerTriggers[i].model], mins, maxs);
++}
++
++static qboolean ETA_StepUsable(int i)
++{
++	return (qboolean)( eta_playerTriggers[i].model > 0 && eta_playerTriggers[i].model < MAX_MODELS
++	                   && cgs.inlineDrawModel[eta_playerTriggers[i].model]
++	                   && ETA_StepOrder(eta_playerTriggers[i].event) >= 0 );
++}
++
++/* Kept in a cvar by map, so a save loaded again keeps how far it went. */
++static void ETA_StepFrame(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	char                 kept[MAX_QPATH + 16], map[MAX_QPATH];
++	int                  i;
++
++	trap_Cvar_VariableStringBuffer("mapname", map, sizeof(map));
++	if (eta_stepStart != cgs.levelStartTime)
++	{
++		char *space;
++
++		eta_stepStart     = cgs.levelStartTime;
++		eta_stepPassedMax = -1;
++		eta_stepGaveUp    = 0;
++		trap_Cvar_VariableStringBuffer("eta_stepsWalked", kept, sizeof(kept));
++		space = strrchr(kept, ':');
++		if (space && !Q_stricmpn(kept, map, (int)( space - kept )) && (int)strlen(map) == (int)( space - kept ))
++		{
++			eta_stepPassedMax = atoi(space + 1);
++		}
++	}
++	if (!cg.snap || ps->pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	for (i = 0; i < eta_playerTriggerCount; i++)
++	{
++		vec3_t mins, maxs;
++		int    order, a;
++
++		if (!ETA_StepUsable(i) || ( order = ETA_StepOrder(eta_playerTriggers[i].event) ) <= eta_stepPassedMax)
++		{
++			continue;
++		}
++		ETA_StepBox(i, mins, maxs);
++		for (a = 0; a < 3; a++)
++		{
++			if (ps->origin[a] + ( a == 2 ? 32.0f : 16.0f ) < mins[a] || ps->origin[a] - ( a == 2 ? 24.0f : 16.0f ) > maxs[a])
++			{
++				break;
++			}
++		}
++		if (a == 3)
++		{
++			eta_stepPassedMax = order;
++			eta_stepGaveUp    = 0;
++			trap_Cvar_Set("eta_stepsWalked", va("%s:%d", map, order));
++		}
++	}
++}
++
++/* The next step of the trail to the objective, where it is: qfalse with
++   none - the objective not met at a numbered trigger, or nothing left
++   between. */
++static qboolean ETA_StepNext(int objective, vec3_t out)
++{
++	int   i, target = -1, floor = eta_stepPassedMax, next = -1;
++	float best = 0.0f;
++
++	for (i = 0; i < eta_playerTriggerCount; i++)
++	{
++		int o, met;
++
++		if (!ETA_StepUsable(i))
++		{
++			continue;
++		}
++		o   = ETA_StepOrder(eta_playerTriggers[i].event);
++		met = CG_AccessibilityObjectiveOfEvent(eta_playerTriggers[i].event);
++		if (met == objective && ( target < 0 || o < target ))
++		{
++			target = o;
++		}
++		if (met > 0 && met != objective && CG_AccessibilityObjectiveDone(met) && o > floor)
++		{
++			floor = o;
++		}
++	}
++	if (target < 0 || floor < 0 || eta_stepGaveUp == objective)
++	{
++		return qfalse;   /* none before the first objective: the start is led as it was */
++	}
++	for (i = 0; i < eta_playerTriggerCount; i++)
++	{
++		vec3_t mins, maxs, mid;
++		int    o;
++
++		if (!ETA_StepUsable(i))
++		{
++			continue;
++		}
++		o = ETA_StepOrder(eta_playerTriggers[i].event);
++		if (o <= floor || o >= target || ( next >= 0 && o > next ))
++		{
++			continue;
++		}
++		ETA_StepBox(i, mins, maxs);
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		mid[2] = mins[2] + 32.0f < maxs[2] ? mins[2] + 32.0f : mid[2];
++		if (next < 0 || o < next || Distance(mid, cg.predictedPlayerState.origin) < best)
++		{
++			next = o;
++			best = Distance(mid, cg.predictedPlayerState.origin);
++			VectorCopy(mid, out);
++		}
++	}
++	eta_stepLed = next;
++	return (qboolean)( next >= 0 );
++}
++
++/* No way to the step O led to, and it on another floor: the trail is let
++   go of, for the objective itself. Over the rocket base's hanging bridge,
++   which falls under the player into the train tunnel, the bridge's far
++   end was twelve metres up with no way there; the way on from the tunnel
++   is up the first lift, which O finds for the objective. Until the
++   objective is met, or a step further on is walked into. */
++void CG_AccessibilityStepGiveUp(void)
++{
++	vec3_t place;
++	int    objective = 0;
++
++	if (CG_AccessibilityObjectiveInOrder(cg.predictedPlayerState.origin, place, &objective))
++	{
++		eta_stepGaveUp = objective;
++	}
++}
++
++/* The step O led to walked into: the marker on it is reached only then.
++   Beside it, behind the rocket base's moving door, "Marker reached" was
++   said, and O led to the same step, over and over. */
++qboolean CG_AccessibilityStepLedPassed(void)
++{
++	return (qboolean)( eta_stepLed < 0 || eta_stepPassedMax >= eta_stepLed );
++}
++
+ /*
+  * A way out boarded from one side only: the forest's supply truck,
+  * parked in the compound, is stowed away in from behind, up its ramp.
+@@ -8540,6 +8722,23 @@ void CG_AccessibilityWayOut(void)
+ 		    && !( CG_AccessibilityExitPoint(place, exitAt) && Distance(exitAt, place) < 256.0f ))
+ 		{
+ 			const char *words = CG_AccessibilityObjectiveText(objective);
++			vec3_t      step;
++
++			/* By the level's trail, a step at a time. */
++			if (ETA_StepNext(objective, step))
++			{
++				VectorSubtract(step, ps->origin, delta);
++				meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++				ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++				ETA_Speech_Say(va("Your next objective%s%s, %d meters. The way there goes on as the level leads: %d %s, "
++				                  "%s%s%s. O again turns you toward it",
++				                  words[0] ? ": " : "", words, (int)(Distance(place, ps->origin) * ETA_QU_TO_METERS + 0.5f),
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++				                  height[0] ? ", " : "", height));
++				ETA_MarkerSetByO(step, "the way on");
++				return;
++			}
+ 
+ 			/* On another floor, with a lift on this one not just ridden:
+ 			   by the lift at once. From the rocket base's bedroom the
+@@ -12315,6 +12514,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_CrushFrame();
+ 	ETA_SwitchNoticeFrame();
+ 	ETA_LiftsFrame();
++	ETA_StepFrame();
+ 	ETA_WarriorFrame();
+ 	ETA_SpiritFrame();
+ 	ETA_EnemyLooksFrame();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 1da4b8b5..81d45898 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2359,6 +2359,8 @@ int CG_AccessibilityUnlockSpotAt( const vec3_t at );
+ char CG_AccessibilityDoorLive( int model );
+ void CG_AccessibilityAreasNoWayForget( void );
+ qboolean CG_AccessibilityObjectiveDone( int n );
++qboolean CG_AccessibilityStepLedPassed( void );
++void CG_AccessibilityStepGiveUp( void );
+ const char *CG_AccessibilityObjectiveText( int n );
+ int CG_AccessibilityFirstObjectiveLeft( void );
+ qboolean CG_AccessibilityObjectivePlace( const vec3_t from, vec3_t out, int *objective );
