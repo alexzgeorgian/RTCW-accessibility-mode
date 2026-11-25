@@ -1,0 +1,102 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 90528c3c..d22a204e 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7228,7 +7228,7 @@ static qboolean ETA_ShutInByDoor(void)
+ 	   player and the tailgate: a shut door the level's script opens, the
+ 	   nearest within some steps. Led to, and F opens it there. */
+ 	{
+-		int    n, best = -1;
++		int    n, best = -1, bestModel = 0;
+ 		float  bestFar = 480.0f;
+ 		vec3_t at, bestAt;
+ 
+@@ -7250,8 +7250,9 @@ static qboolean ETA_ShutInByDoor(void)
+ 			VectorAdd(at, cg_entities[es->number].lerpOrigin, at);
+ 			if (Distance(at, ps->origin) < bestFar)
+ 			{
+-				bestFar = Distance(at, ps->origin);
+-				best    = n;
++				bestFar   = Distance(at, ps->origin);
++				best      = n;
++				bestModel = es->modelindex;
+ 				VectorCopy(at, bestAt);
+ 			}
+ 		}
+@@ -7260,11 +7261,13 @@ static qboolean ETA_ShutInByDoor(void)
+ 			vec3_t stand, toward;
+ 			int    meters;
+ 
+-			/* Where to stand: a step short of it, on the player's side. */
++			/* Where F opens it from: its trigger, not the door itself. */
++			CG_AccessibilityScriptDoorUse(bestModel, bestAt);
++			/* Where to stand: a step short of that, on the player's side. */
+ 			VectorSubtract(ps->origin, bestAt, toward);
+ 			toward[2] = 0.0f;
+ 			VectorNormalize(toward);
+-			VectorMA(bestAt, 40.0f, toward, stand);
++			VectorMA(bestAt, 48.0f, toward, stand);
+ 			stand[2] = ps->origin[2];
+ 			meters = (int)( Distance(stand, ps->origin) * ETA_QU_TO_METERS + 0.5f );
+ 			CG_AccessibilityChoose(stand, "the shut door out of here");
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 4b1a352f..02df450f 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5559,11 +5559,26 @@ static struct
+ } eta_scriptMovers[ETA_MAX_SCRIPT_MOVERS];
+ static int eta_scriptMoverCount;
+ static qboolean eta_scriptDoor[MAX_MODELS];   /* a script mover opened as a door */
++static int      eta_scriptDoorUser[MAX_MODELS]; /* the invisible trigger F uses to open it */
+ 
+ qboolean CG_AccessibilityScriptDoor(int model)
+ {
+ 	return (qboolean)( model > 0 && model < MAX_MODELS && eta_scriptDoor[model] );
+ }
++
++/* Where F is used to open a script door: its trigger's middle. The truck's
++   tailgate is opened from a strip just inside it, not from the tailgate:
++   led to the tailgate itself, past the strip, F there did nothing, and
++   the tester could not get out of the truck. qfalse with none. */
++qboolean CG_AccessibilityScriptDoorUse(int model, vec3_t at)
++{
++	if (!CG_AccessibilityScriptDoor(model) || eta_scriptDoorUser[model] <= 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(cgs.inlineModelMidpoints[eta_scriptDoorUser[model]], at);
++	return qtrue;
++}
+ static struct
+ {
+ 	char   targetname[48];
+@@ -6598,6 +6613,7 @@ static void ETA_ReadMapEntities(void)
+ 	eta_orderPending[0] = '\0';
+ 	memset(eta_lifts, 0, sizeof(eta_lifts));
+ 	memset(eta_scriptDoor, 0, sizeof(eta_scriptDoor));
++	memset(eta_scriptDoorUser, 0, sizeof(eta_scriptDoorUser));
+ 	eta_scriptTriggerCount = eta_scriptMoverCount = eta_cornerCount = 0;
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+@@ -7310,7 +7326,8 @@ static void ETA_ReadMapEntities(void)
+ 				}
+ 				if (k == 3)
+ 				{
+-					eta_scriptDoor[mm] = qtrue;
++					eta_scriptDoor[mm]     = qtrue;
++					eta_scriptDoorUser[mm] = users[i].model;
+ 				}
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 23b67290..ac397c32 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2330,6 +2330,7 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityLiftLeverUsed(void);
+ qboolean CG_AccessibilityScriptDoor(int model);
++qboolean CG_AccessibilityScriptDoorUse(int model, vec3_t at);
+ qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out);
+ qboolean CG_AccessibilityLiftSenderCountdown(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );

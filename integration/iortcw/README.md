@@ -5010,3 +5010,13 @@ back up. Now the lift or ride last carried by is not the way on until
 another has carried the player. In game: up the first lift and down
 again, O at its bottom: "The way to your next objective goes by a lift:
 to its call button first, 78 meters, left" - the second lift's.
+
+## 0295-tailgate-trigger.patch
+
+The tester could not get out of the rocket base's truck at the start.
+Its tailgate is opened from an invisible strip a step inside it, and
+"Shut in: ... O leads to it, and F opens it there" led to the tailgate
+itself, past the strip: F there did nothing. Led now to a step short of
+the strip, F turned toward it. In game, from the start: "Marker
+reached, the shut door out of here. F opens it", F, "Open door", and
+out of the truck.
