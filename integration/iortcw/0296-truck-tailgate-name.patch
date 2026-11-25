@@ -1,0 +1,202 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 82b8cfdd..18d8e2ea 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1578,6 +1578,15 @@ void CG_AccessibilityFrame( void ) {
+ 			}
+ 		}
+ 
++		/* The truck's tailgate, by its name. */
++		if ( hint == HINT_DOOR || hint == HINT_DOOR_ROTATING ) {
++			const char *tailgate = CG_AccessibilityScriptDoorAhead();
++
++			if ( tailgate ) {
++				name = va( "%s, F opens it", tailgate );
++			}
++		}
++
+ 		/* A door already open, or swinging: F would shut it. */
+ 		if ( hint == HINT_DOOR || hint == HINT_DOOR_ROTATING ) {
+ 			trace_t trace;
+@@ -1594,7 +1603,7 @@ void CG_AccessibilityFrame( void ) {
+ 					 || ( es->pos.trType != TR_STATIONARY && es->pos.trDuration ) ) {
+ 					name = "Door, moving";
+ 				} else if ( VectorLength( es->apos.trBase ) > 5.0f ) {
+-					name = "Open door";
++					name = CG_AccessibilityScriptDoorAhead() ? "Truck's tailgate, open" : "Open door";
+ 				} else if ( CG_AccessibilityDoorBySwitch( es->modelindex ) ) {
+ 					/* F does nothing at a door switches are aimed at:
+ 					   the second catacomb's door upstairs said "F opens
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index d22a204e..e5271459 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7133,6 +7133,13 @@ static qboolean ETA_OpeningToward(float wanted, float *yaw)
+ #define ETA_DOOR_TOWARD eta_doorToward
+ static float eta_doorToward = 96.0f;
+ 
++static int eta_doorTowardLast;
++
++static int ETA_DoorTowardLast(void)
++{
++	return eta_doorTowardLast;
++}
++
+ static int ETA_DoorToward(float yaw)
+ {
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+@@ -7175,6 +7182,7 @@ static int ETA_DoorToward(float yaw)
+ 
+ 		/* A door the script works - the truck's tailgate, turned to face
+ 		   along the truck: open once tipped down, its yaw is no sign. */
++		eta_doorTowardLast = trace.entityNum;
+ 		if (CG_AccessibilityScriptDoor(model))
+ 		{
+ 			return ( es->apos.trType != TR_STATIONARY && es->apos.trDuration )
+@@ -7217,8 +7225,13 @@ static qboolean ETA_ShutInByDoor(void)
+ 			VectorMA(ps->origin, 256.0f, dir, way.point);
+ 			way.point[2] = ps->origin[2] + ps->viewheight;
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(va("A shut door, %s, is the way out of here. Turning you to it: F opens it",
+-			                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(yaw - ps->viewangles[YAW]))));
++			{
++				const char *named = CG_AccessibilityScriptDoorName(cg_entities[ETA_DoorTowardLast()].currentState.modelindex);
++
++				ETA_Speech_Say(va("%s, %s, is the way out of here. Turning you to it: F opens it",
++				                  named ? "The truck's tailgate" : "A shut door",
++				                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(yaw - ps->viewangles[YAW]))));
++			}
+ 			ETA_AimStartSnap(&way, NULL);
+ 			return qtrue;
+ 		}
+@@ -7270,13 +7283,17 @@ static qboolean ETA_ShutInByDoor(void)
+ 			VectorMA(bestAt, 48.0f, toward, stand);
+ 			stand[2] = ps->origin[2];
+ 			meters = (int)( Distance(stand, ps->origin) * ETA_QU_TO_METERS + 0.5f );
+-			CG_AccessibilityChoose(stand, "the shut door out of here");
+-			CG_AccessibilityChosenIsThing();
+-			CG_AccessibilityChosenAimAt(bestAt);
+-			ETA_HudNarrator_HoldPassive(cg.time);
+-			ETA_Speech_Say(va("Shut in: the way out of here is a shut door, %d %s, %s. O leads to it, and F opens it there",
+-			                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
+-			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestAt))));
++			{
++				const char *named = CG_AccessibilityScriptDoorName(bestModel);
++
++				CG_AccessibilityChoose(stand, named ? named : "the shut door out of here");
++				CG_AccessibilityChosenIsThing();
++				CG_AccessibilityChosenAimAt(bestAt);
++				ETA_HudNarrator_HoldPassive(cg.time);
++				ETA_Speech_Say(va("Shut in: the way out of here is %s, %d %s, %s. O leads to it, and F opens it there",
++				                  named ? named : "a shut door", meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(bestAt))));
++			}
+ 			return qtrue;
+ 		}
+ 	}
+@@ -7895,7 +7912,8 @@ static void ETA_FaceTheWayNow(void)
+ 					                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(opener))));
+ 					return;
+ 				}
+-				ETA_Speech_Say("Facing the way. A door: F opens it");
++				ETA_Speech_Say(CG_AccessibilityScriptDoorName(model) ? "Facing the way. The truck's tailgate: F opens it"
++				               : "Facing the way. A door: F opens it");
+ 				return;
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 5c7e60bf..78102265 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -3189,9 +3189,9 @@ void CG_AccessibilityMarkerFrame(void)
+ 			/* It shuts two seconds after it opens: through at once. */
+ 			ETA_Speech_Say(va("Marker reached, %s. F opens it, then walk straight in", eta_marker.name));
+ 		}
+-		else if (!Q_stricmp(eta_marker.name, "the shut door out of here"))
++		else if (!Q_stricmp(eta_marker.name, "the shut door out of here") || !Q_stricmp(eta_marker.name, "the truck's tailgate"))
+ 		{
+-			ETA_Speech_Say("Marker reached, the shut door out of here. F opens it");
++			ETA_Speech_Say(va("Marker reached, %s. F opens it", eta_marker.name));
+ 		}
+ 		else if (!Q_stricmp(eta_marker.name, "the inside of the lift"))
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 02df450f..7070a358 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -5566,6 +5566,38 @@ qboolean CG_AccessibilityScriptDoor(int model)
+ 	return (qboolean)( model > 0 && model < MAX_MODELS && eta_scriptDoor[model] );
+ }
+ 
++static qboolean eta_scriptDoorTruck[MAX_MODELS]; /* a truck's tailgate */
++
++/* A script door's own name: the truck's tailgate, by its script's name -
++   the tester, told of "a shut door", asked for it to be called what it
++   is. NULL for any other. */
++const char *CG_AccessibilityScriptDoorName(int model)
++{
++	return CG_AccessibilityScriptDoor(model) && eta_scriptDoorTruck[model] ? "the truck's tailgate" : NULL;
++}
++
++/* The tailgate's trigger in view, for the crosshair: its name, or NULL. */
++const char *CG_AccessibilityScriptDoorAhead(void)
++{
++	vec3_t forward, to;
++	int    m;
++
++	AngleVectors(cg.refdefViewAngles, forward, NULL, NULL);
++	for (m = 1; m < MAX_MODELS; m++)
++	{
++		if (!eta_scriptDoorTruck[m] || eta_scriptDoorUser[m] <= 0)
++		{
++			continue;
++		}
++		VectorSubtract(cgs.inlineModelMidpoints[eta_scriptDoorUser[m]], cg.refdef.vieworg, to);
++		if (VectorNormalize(to) < 200.0f && DotProduct(to, forward) > 0.7f)
++		{
++			return "Truck's tailgate";
++		}
++	}
++	return NULL;
++}
++
+ /* Where F is used to open a script door: its trigger's middle. The truck's
+    tailgate is opened from a strip just inside it, not from the tailgate:
+    led to the tailgate itself, past the strip, F there did nothing, and
+@@ -6614,6 +6646,7 @@ static void ETA_ReadMapEntities(void)
+ 	memset(eta_lifts, 0, sizeof(eta_lifts));
+ 	memset(eta_scriptDoor, 0, sizeof(eta_scriptDoor));
+ 	memset(eta_scriptDoorUser, 0, sizeof(eta_scriptDoorUser));
++	memset(eta_scriptDoorTruck, 0, sizeof(eta_scriptDoorTruck));
+ 	eta_scriptTriggerCount = eta_scriptMoverCount = eta_cornerCount = 0;
+ 	memset(eta_breakModel, 0, sizeof(eta_breakModel));
+ 	memset(eta_doorOpener, 0, sizeof(eta_doorOpener));
+@@ -7326,8 +7359,13 @@ static void ETA_ReadMapEntities(void)
+ 				}
+ 				if (k == 3)
+ 				{
+-					eta_scriptDoor[mm]     = qtrue;
+-					eta_scriptDoorUser[mm] = users[i].model;
++					eta_scriptDoor[mm]      = qtrue;
++					eta_scriptDoorUser[mm]  = users[i].model;
++					eta_scriptDoorTruck[mm] = (qboolean)( Q_stristr(eta_scriptMovers[m].scriptname, "truck") != NULL );
++					if (eta_scriptDoorTruck[mm])
++					{
++						name = "Truck's tailgate";   /* not "Door": F's list and T say what it is */
++					}
+ 				}
+ 			}
+ 		}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index ac397c32..8038106d 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2331,6 +2331,8 @@ void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityLiftLeverUsed(void);
+ qboolean CG_AccessibilityScriptDoor(int model);
+ qboolean CG_AccessibilityScriptDoorUse(int model, vec3_t at);
++const char *CG_AccessibilityScriptDoorName(int model);
++const char *CG_AccessibilityScriptDoorAhead(void);
+ qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out);
+ qboolean CG_AccessibilityLiftSenderCountdown(void);
+ void CG_AccessibilityAreaText( char *out, size_t size );

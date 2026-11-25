@@ -5020,3 +5020,13 @@ itself, past the strip: F there did nothing. Led now to a step short of
 the strip, F turned toward it. In game, from the start: "Marker
 reached, the shut door out of here. F opens it", F, "Open door", and
 out of the truck.
+
+## 0296-truck-tailgate-name.patch
+
+The tester asked for the rocket base's truck's back to be called what
+it is, not "a shut door". A script door whose script is a truck's is
+"the truck's tailgate": "Shut in: the way out of here is the truck's
+tailgate, 2 meters, behind left. O leads to it, and F opens it there",
+"Marker reached, the truck's tailgate. F opens it", F's list "Truck's
+tailgate", the crosshair "Truck's tailgate, F opens it" and, opened,
+"Truck's tailgate, open". In game, from the start, out of the truck.
