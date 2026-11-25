@@ -4989,3 +4989,13 @@ it is still offered: the way to the control room goes down it first.
 In game: in the second lift at its top, "Facing the way. Your next
 objective, 15 meters, 7 meters above you"; beside the first lift's
 top, "it goes by a lift, 4 meters, ahead right".
+
+## 0293-way-by-lift-wording.patch
+
+The tester, before the rocket base's first lift, heard "No way on foot
+found to your next objective from here: it goes by a lift" and took it
+for a fault. Said now as the way: "The way to your next objective goes
+by a lift: to its call button first, 13 meters, ahead left. O again
+leads there" (or "by the train: to its lever first"), and at it, "The
+way to your next objective goes by this lift. If it is not here, its
+call button brings it; step in, and F on its lever sends it".

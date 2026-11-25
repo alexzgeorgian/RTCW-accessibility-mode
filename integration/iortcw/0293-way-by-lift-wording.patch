@@ -1,0 +1,33 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 6b37b2d4..90528c3c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7391,18 +7391,21 @@ static void ETA_FaceTheWayUnreachable(void)
+ 			ETA_HudNarrator_HoldPassive(cg.time);
+ 			if (meters <= 3)
+ 			{
+-				ETA_Speech_Say(lift ? va("No way on foot to %s from here: it goes by this lift. If it is not here, its "
+-				                         "call button brings it; step in, and F on its lever sends it", what)
+-				               : va("No way on foot to %s from here: it goes by the train. F on its lever, then jump "
+-				                    "onto the train at once", what));
++				/* Said as the way, not as a failure: the tester, hearing
++				   "no way on foot" before the first lift, took it for a
++				   fault. */
++				ETA_Speech_Say(lift ? va("The way to %s goes by this lift. If it is not here, its call button brings it; "
++				                         "step in, and F on its lever sends it", what)
++				               : va("The way to %s goes by the train. F on its lever, then jump onto the train at once",
++				                    what));
+ 				return;
+ 			}
+ 			CG_AccessibilityChoose(by, byName);
+ 			CG_AccessibilityChosenIsThing();
+ 			CG_AccessibilityChosenAimAt(by);
+-			ETA_Speech_Say(va("No way on foot found to %s from here: it goes by %s, %d %s, %s. O again leads there", what,
+-			                  lift ? "a lift" : "the train", meters, meters == 1 ? "meter" : "meters",
+-			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(by))));
++			ETA_Speech_Say(va("The way to %s goes by %s: to its %s first, %d %s, %s. O again leads there", what,
++			                  lift ? "a lift" : "the train", lift ? "call button" : "lever", meters,
++			                  meters == 1 ? "meter" : "meters", ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(by))));
+ 			return;
+ 		}
+ 	}
