@@ -5083,3 +5083,17 @@ the nearest was placed - "2 things on the ground, nearest Thompson,
 ahead, 3 meters". Each is placed now, nearest first: "On the ground:
 Grenade, right, 2 meters; Thompson, ahead, 3 meters; Ammo for Thompson,
 ahead left, 4 meters".
+
+## 0301-lift-named-far.patch
+
+From the room the rocket base begins in, the lift is 46 metres off,
+too far for O to lead to it first, and O named only the control room,
+14 metres up. The tester, having let go of the lift with Backspace,
+took it for a place no way led to. With the next objective on another
+floor and a lift too far off to lead to first, O now says it: "Your
+next objective: Locate Main Control Room, 122 meters, right, west, 14
+meters above you. The way goes by a lift, 46 meters off, and on from
+there". It still leads toward the objective, whose way goes by the
+lift. In game, from the start: O, Backspace, O says the lift again, and
+the test player is out of the truck, at the lift and down it in two
+minutes.

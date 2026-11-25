@@ -1,0 +1,52 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index c8636bbb..4161fbea 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8504,6 +8504,7 @@ void CG_AccessibilityWayOut(void)
+ 	{
+ 		vec3_t place, exitAt;
+ 		int    objective = 0;
++		char   liftNote[80];
+ 
+ 		qboolean skip = eta_wayOutSkipObjective;
+ 
+@@ -8544,15 +8545,37 @@ void CG_AccessibilityWayOut(void)
+ 				}
+ 			}
+ 
++			/* On another floor, by a lift too far off to lead to first:
++			   said, and led on toward the objective, whose way goes by
++			   it. From the room the level begins in, O named only the
++			   control room, 14 metres up, and the tester, having let go
++			   of the lift with Backspace, took it for a place no way
++			   led to. */
++			liftNote[0] = '\0';
++			if (fabsf(place[2] - ps->origin[2]) > 160.0f)
++			{
++				vec3_t   by;
++				char     byName[32];
++				qboolean lift = qfalse;
++
++				if (CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift, place[2]) && lift)
++				{
++					int m = (int)(Distance(by, ps->origin) * ETA_QU_TO_METERS + 0.5f);
++
++					Com_sprintf(liftNote, sizeof(liftNote), "The way goes by a lift, %d meters off, and on from there. ",
++					            m < 1 ? 1 : m);
++				}
++			}
++
+ 			VectorSubtract(place, ps->origin, delta);
+ 			meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 			ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
+-			ETA_Speech_Say(va("Your next objective%s%s, %d %s, %s, %s%s%s. The way out comes after it. "
++			ETA_Speech_Say(va("Your next objective%s%s, %d %s, %s, %s%s%s. %s"
+ 			                  "O again turns you toward it",
+ 			                  words[0] ? ": " : "", words, meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
+ 			                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
+ 			                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+-			                  height[0] ? ", " : "", height));
++			                  height[0] ? ", " : "", height, liftNote[0] ? liftNote : "The way out comes after it. "));
+ 			ETA_MarkerSetByO(place, "your next objective");
+ 			return;
+ 		}
