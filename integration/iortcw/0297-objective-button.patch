@@ -1,0 +1,111 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index e074ce07..6126350a 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -1471,6 +1471,9 @@ static void ETA_ThingsStep(int step)
+ 
+ 		action = thing->ride ? CG_AccessibilityRideAction()
+ 		                  : trapUnder ? "Walk up to it, and the moment you have it, step straight back"
++		                  : !Q_stricmpn(thing->name, "Button, objective ", 18)
++		                  ? va("F presses it: %s", CG_AccessibilityObjectiveText(atoi(thing->name + 18))[0]
++		                                          ? CG_AccessibilityObjectiveText(atoi(thing->name + 18)) : "your objective")
+ 		                  : !Q_stricmpn(thing->name, "Train lever", 11)
+ 		                  ? "F starts the train, which leaves 2 seconds later: be by it, and jump on at once"
+ 		                  : ETA_ThingReusable(thing) && !CG_AccessibilitySwitchOffAt(thing->point)
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 4d8ace32..27665048 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -940,6 +940,23 @@ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *ob
+  * player event that alerts him, and the trigger that fires that event.
+  * Where the trigger is; qfalse with none.
+  */
++/* The objective a player script event meets, by "objectivemet N" in
++   it: 0 for none. */
++int CG_AccessibilityObjectiveOfEvent(const char *event)
++{
++	int i;
++
++	for (i = 0; event && event[0] && i < eta_unlockLineCount; i++)
++	{
++		if (eta_unlockLines[i].verb == 'o' && !Q_stricmp(eta_unlockLines[i].owner, "player")
++		    && !Q_stricmp(eta_unlockLines[i].event, event))
++		{
++			return atoi(eta_unlockLines[i].what);
++		}
++	}
++	return 0;
++}
++
+ /* Whether the player event that fired at a spot also starts a countdown
+    - the rocket base's launch: "trigger counter2 v2_countdown". */
+ static char eta_senderEvent[48];
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7070a358..20230268 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4897,9 +4897,26 @@ typedef struct
+ {
+ 	int  model;
+ 	char name[32];
++	char target[48];   /* the script event it fires */
+ } eta_user_t;
+ static eta_user_t eta_users[ETA_MAX_USERS];
+ 
++/* A switch's name, as said: one that meets an objective by which - the
++   rocket base's launch abort button was "Button", and the tester asked
++   whether it was on T's list at all. The script is read after the
++   switches are named, so asked here, as it is said. */
++static const char *ETA_UserName(int i)
++{
++	int objective;
++
++	if (( !Q_stricmp(eta_users[i].name, "Button") || !Q_stricmp(eta_users[i].name, "Switch") )
++	    && ( objective = CG_AccessibilityObjectiveOfEvent(eta_users[i].target) ) > 0)
++	{
++		return va("Button, objective %d", objective);
++	}
++	return eta_users[i].name;
++}
++
+ /* The items the map places, where it places them: for T's list of the
+    things left (cg_accessibility_things.c), from the start of the level,
+    before any is in sight. */
+@@ -7378,6 +7395,7 @@ static void ETA_ReadMapEntities(void)
+ 
+ 		eta_users[eta_userCount].model = users[i].model;
+ 		Q_strncpyz(eta_users[eta_userCount].name, name, sizeof(eta_users[0].name));
++		Q_strncpyz(eta_users[eta_userCount].target, users[i].target, sizeof(eta_users[0].target));
+ 		eta_userCount++;
+ 	}
+ 
+@@ -9163,7 +9181,7 @@ qboolean CG_AccessibilityMapThing(int index, vec3_t at, char *name, size_t nameS
+ 	if (index < eta_userCount)
+ 	{
+ 		VectorCopy(cgs.inlineModelMidpoints[eta_users[index].model], at);
+-		Q_strncpyz(name, Q_stricmp(eta_users[index].name, "Door") ? eta_users[index].name : "", nameSize);
++		Q_strncpyz(name, Q_stricmp(eta_users[index].name, "Door") ? ETA_UserName(index) : "", nameSize);
+ 		if (name[0] && eta_opensDoor[eta_users[index].model])
+ 		{
+ 			Q_strcat(name, nameSize, ETA_ForDoor(eta_opensDoor[eta_users[index].model]));
+@@ -12980,7 +12998,7 @@ int CG_AccessibilityUseTargets(etaAimTarget_t *list, int max)
+ 
+ 		if (Q_stricmp(eta_users[i].name, "Door"))
+ 		{
+-			ETA_SwitchName(eta_users[i].name, eta_users[i].model, target.name, sizeof(target.name));
++			ETA_SwitchName(ETA_UserName(i), eta_users[i].model, target.name, sizeof(target.name));
+ 		}
+ 		else
+ 		{
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 8038106d..1da4b8b5 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2335,6 +2335,7 @@ const char *CG_AccessibilityScriptDoorName(int model);
+ const char *CG_AccessibilityScriptDoorAhead(void);
+ qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out);
+ qboolean CG_AccessibilityLiftSenderCountdown(void);
++int CG_AccessibilityObjectiveOfEvent(const char *event);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );

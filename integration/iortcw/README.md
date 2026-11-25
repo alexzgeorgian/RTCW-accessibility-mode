@@ -5030,3 +5030,12 @@ tailgate, 2 meters, behind left. O leads to it, and F opens it there",
 "Marker reached, the truck's tailgate. F opens it", F's list "Truck's
 tailgate", the crosshair "Truck's tailgate, F opens it" and, opened,
 "Truck's tailgate, open". In game, from the start, out of the truck.
+
+## 0297-objective-button.patch
+
+The tester asked whether the rocket base's launch button was on T's
+list. It was, as "Button". A button or switch whose script event meets
+an objective ("objectivemet N") is now "Button, objective N", and T
+says what F does: "1 of 1, Button, objective 2, ahead, 2 meters. F
+presses it: Terminate launch of V2 rocket". The script is read after
+the switches are named, so the name is made as it is said.
