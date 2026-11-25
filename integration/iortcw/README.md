@@ -5053,3 +5053,15 @@ by a lift: to its call button first, 11 meters, right", the call
 button chosen as a thing, so F there presses it. In game, from the
 save: the bedroom, the door, the call button, in the lift and down, in
 50 seconds.
+
+## 0299-objective-kept.patch
+
+The tester found O confused in the rocket base: press by press it led
+to the lift, the control room, the way out, the bedroom. With no way
+found to the next objective twice from the same spot, O gave it up for
+the way out - "Still no way to your next objective from here. On to the
+way out instead" - and the next press went back to the objective. The
+next objective is kept now: "No way found to your next objective from
+here yet. X lists the ways out of here, and T what is left to do; O
+tries again from wherever you go". The way out comes only once no
+objective with a place is left.

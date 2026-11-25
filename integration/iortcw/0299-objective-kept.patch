@@ -1,0 +1,23 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index e5271459..9a55fd34 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7678,6 +7678,18 @@ static void ETA_FaceTheWayUnreachable(void)
+ 		CG_AccessibilityWayOut();
+ 		return;
+ 	}
++	/* The next objective: kept, not traded for the way out. O went from
++	   the objective to the way out and back with every press - the lift,
++	   the control room, the way out, the bedroom - and the tester found
++	   it confused. Said once what to do, and O tries again from wherever
++	   the player goes next. */
++	if (!Q_stricmp(what, "your next objective"))
++	{
++		ETA_HudNarrator_HoldPassive(cg.time);
++		ETA_Speech_Say("No way found to your next objective from here yet. X lists the ways out of here, and T what "
++		               "is left to do; O tries again from wherever you go");
++		return;
++	}
+ 	CG_AccessibilityThingsNoWay(origin);   /* T lists it last, saying so */
+ 	ETA_HudNarrator_HoldPassive(cg.time);
+ 	/* Asked again from the same spot: on to the way out instead. The
