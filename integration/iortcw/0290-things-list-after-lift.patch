@@ -1,0 +1,32 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 30fde96e..e074ce07 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -135,6 +135,7 @@ static struct
+ 	int         pressedAt;  /* T or Y last pressed */
+ 	int         list[ETA_THINGS_MAX];   /* T and Y's list, nearest first */
+ 	int         listCount, listPos, listArea;
++	float       listZ;       /* the height the list was made at */
+ 	int         nextStep;   /* on the list from another area: the level's next step, or -1 */
+ 	int         rideThing;  /* the tram's place among the things, +1; 0 none */
+ 	int         found;      /* goes up as things are come across: T's list made again */
+@@ -1118,6 +1119,11 @@ static void ETA_ThingsStep(int step)
+ 	   the soldiers dropped in a fight, after T was pressed. */
+ 	fresh = (qboolean)(cg.time < eta_things.pressedAt || cg.time - eta_things.pressedAt >= ETA_THINGS_LIST_MS
+ 	                   || area != eta_things.listArea || !eta_things.listCount
++	                   /* Carried up or down in the same area - a lift's
++	                      shaft: the test player, ridden down, was offered
++	                      the lever at the top, 13 metres up, and F turned
++	                      to it rather than pulling the one in front. */
++	                   || fabsf(ps->origin[2] - eta_things.listZ) > 96.0f
+ 	                   || eta_things.found != eta_things.listFound);
+ 	eta_things.pressedAt = cg.time;
+ 
+@@ -1300,6 +1306,7 @@ static void ETA_ThingsStep(int step)
+ 		eta_things.listCount = count;
+ 		eta_things.listFound = eta_things.found;
+ 		eta_things.listArea  = area;
++		eta_things.listZ     = ps->origin[2];
+ 		eta_things.listPos   = -1;
+ 
+ 		if (!count)

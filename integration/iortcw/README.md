@@ -4946,3 +4946,13 @@ test player walked against it for eight minutes.
 
 In game, from the start: the test player was led out of the truck by
 its tailgate, to the first lift's call button, and in.
+
+## 0290-things-list-after-lift.patch
+
+The test player, ridden down the rocket base's first lift, pressed T
+and F on the lever to go on, and nothing happened: T still had the list
+it made at the top - the lift's shaft is one area - and offered "Lift
+lever, down, ahead, 13 meters", the lever at the top, and F turned
+toward it rather than pulling the one in front. T's list is made again
+once the player is more than 96 units higher or lower than when it was
+made. In game: up, T, F, down, T, F, up again.
