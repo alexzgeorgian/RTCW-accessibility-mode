@@ -4975,3 +4975,17 @@ made. In game: up, T, F, down, T, F, up again.
   there; then come back here, ready for them. Passing it also starts a
   countdown: the rocket launches about 2 minutes later unless its
   launch is stopped" - the last when that event starts a countdown.
+
+## 0292-not-the-lift-stood-in.patch
+
+The tester had trouble finding the rocket base's control room: up the
+second lift, its way on is a ladder and doors above, and O, its search
+slow, offered "it goes by this lift" - the lift just come up in, which
+goes no higher. A lift is no longer offered as the way on while the
+player stands in it, at the end of it the objective lies beyond - at
+its top for one above, at its bottom for one below - as high and as low
+as it has been seen to go. Beside the first lift's top, at the start,
+it is still offered: the way to the control room goes down it first.
+In game: in the second lift at its top, "Facing the way. Your next
+objective, 15 meters, 7 meters above you"; beside the first lift's
+top, "it goes by a lift, 4 meters, ahead right".

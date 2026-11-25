@@ -1,0 +1,100 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 90657a63..6b37b2d4 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -6966,7 +6966,7 @@ static void ETA_FacePendingFrame(void)
+ 				if (CG_AccessibilityMarkerInfo(at, &marked) && marked
+ 				    && ( !Q_stricmp(marked, "your next objective") || !Q_stricmp(marked, "the way out") )
+ 				    && fabsf(at[2] - cg.predictedPlayerState.origin[2]) > 160.0f
+-				    && CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift))
++				    && CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift, at[2]))
+ 				{
+ 					waitedFrom        = 0;
+ 					eta_facePendingAt = 0;
+@@ -7381,7 +7381,7 @@ static void ETA_FaceTheWayUnreachable(void)
+ 		char     byName[32];
+ 		qboolean lift = qfalse;
+ 
+-		if (CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift))
++		if (CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift, origin[2]))
+ 		{
+ 			vec3_t toBy;
+ 			int    meters;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7ea640af..0a1f0e6d 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -6104,6 +6104,7 @@ static struct
+ 	vec3_t mins, maxs;
+ 	int    model;
+ 	char   script[48];   /* its scriptname */
++	float  lowest, highest; /* its floor, as low and as high as it has been seen */
+ } eta_leverLift[ETA_LEVER_LIFTS];
+ static int eta_leverLiftCount;
+ 
+@@ -6258,7 +6259,7 @@ static int eta_leverLiftUsedAt[ETA_LEVER_LIFTS];
+  * just been carried by, at the player's own level: a lift by its shaft,
+  * the train by its lever.
+  */
+-qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift)
++qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift, float towardZ)
+ {
+ 	const float *me = cg.predictedPlayerState.origin;
+ 	float        best = 0.0f;
+@@ -6272,6 +6273,17 @@ qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, q
+ 		{
+ 			continue;
+ 		}
++		/* One that goes no further the way it is wanted - up from its
++		   top, down from its bottom, as far as it has been seen to go:
++		   at the rocket base's second lift's top, the control room
++		   above, the tester was offered the lift just come up in. */
++		if (me[0] > eta_leverLift[i].mins[0] - 16.0f && me[0] < eta_leverLift[i].maxs[0] + 16.0f
++		    && me[1] > eta_leverLift[i].mins[1] - 16.0f && me[1] < eta_leverLift[i].maxs[1] + 16.0f
++		    && ( ( towardZ > me[2] && me[2] - 24.0f >= eta_leverLift[i].highest - 32.0f )
++		         || ( towardZ < me[2] && me[2] - 24.0f <= eta_leverLift[i].lowest + 32.0f ) ))
++		{
++			continue;   /* standing in it, at its end that way */
++		}
+ 		/* By its call button at the player's own level: the shaft's
+ 		   middle at the player's height may be in the wall between two
+ 		   floors, and the way there was "no way". */
+@@ -6378,6 +6390,14 @@ static void ETA_LeverLiftFrame(void)
+ 		}
+ 		seen[i]  = qtrue;
+ 		state[i] = moving;
++		if (mins[2] < eta_leverLift[i].lowest)
++		{
++			eta_leverLift[i].lowest = mins[2];
++		}
++		if (mins[2] > eta_leverLift[i].highest)
++		{
++			eta_leverLift[i].highest = mins[2];
++		}
+ 		if (in && moving)
+ 		{
+ 			eta_leverLiftUsedAt[i] = cg.time ? cg.time : 1;
+@@ -6678,7 +6698,9 @@ static void ETA_ReadMapEntities(void)
+ 				                   eta_leverLift[eta_leverLiftCount].maxs);
+ 				VectorAdd(eta_leverLift[eta_leverLiftCount].mins, o, eta_leverLift[eta_leverLiftCount].mins);
+ 				VectorAdd(eta_leverLift[eta_leverLiftCount].maxs, o, eta_leverLift[eta_leverLiftCount].maxs);
+-				eta_leverLift[eta_leverLiftCount].model = index;
++				eta_leverLift[eta_leverLiftCount].model   = index;
++				eta_leverLift[eta_leverLiftCount].lowest  = eta_leverLift[eta_leverLiftCount].mins[2];
++				eta_leverLift[eta_leverLiftCount].highest = eta_leverLift[eta_leverLiftCount].mins[2];
+ 				Q_strncpyz(eta_leverLift[eta_leverLiftCount].script, scriptname, sizeof(eta_leverLift[0].script));
+ 				eta_leverLiftCount++;
+ 			}
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index ac7db695..23b67290 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2326,7 +2326,7 @@ qboolean CG_AccessibilityLeverLiftAt(const vec3_t point);
+ void CG_AccessibilityLiftCalled(void);
+ qboolean CG_AccessibilityLeverLiftHere(const vec3_t point, vec3_t where);
+ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *objective);
+-qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift);
++qboolean CG_AccessibilityConnectorNearest(vec3_t out, char *name, size_t size, qboolean *isLift, float towardZ);
+ void CG_AccessibilityWayOutSkipObjective(void);
+ void CG_AccessibilityLiftLeverUsed(void);
+ qboolean CG_AccessibilityScriptDoor(int model);
