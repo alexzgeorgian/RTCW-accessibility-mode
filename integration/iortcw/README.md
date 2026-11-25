@@ -5039,3 +5039,17 @@ an objective ("objectivemet N") is now "Button, objective N", and T
 says what F does: "1 of 1, Button, objective 2, ahead, 2 meters. F
 presses it: Terminate launch of V2 rocket". The script is read after
 the switches are named, so the name is made as it is said.
+
+## 0298-lift-first-other-floor.patch
+
+From the tester's save in the rocket base's bedroom: O found a way on
+foot to the control room by jumps no one can make - "Jump up, behind",
+onto the bed, again and again - and the test player went round the
+bedroom for almost two minutes before O gave it up for the lift. With
+the next objective more than four metres up or down, and a lift not
+just ridden on this floor, O now leads to the lift at once: "Your next
+objective: Locate Main Control Room, 76 meters, above you. The way goes
+by a lift: to its call button first, 11 meters, right", the call
+button chosen as a thing, so F there presses it. In game, from the
+save: the bedroom, the door, the call button, in the lift and down, in
+50 seconds.

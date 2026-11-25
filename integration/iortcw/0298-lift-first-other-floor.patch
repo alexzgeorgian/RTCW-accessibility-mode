@@ -1,0 +1,42 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 20230268..dc997fd7 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8513,6 +8513,37 @@ void CG_AccessibilityWayOut(void)
+ 		{
+ 			const char *words = CG_AccessibilityObjectiveText(objective);
+ 
++			/* On another floor, with a lift on this one not just ridden:
++			   by the lift at once. From the rocket base's bedroom the
++			   search found a way on foot to the control room by jumps
++			   no one can make, and the tester went round the bedroom
++			   for minutes before O gave it up for the lift. */
++			if (fabsf(place[2] - ps->origin[2]) > 160.0f)
++			{
++				vec3_t   by;
++				char     byName[32];
++				qboolean lift = qfalse;
++
++				if (CG_AccessibilityConnectorNearest(by, byName, sizeof(byName), &lift, place[2]) && lift
++				    && Distance(by, ps->origin) < 1600.0f)
++				{
++					VectorSubtract(by, ps->origin, delta);
++					meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++					ETA_Speech_Say(va("Your next objective%s%s, %d meters, %s you. The way goes by a lift: to its call "
++					                  "button first, %d %s, %s. O again turns you toward it",
++					                  words[0] ? ": " : "", words, (int)(Distance(place, ps->origin) * ETA_QU_TO_METERS + 0.5f),
++					                  place[2] > ps->origin[2] ? "above" : "below", meters < 1 ? 1 : meters,
++					                  meters == 1 ? "meter" : "meters",
++					                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW]))));
++					/* Chosen as the thing it is, so that F there presses it. */
++					CG_AccessibilityChoose(by, byName);
++					CG_AccessibilityChosenIsThing();
++					CG_AccessibilityChosenAimAt(by);
++					CG_AccessibilityWayOut();
++					return;
++				}
++			}
++
+ 			VectorSubtract(place, ps->origin, delta);
+ 			meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+ 			ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
