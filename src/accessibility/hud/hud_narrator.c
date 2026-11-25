@@ -1952,7 +1952,44 @@ int ETA_HudNarrator_UpdateAwareness(const ETA_AwareThing *things, int count,
             }
         }
 
-        if (together > 1)
+        if (together > 1 && best->kind == ETA_AWARE_ITEM)
+        {
+            /* What a fallen soldier drops lands together - a weapon and
+               its ammo. Only the nearest was placed, and the tester could
+               not find the rest. Each is placed, nearest first. */
+            ETA_AwareSlot *next = best;
+            size_t        used;
+            int           n = 0;
+
+            snprintf(out, outSize, "On the ground:");
+            while (next && n < 4)
+            {
+                int m = ETA_HudNarrator_AwareMeters(next->meters);
+
+                used = strlen(out);
+                snprintf(out + used, outSize - used, "%s %s, %s, %d meter%s", n ? ";" : "",
+                         next->name[0] ? next->name : "something",
+                         ETA_HudNarrator_RelativeDirection(next->leftOfView), m, m == 1 ? "" : "s");
+                next->announced = next->band;
+                next->spokeSet  = 1;
+                next->spokeAt   = nowMs;
+                n++;
+
+                next = NULL;
+                for (i = 0; i < ETA_AWARE_MAX; i++)
+                {
+                    ETA_AwareSlot *slot = &gAware[i];
+
+                    if (slot->used && slot->kind == ETA_AWARE_ITEM
+                        && ETA_HudNarrator_AwareEvent(slot) == ETA_AWARE_EVENT_APPEAR
+                        && (!next || slot->meters < next->meters))
+                    {
+                        next = slot;
+                    }
+                }
+            }
+        }
+        else if (together > 1)
         {
             char nearest[64];
 
@@ -1995,7 +2032,7 @@ int ETA_HudNarrator_UpdateAwareness(const ETA_AwareThing *things, int count,
 
 void ETA_HudNarrator_SpeakAwareness(const char *text)
 {
-    static char buffer[160];
+    static char buffer[320];
 
     if (!text || !text[0])
     {

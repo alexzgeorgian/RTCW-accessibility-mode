@@ -1,0 +1,67 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 6126350a..37408aba 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -716,6 +716,21 @@ static qboolean ETA_ThingOffLevel(const eta_thing_t *thing)
+ 	                             && CG_AccessibilityLeverLiftHere(thing->point, NULL) ) ) );
+ }
+ 
++/*
++ * A lift's call button or lever, or the train's lever, on this floor and
++ * near: on T wherever the areas put it. The tester, choosing the lift on
++ * T and walking off toward it, found it gone from T once they were in
++ * another area, and only the control room left, which they could not
++ * reach without the lift.
++ */
++#define ETA_THINGS_RIDE_NEAR 1600.0f
++
++static qboolean ETA_ThingRideNear(const eta_thing_t *thing)
++{
++	return (qboolean)( ETA_ThingRideControl(thing) && !ETA_ThingOffLevel(thing)
++	                   && Distance(cg.predictedPlayerState.origin, thing->point) < ETA_THINGS_RIDE_NEAR );
++}
++
+ /* Those left in an area, or in the whole level for -1. */
+ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ {
+@@ -1082,7 +1097,8 @@ qboolean CG_AccessibilityThingPressedAt(const vec3_t point)
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+-	return (qboolean)(!thing->done && ( thing->known || thing->ride || !Q_stricmpn(thing->name, "Tram button", 11) )
++	return (qboolean)(!thing->done && ( thing->known || thing->ride || !Q_stricmpn(thing->name, "Tram button", 11)
++	                                    || ETA_ThingRideNear(thing) )
+ 	                  && (thing->kind != ETA_THING_SECRET || eta_secretsLead.integer));
+ }
+ 
+@@ -1148,6 +1164,7 @@ static void ETA_ThingsStep(int step)
+ 			if (!eta_things.things[i].known && !eta_things.things[i].ride
+ 			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+ 			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
++			    && !ETA_ThingRideNear(&eta_things.things[i])
+ 			    /* A switch in this very area, on this floor: the way on.
+ 			       Past the crypt's bridge, the north switch was not on T
+ 			       until it had been seen, and the tester was lost. */
+@@ -1185,7 +1202,8 @@ static void ETA_ThingsStep(int step)
+ 			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride
+ 			         || ETA_ThingHereInSight(eta_things.things[i].point)
+ 			         || ( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+-			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
++			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
++			         || ETA_ThingRideNear(&eta_things.things[i]))
+ 			{
+ 				/* The tram, and its button near: on the list wherever
+ 				   the area takes them to be. */
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index dc997fd7..c8636bbb 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -3742,7 +3742,7 @@ static void ETA_NarrateAwareness(qboolean held)
+ 	static int     lastSerial = -1;
+ 	static int     lastSpeechAt;
+ 	ETA_AwareThing list[ETA_AWARE_MAX];
+-	char           said[160];
++	char           said[320];
+ 	const char     *last;
+ 	int            serial, count, quiet;
+ 	qboolean       building;

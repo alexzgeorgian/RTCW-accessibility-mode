@@ -5065,3 +5065,21 @@ next objective is kept now: "No way found to your next objective from
 here yet. X lists the ways out of here, and T what is left to do; O
 tries again from wherever you go". The way out comes only once no
 objective with a place is left.
+
+## 0300-near-lift-and-drops.patch
+
+The tester chose the lift on T in the rocket base, walked off toward
+it, and found it gone from T, with only the control room left, which
+cannot be reached without the lift. T lists the things of the area the
+player is in, and the lift's call button was in another. A lift's call
+button or lever, or the train's lever, on the player's floor and within
+40 metres, is now on T wherever the areas put it, come across or not.
+In game, from the tester's bedroom save: "1 of 1, Lift call button,
+right, 11 meters", and still there after Backspace.
+
+With the narrator in src/accessibility/hud/hud_narrator.c: what a
+fallen soldier drops lands together, a weapon and its ammo, and only
+the nearest was placed - "2 things on the ground, nearest Thompson,
+ahead, 3 meters". Each is placed now, nearest first: "On the ground:
+Grenade, right, 2 meters; Thompson, ahead, 3 meters; Ammo for Thompson,
+ahead left, 4 meters".
