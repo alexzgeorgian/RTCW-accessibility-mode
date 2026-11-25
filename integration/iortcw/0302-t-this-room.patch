@@ -1,0 +1,127 @@
+diff --git a/SP/code/cgame/cg_accessibility_things.c b/SP/code/cgame/cg_accessibility_things.c
+index 37408aba..d5544fcb 100644
+--- a/SP/code/cgame/cg_accessibility_things.c
++++ b/SP/code/cgame/cg_accessibility_things.c
+@@ -650,6 +650,11 @@ static qboolean ETA_ThingStillThere(const eta_thing_t *thing)
+    wall of the room the tester stood in, a meter off, and its middle,
+    in the wall, was taken for another area's: T never had it. */
+ #define ETA_THINGS_HERE_NEAR 400.0f
++/* Seen from here but in another area: only when within a few steps - the
++   switch in the wall. The tester, in the rocket base, asked for T to
++   list only the room they stand in: what was seen through a window or a
++   doorway, out of reach, made the launch button hard to come to. */
++#define ETA_THINGS_SEEN_NEAR 128.0f
+ 
+ static qboolean ETA_ThingHereInSight(const vec3_t point)
+ {
+@@ -658,7 +663,7 @@ static qboolean ETA_ThingHereInSight(const vec3_t point)
+ 
+ 	VectorCopy(cg.predictedPlayerState.origin, eye);
+ 	eye[2] += cg.predictedPlayerState.viewheight;
+-	if (Distance(eye, point) > ETA_THINGS_HERE_NEAR)
++	if (Distance(eye, point) > ETA_THINGS_SEEN_NEAR)
+ 	{
+ 		return qfalse;
+ 	}
+@@ -716,21 +721,6 @@ static qboolean ETA_ThingOffLevel(const eta_thing_t *thing)
+ 	                             && CG_AccessibilityLeverLiftHere(thing->point, NULL) ) ) );
+ }
+ 
+-/*
+- * A lift's call button or lever, or the train's lever, on this floor and
+- * near: on T wherever the areas put it. The tester, choosing the lift on
+- * T and walking off toward it, found it gone from T once they were in
+- * another area, and only the control room left, which they could not
+- * reach without the lift.
+- */
+-#define ETA_THINGS_RIDE_NEAR 1600.0f
+-
+-static qboolean ETA_ThingRideNear(const eta_thing_t *thing)
+-{
+-	return (qboolean)( ETA_ThingRideControl(thing) && !ETA_ThingOffLevel(thing)
+-	                   && Distance(cg.predictedPlayerState.origin, thing->point) < ETA_THINGS_RIDE_NEAR );
+-}
+-
+ /* Those left in an area, or in the whole level for -1. */
+ static void ETA_ThingsCount(int area, int counts[ETA_THING_KINDS], int *left)
+ {
+@@ -1097,8 +1087,7 @@ qboolean CG_AccessibilityThingPressedAt(const vec3_t point)
+ /* Whether T leads to a thing: a secret area only with eta_secretsLead. */
+ static qboolean ETA_ThingLeadable(const eta_thing_t *thing)
+ {
+-	return (qboolean)(!thing->done && ( thing->known || thing->ride || !Q_stricmpn(thing->name, "Tram button", 11)
+-	                                    || ETA_ThingRideNear(thing) )
++	return (qboolean)(!thing->done && ( thing->known || thing->ride || !Q_stricmpn(thing->name, "Tram button", 11) )
+ 	                  && (thing->kind != ETA_THING_SECRET || eta_secretsLead.integer));
+ }
+ 
+@@ -1164,7 +1153,6 @@ static void ETA_ThingsStep(int step)
+ 			if (!eta_things.things[i].known && !eta_things.things[i].ride
+ 			    && !( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+ 			          && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
+-			    && !ETA_ThingRideNear(&eta_things.things[i])
+ 			    /* A switch in this very area, on this floor: the way on.
+ 			       Past the crypt's bridge, the north switch was not on T
+ 			       until it had been seen, and the tester was lost. */
+@@ -1202,8 +1190,7 @@ static void ETA_ThingsStep(int step)
+ 			else if (CG_AccessibilityAreaHolds(area, eta_things.things[i].point) || eta_things.things[i].ride
+ 			         || ETA_ThingHereInSight(eta_things.things[i].point)
+ 			         || ( !Q_stricmpn(eta_things.things[i].name, "Tram button", 11)
+-			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f )
+-			         || ETA_ThingRideNear(&eta_things.things[i]))
++			              && Distance(ps->origin, eta_things.things[i].point) < 1200.0f ))
+ 			{
+ 				/* The tram, and its button near: on the list wherever
+ 				   the area takes them to be. */
+@@ -1489,9 +1476,10 @@ static void ETA_ThingsStep(int step)
+ 
+ 		action = thing->ride ? CG_AccessibilityRideAction()
+ 		                  : trapUnder ? "Walk up to it, and the moment you have it, step straight back"
+-		                  : !Q_stricmpn(thing->name, "Button, objective ", 18)
+-		                  ? va("F presses it: %s", CG_AccessibilityObjectiveText(atoi(thing->name + 18))[0]
+-		                                          ? CG_AccessibilityObjectiveText(atoi(thing->name + 18)) : "your objective")
++		                  : Q_stristr(thing->name, "button, objective ")
++		                  ? va("F presses it: %s", CG_AccessibilityObjectiveText(atoi(Q_stristr(thing->name, "button, objective ") + 18))[0]
++		                                          ? CG_AccessibilityObjectiveText(atoi(Q_stristr(thing->name, "button, objective ") + 18))
++		                                          : "your objective")
+ 		                  : !Q_stricmpn(thing->name, "Train lever", 11)
+ 		                  ? "F starts the train, which leaves 2 seconds later: be by it, and jump on at once"
+ 		                  : ETA_ThingReusable(thing) && !CG_AccessibilitySwitchOffAt(thing->point)
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 4161fbea..f53b1af2 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -4912,6 +4912,33 @@ static const char *ETA_UserName(int i)
+ 	if (( !Q_stricmp(eta_users[i].name, "Button") || !Q_stricmp(eta_users[i].name, "Switch") )
+ 	    && ( objective = CG_AccessibilityObjectiveOfEvent(eta_users[i].target) ) > 0)
+ 	{
++		/* Named by what the map calls what it sets off, when that is
++		   words: the rocket base's "abort_launch" is the "Abort launch
++		   button" - the tester found "Button, objective 2" no name. */
++		char words[48];
++		int  k, letters = 0;
++
++		Q_strncpyz(words, eta_users[i].target, sizeof(words));
++		for (k = 0; words[k]; k++)
++		{
++			if (words[k] == '_')
++			{
++				words[k] = ' ';
++			}
++			else if (isalpha((unsigned char)words[k]))
++			{
++				letters++;
++			}
++			else if (words[k] != ' ')
++			{
++				letters = -1000;   /* a number in it: "t517", "button2" */
++			}
++		}
++		if (letters >= 4 && strchr(words, ' ') && Q_stricmpn(words, "button", 6))
++		{
++			words[0] = (char)toupper((unsigned char)words[0]);
++			return va("%s button, objective %d", words, objective);
++		}
+ 		return va("Button, objective %d", objective);
+ 	}
+ 	return eta_users[i].name;

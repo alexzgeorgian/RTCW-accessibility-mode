@@ -5097,3 +5097,21 @@ there". It still leads toward the objective, whose way goes by the
 lift. In game, from the start: O, Backspace, O says the lift again, and
 the test player is out of the truck, at the lift and down it in two
 minutes.
+
+## 0302-t-this-room.patch
+
+The tester found the rocket base's launch button hard to come to, and
+asked for T to list only the room they stand in. What was in sight from
+another area within ten metres - through a window, a doorway - was on
+T; now only within about three, the switch set in the wall beside the
+player. The alarm box in sight, which the forest needs, stays. The lift
+controls kept on T from 40 metres off (0300) are gone again: that came
+of a report that was about O, not T.
+
+A button that meets an objective is named by what the map calls what it
+sets off, when that is words: the rocket base's "abort_launch" makes it
+the "Abort launch button, objective 2", where the tester heard
+"Button, objective 2" and found it no name. A name with a number in it
+stays "Button, objective N". In game, from the bedroom save: T says
+"Nothing left in this area. 1 thing in other areas", and the test
+player is at the lift, in it and down in 47 seconds.
