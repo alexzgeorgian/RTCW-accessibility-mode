@@ -1,0 +1,1038 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 18d8e2ea..6e596f87 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -1642,9 +1642,12 @@ void CG_AccessibilityFrame( void ) {
+ 
+ 		for ( i = 0; i < ETA_MAX_OBJECTIVES; i++ ) {
+ 			if ( ( bits & ( 1 << i ) ) && !( eta.objectives & ( 1 << i ) ) ) {
++				char run[160];
++
++				Q_strncpyz( run, CG_AccessibilityObjectiveDoneRun(), sizeof( run ) );
+ 				CG_AccessibilitySay( i < eta.numObjectiveTexts
+-									 ? va( "Objective done: %s", eta.objectiveText[i] )
+-									 : va( "Objective %i done", i + 1 ) );
++									 ? va( "Objective done: %s%s", eta.objectiveText[i], run )
++									 : va( "Objective %i done%s", i + 1, run ) );
+ 			}
+ 		}
+ 		eta.objectives = bits;
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 3028eebd..c69d6ff5 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -3879,7 +3879,7 @@ static void ETA_GuideFrame(void)
+ 		vec3_t      at;
+ 		const char *name;
+ 
+-		if (!CG_AccessibilityMarkerInfo(at, &name) || !name || !strstr(name, "ladder up"))
++		if (!CG_AccessibilityMarkerInfo(at, &name) || !name || ( !strstr(name, "ladder up") && Q_stricmp(name, "the way back") ))
+ 		{
+ 			eta_guideByF = qfalse;
+ 		}
+@@ -4109,6 +4109,32 @@ static void ETA_GuideFrame(void)
+ 			forward[2] = 0.0f;
+ 			VectorNormalize(forward);
+ 			VectorMA(ps->origin, 40.0f, forward, ahead);
++
++			/* Something to break in the way: said, and fired at by the
++			   player, not gone round. The radar base begins in an air
++			   duct with a grate across it, the way on beyond it, and the
++			   guide stopped at the grate, finding a way round, for good. */
++			{
++				static const vec3_t small = { -8.0f, -8.0f, -8.0f }, big = { 8.0f, 8.0f, 8.0f };
++				trace_t             tr;
++				vec3_t              far;
++
++				VectorMA(ps->origin, 64.0f, forward, far);
++				CG_Trace(&tr, ps->origin, small, big, far, ps->clientNum, MASK_PLAYERSOLID);
++				if (tr.fraction < 1.0f && tr.entityNum >= 0 && tr.entityNum < ENTITYNUM_WORLD
++				    && cg_entities[tr.entityNum].currentState.eType == ET_EXPLOSIVE)
++				{
++					if (cg.time - eta_guide.replanAt > 5000 || cg.time < eta_guide.replanAt)
++					{
++						eta_guide.replanAt = cg.time;
++						ETA_HudNarrator_HoldPassive(cg.time);
++						ETA_Speech_Say("In the way, ahead: something to break. Fire at it, and the way goes on through");
++					}
++					eta_guide.checkAt = cg.time;
++					VectorCopy(ps->origin, eta_guide.checkFrom);
++					return;
++				}
++			}
+ 			CG_AccessibilityMarkerBlocked(ahead, 32.0f);
+ 
+ 			if (cg.time - eta_guide.replanAt > 5000 || cg.time < eta_guide.replanAt)
+@@ -6162,6 +6188,30 @@ void CG_AccessibilityFacePoint(const vec3_t point)
+ 	ETA_AimStartSnap(&aim, NULL);
+ }
+ 
++/* Steered along the way while W is held, for as long as the marker is
++   "the way back": out of where an objective broken brings fire down. */
++void CG_AccessibilitySteerBack(void)
++{
++	eta_guideByF = qtrue;
++}
++
++/* Turned and aimed at a point, up or down as well: the radar base's
++   radar control is below eye height, and shots turned to it level went
++   over its top. */
++void CG_AccessibilityAimPoint(const vec3_t point)
++{
++	etaAimTarget_t aim;
++
++	if (!cg.snap || cg.predictedPlayerState.pm_type != PM_NORMAL)
++	{
++		return;
++	}
++	memset(&aim, 0, sizeof(aim));
++	aim.entityNum = -1;
++	VectorCopy(point, aim.point);
++	ETA_AimStartSnap(&aim, NULL);
++}
++
+ void CG_AccessibilityFaceTheWay(void)
+ {
+ 	char run[128];
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index f9ab19b1..7b4b0772 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -156,9 +156,11 @@ static void ETA_MarkerEye(vec3_t eye)
+ #define ETA_ROUTE_JUMP_LIFT     24.0f   /* a third, for a ledge to jump onto */
+ #define ETA_ROUTE_MAX_DROP      96.0f
+ /* What the way may drop off an edge: as deep as a fall does no harm -
+-   the game hurts a landing past about six metres (delta 38.75). The tram
+-   level's way out drops three metres into a duct and five out of it. */
+-#define ETA_ROUTE_SEARCH_DROP   200.0f
++   the game hurts a landing past about six metres (delta 38.75, 242
++   units). The tram level's way out drops three metres into a duct and
++   five out of it; the radar base's first duct ends, past its grate, a
++   little over five metres up. */
++#define ETA_ROUTE_SEARCH_DROP   232.0f
+ #define ETA_ROUTE_BUDGET_MS     8       /* searching per frame, at most: the forest's 150 metres took 0.7 s; twice that
+                                            since the way keeps clear of soldiers, so twice the share */
+ #define ETA_ROUTE_BUDGET_STEP   4       /* squares between looks at the clock */
+@@ -1434,6 +1436,10 @@ static void ETA_RouteStartAt(const vec3_t origin, float out[3])
+ 	VectorCopy(origin, out);
+ }
+ 
++static qboolean ETA_MarkerBreakableFace(float out[3]);
++static qboolean ETA_MarkerThrowCase(void);
++static qboolean ETA_MarkerThrowSpot(vec3_t out);
++
+ static void ETA_RoutePlanWith(qboolean jumps)
+ {
+ 	float start[3], goal[3];
+@@ -1448,11 +1454,22 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 	goal[1]  = eta_marker.origin[1];
+ 	goal[2]  = eta_marker.origin[2];
+ 
+-	ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL,
+-	                     eta_marker.square ? ETA_MarkerSquareRadius()
+-	                     : eta_marker.walkOnto ? ETA_MARKER_ONTO_UNITS
+-	                                           : ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS,
+-	                     eta_marker.square);
++	if (ETA_MarkerThrowCase() && ETA_MarkerThrowSpot(goal))
++	{
++		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_ROUTE_CELL, eta_marker.square);
++	}
++	else if (!Q_stricmp(eta_marker.name, "your next objective") && ETA_MarkerBreakableFace(goal))
++	{
++		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_ROUTE_CELL, eta_marker.square);
++	}
++	else
++	{
++		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL,
++		                     eta_marker.square ? ETA_MarkerSquareRadius()
++		                     : eta_marker.walkOnto ? ETA_MARKER_ONTO_UNITS
++		                                           : ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS,
++		                     eta_marker.square);
++	}
+ 
+ 	eta_route.planned   = qtrue;
+ 	eta_route.startedAt = cg.time;
+@@ -2686,6 +2703,553 @@ static void ETA_MarkerTarget(vec3_t out)
+ /* Whether the marker is a place to stand - ground just under it, as
+    under a waypoint or a thing lying somewhere - rather than a switch on a
+    wall, which F reaches from the floor below. */
++/* The marker on something to break that the game still has whole -
++   an objective met by breaking it, like the radar base's radar control,
++   set in a wall: its middle is in the wall, never stood on. */
++static qboolean ETA_MarkerOnBreakable(void)
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t               mins, maxs;
++		int                  k;
++
++		if (es->eType != ET_EXPLOSIVE || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++		    || !cgs.inlineDrawModel[es->modelindex] || !es->solid)
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		VectorAdd(mins, cg_entities[es->number].lerpOrigin, mins);
++		VectorAdd(maxs, cg_entities[es->number].lerpOrigin, maxs);
++		for (k = 0; k < 3; k++)
++		{
++			if (eta_marker.origin[k] < mins[k] - 8.0f || eta_marker.origin[k] > maxs[k] + 8.0f)
++			{
++				break;
++			}
++		}
++		if (k == 3)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* Where to stand to break the thing to break the marker is on: in front
++   of its open face. Its middle is in the wall, and the way to it ended
++   behind that wall, within the way's reach of the middle but with no
++   shot at it - the radar base's radar control backs onto a corridor. */
++static qboolean ETA_MarkerBreakableFace(float out[3])
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t               mins, maxs, mid;
++		int                  k, thin = 0, side;
++
++		if (es->eType != ET_EXPLOSIVE || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++		    || !cgs.inlineDrawModel[es->modelindex] || !es->solid)
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		VectorAdd(mins, cg_entities[es->number].lerpOrigin, mins);
++		VectorAdd(maxs, cg_entities[es->number].lerpOrigin, maxs);
++		for (k = 0; k < 3; k++)
++		{
++			if (eta_marker.origin[k] < mins[k] - 8.0f || eta_marker.origin[k] > maxs[k] + 8.0f)
++			{
++				break;
++			}
++		}
++		if (k < 3)
++		{
++			continue;
++		}
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		thin = ( maxs[0] - mins[0] <= maxs[1] - mins[1] ) ? 0 : 1;
++		for (side = -1; side <= 1; side += 2)
++		{
++			vec3_t  front;
++			trace_t tr;
++
++			VectorCopy(mid, front);
++			front[thin] = ( side < 0 ? mins[thin] : maxs[thin] ) + side * 40.0f;
++			if (CG_PointContents(front, -1) & MASK_PLAYERSOLID)
++			{
++				continue;
++			}
++			CG_Trace(&tr, front, NULL, NULL, mid, cg.predictedPlayerState.clientNum, MASK_SHOT);
++			if (tr.fraction >= 1.0f || tr.entityNum == es->number)
++			{
++				VectorCopy(front, out);
++				return qtrue;
++			}
++		}
++	}
++	return qfalse;
++}
++
++/* A point on the thing to break the marker is on that a shot from in
++   front of it hits: its middle may be a gap. The radar base's radar
++   control is a frame of plates with gaps between, its middle one of them,
++   and every shot turned to the middle went through. Nearest the middle,
++   tried a hand's width apart across its face. */
++static qboolean ETA_MarkerBreakableAim(vec3_t out)
++{
++	int n;
++
++	for (n = 0; cg.snap && n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++		vec3_t               mins, maxs, mid;
++		clipHandle_t         clip;
++		int                  k, thin, a, b;
++		float                side, best = -1.0f, u, v;
++
++		if (es->eType != ET_EXPLOSIVE || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++		    || !cgs.inlineDrawModel[es->modelindex] || !es->solid)
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		VectorAdd(mins, cg_entities[es->number].lerpOrigin, mins);
++		VectorAdd(maxs, cg_entities[es->number].lerpOrigin, maxs);
++		for (k = 0; k < 3; k++)
++		{
++			if (eta_marker.origin[k] < mins[k] - 8.0f || eta_marker.origin[k] > maxs[k] + 8.0f)
++			{
++				break;
++			}
++		}
++		if (k < 3)
++		{
++			continue;
++		}
++		VectorAdd(mins, maxs, mid);
++		VectorScale(mid, 0.5f, mid);
++		thin = ( maxs[0] - mins[0] <= maxs[1] - mins[1] ) ? 0 : 1;
++		a    = thin == 0 ? 1 : 0;   /* across the face */
++		b    = 2;                   /* up it */
++		side = cg.predictedPlayerState.origin[thin] >= mid[thin] ? 1.0f : -1.0f;
++		clip = trap_CM_InlineModel(es->modelindex);
++		for (u = mins[a] + 4.0f; u <= maxs[a] - 4.0f; u += 4.0f)
++		{
++			for (v = mins[b] + 4.0f; v <= maxs[b] - 4.0f; v += 4.0f)
++			{
++				vec3_t  from, to;
++				trace_t tr;
++				float   off = ( u - mid[a] ) * ( u - mid[a] ) + ( v - mid[b] ) * ( v - mid[b] );
++
++				if (best >= 0.0f && off >= best)
++				{
++					continue;
++				}
++				from[thin] = mid[thin] + side * ( ( maxs[thin] - mins[thin] ) * 0.5f + 16.0f );
++				to[thin]   = mid[thin] - side * ( ( maxs[thin] - mins[thin] ) * 0.5f + 16.0f );
++				from[a]    = to[a] = u;
++				from[b]    = to[b] = v;
++				trap_CM_BoxTrace(&tr, from, to, NULL, NULL, clip, MASK_SHOT);
++				if (tr.fraction < 1.0f && !tr.startsolid)
++				{
++					best = off;
++					VectorCopy(tr.endpos, out);
++				}
++			}
++		}
++		return (qboolean)( best >= 0.0f );
++	}
++	return qfalse;
++}
++
++/* Where to run once an objective broken is done: back along the way
++   that led to it. The radar base's radar control breaks, the dish falls,
++   and two or three seconds on the whole room it stood in goes up in
++   flames that kill at once; the test player, standing at the control,
++   died every time. */
++static vec3_t eta_breakBack;
++static int    eta_breakBackAt;
++static vec3_t eta_breakArrivedFrom;   /* where O said to fire */
++static int    eta_breakArrivedAt;
++static int    eta_breakDynamite;      /* the dynamite carried then; -1 told to fire */
++static vec3_t eta_breakDanger;        /* what blows */
++
++/* Where the player has walked on the way to the marker, a point each
++   step of a body's width, the last 64: the way they came. */
++#define ETA_CRUMBS 64
++static vec3_t eta_crumbs[ETA_CRUMBS];
++static int    eta_crumbAt[ETA_CRUMBS];
++static int    eta_crumbHead;
++
++static void ETA_CrumbFrame(void)
++{
++	const float *at   = cg.predictedPlayerState.origin;
++	int          last = ( eta_crumbHead + ETA_CRUMBS - 1 ) % ETA_CRUMBS;
++
++	if (eta_crumbAt[last] && cg.time >= eta_crumbAt[last] && Distance(eta_crumbs[last], at) < 24.0f)
++	{
++		return;
++	}
++	VectorCopy(at, eta_crumbs[eta_crumbHead]);
++	eta_crumbAt[eta_crumbHead] = cg.time ? cg.time : 1;
++	eta_crumbHead              = ( eta_crumbHead + 1 ) % ETA_CRUMBS;
++}
++
++/* The run back, as said: straight to the first leg's end, and the turn
++   and length of a second leg, if there is one. */
++static vec3_t eta_breakLeg2;
++static int    eta_breakLegs;
++
++static qboolean ETA_CrumbClear(const vec3_t from, const vec3_t to)
++{
++	trace_t tr;
++
++	CG_Trace(&tr, from, NULL, NULL, to, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++	return (qboolean)( tr.fraction >= 1.0f );
++}
++
++static void ETA_BreakBackKeep(const float *danger)
++{
++	vec3_t here, exit;
++	int    order[ETA_CRUMBS], count = 0, k, i, out = -1;
++
++	eta_breakBackAt = 0;
++	eta_breakLegs   = 0;
++	VectorCopy(cg.predictedPlayerState.origin, here);
++
++	/* The steps back, newest first, as far as five minutes. */
++	for (k = 1; k < ETA_CRUMBS; k++)
++	{
++		i = ( eta_crumbHead + ETA_CRUMBS - k ) % ETA_CRUMBS;
++		if (!eta_crumbAt[i] || cg.time < eta_crumbAt[i] || cg.time - eta_crumbAt[i] > 300000)
++		{
++			break;
++		}
++		order[count++] = i;
++	}
++
++	/* Where to: out of the trap the player stands in, a body's length
++	   past its edge, if they are in one the map switches on; else eight
++	   metres back. */
++	for (k = 0; k < count; k++)
++	{
++		const char *trap = CG_AccessibilityTrapUnder(here);
++
++		const float *c = eta_crumbs[order[k]];
++
++		/* Out of the blast's reach, 600 units, by distance alone: a door
++		   shut when this is worked out is open once walked through, and
++		   the test player, just past the radar room's, died in the blast. */
++		if (danger && Distance(c, danger) < 680.0f)
++		{
++			continue;
++		}
++		if (trap ? !CG_AccessibilityTrapUnder(c) && ( k + 1 >= count || !CG_AccessibilityTrapUnder(eta_crumbs[order[k + 1]]) )
++		         : Distance(c, here) >= 320.0f)
++		{
++			out = k + 1 < count && trap ? k + 1 : k;
++			break;
++		}
++	}
++	if (out < 0)
++	{
++		out = count - 1;
++	}
++	if (out < 0)
++	{
++		return;
++	}
++	VectorCopy(eta_crumbs[order[out]], exit);
++
++	/* The first leg: the furthest step back, up to the way out, in a
++	   straight line from here. */
++	for (k = out; k >= 0; k--)
++	{
++		if (ETA_CrumbClear(here, eta_crumbs[order[k]]))
++		{
++			break;
++		}
++	}
++	if (k < 0 || Distance(eta_crumbs[order[k]], here) < 48.0f)
++	{
++		return;
++	}
++	VectorCopy(eta_crumbs[order[k]], eta_breakBack);
++	eta_breakBackAt = cg.time ? cg.time : 1;
++	eta_breakLegs   = 1;
++	/* The beacon leads the rest, and W is steered along it. */
++	VectorCopy(exit, eta_breakLeg2);
++	CG_AccessibilityChoose(exit, "the way back");
++	CG_AccessibilitySteerBack();
++}
++
++/* The objective just done: if broken where O led, the player is turned
++   back the way they came and told to run; "" otherwise. */
++const char *CG_AccessibilityObjectiveDoneRun(void)
++{
++	static char run[192];
++	int         meters;
++
++	if (!eta_breakArrivedAt || cg.time - eta_breakArrivedAt > 300000 || cg.time < eta_breakArrivedAt
++	    || Distance(eta_breakArrivedFrom, cg.predictedPlayerState.origin) > 200.0f)
++	{
++		eta_breakArrivedAt = 0;
++		return "";
++	}
++	eta_breakArrivedAt = 0;
++	ETA_BreakBackKeep(NULL);
++	if (!eta_breakBackAt)
++	{
++		return "";
++	}
++	eta_breakBackAt = 0;
++	CG_AccessibilityFacePoint(eta_breakBack);
++	meters = (int)( Distance(eta_breakLeg2, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f );
++	Com_sprintf(run, sizeof(run), ". Run now: hold W, and you are steered back the way you came, %d %s", meters < 1 ? 1 : meters,
++	            meters == 1 ? "meter" : "meters");
++	Q_strcat(run, sizeof(run), ": it brings fire down here");
++	return run;
++}
++
++/* The dynamite thrown at it, there: the way out at once, ahead of the
++   fuse, and out of the blast's reach. */
++static qboolean ETA_CoverFrom(const vec3_t danger, vec3_t out);
++
++void CG_AccessibilityBreakFrame(void)
++{
++	int meters;
++
++	/* Died or restarted on the way back: its marker is let go of. */
++	if (cg.predictedPlayerState.pm_type == PM_DEAD || cg.predictedPlayerState.stats[STAT_HEALTH] <= 0)
++	{
++		vec3_t      at;
++		const char *name;
++
++		eta_breakArrivedAt = 0;
++		if (CG_AccessibilityMarkerInfo(at, &name) && name && !Q_stricmp(name, "the way back"))
++		{
++			CG_AccessibilityMarkerForget();
++		}
++		return;
++	}
++
++	if (!eta_breakArrivedAt || eta_breakDynamite <= 0 || cg.time < eta_breakArrivedAt || cg.time - eta_breakArrivedAt > 300000
++	    || CG_AccessibilityDynamiteCount() >= eta_breakDynamite
++	    || Distance(eta_breakArrivedFrom, cg.predictedPlayerState.origin) > 300.0f)
++	{
++		if (eta_breakArrivedAt && eta_breakDynamite > 0 && CG_AccessibilityDynamiteCount() > eta_breakDynamite)
++		{
++			eta_breakDynamite = CG_AccessibilityDynamiteCount();   /* more picked up */
++		}
++		return;
++	}
++	eta_breakArrivedAt = 0;
++	{
++		vec3_t cover;
++
++		if (ETA_CoverFrom(eta_breakDanger, cover))
++		{
++			meters = (int)( Distance(cover, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f );
++			CG_AccessibilityChoose(cover, "the way back");
++			CG_AccessibilitySteerBack();
++			ETA_Speech_Say(va("Dynamite thrown. Take cover now, behind the wall %s, %d %s: hold W, you are steered there",
++			                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(cover)), meters < 1 ? 1 : meters,
++			                  meters == 1 ? "meter" : "meters"));
++			CG_AccessibilityFacePoint(cover);
++			return;
++		}
++	}
++	ETA_BreakBackKeep(eta_breakDanger);
++	if (!eta_breakBackAt)
++	{
++		ETA_Speech_Say("Dynamite thrown. Get out of this room, back the way you came, now");
++		return;
++	}
++	eta_breakBackAt = 0;
++	CG_AccessibilityFacePoint(eta_breakBack);
++	meters = (int)( Distance(eta_breakLeg2, cg.predictedPlayerState.origin) * ETA_QU_TO_METERS + 0.5f );
++	ETA_Speech_Say(va("Dynamite thrown. Hold W now: you are steered back the way you came, %d %s, out of its blast",
++	                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters"));
++}
++
++static qboolean ETA_MarkerBreakableAim(vec3_t out);
++
++/* Where to throw dynamite at it from: the nearest place outside the trap
++   its breaking sets off, in a straight line to a solid part of it through
++   the walls' gaps - doors not counted, they are opened. The tester threw
++   it at the radar control from its room's doorway, never going in. */
++static qboolean ETA_MarkerThrowSpot(vec3_t out)
++{
++	static vec3_t keptFor, kept;
++	static int    keptOk = -1;
++	vec3_t        aim;
++	float         best = 0.0f;
++	int           k, found = 0;
++	vec3_t        small = { -4.0f, -4.0f, -4.0f }, smallUp = { 4.0f, 4.0f, 4.0f };
++
++	if (keptOk >= 0 && VectorCompare(keptFor, eta_marker.origin))
++	{
++		VectorCopy(kept, out);
++		return (qboolean)keptOk;
++	}
++	if (!ETA_MarkerBreakableAim(aim))
++	{
++		VectorCopy(eta_marker.origin, aim);
++	}
++	for (k = 0; k < 72; k++)
++	{
++		vec3_t dir;
++		float  d;
++
++		dir[0] = cos(DEG2RAD(k * 5.0f));
++		dir[1] = sin(DEG2RAD(k * 5.0f));
++		dir[2] = 0.0f;
++		for (d = 32.0f; d <= 640.0f && ( !found || d < best ); d += 16.0f)
++		{
++			vec3_t  p, down, mins = { -15.0f, -15.0f, -24.0f }, maxs = { 15.0f, 15.0f, 32.0f };
++			trace_t tr;
++
++			VectorMA(aim, d, dir, p);
++			trap_CM_BoxTrace(&tr, aim, p, small, smallUp, 0, MASK_PLAYERSOLID);
++			if (tr.fraction < 1.0f)
++			{
++				break;   /* the world in the way: this way is done */
++			}
++			if (CG_AccessibilityTrapUnder(p))
++			{
++				continue;
++			}
++			/* Somewhere to stand: floor within reach below, and room. */
++			VectorCopy(p, down);
++			down[2] -= 160.0f;
++			trap_CM_BoxTrace(&tr, p, down, mins, maxs, 0, MASK_PLAYERSOLID);
++			if (tr.fraction >= 1.0f || tr.startsolid || tr.plane.normal[2] < 0.7f)
++			{
++				continue;
++			}
++			found = 1;
++			best  = d;
++			VectorCopy(tr.endpos, out);
++			break;
++		}
++	}
++	VectorCopy(eta_marker.origin, keptFor);
++	keptOk = found;
++	if (found)
++	{
++		VectorCopy(out, kept);
++	}
++	return (qboolean)found;
++}
++
++/* With dynamite, at one whose breaking sets off a trap: it is thrown. */
++static qboolean ETA_MarkerThrowCase(void)
++{
++	return (qboolean)( !Q_stricmp(eta_marker.name, "your next objective") && ETA_MarkerOnBreakable()
++	                   && CG_AccessibilityTrapUnder(eta_marker.origin) && CG_AccessibilityDynamiteCount() > 0 );
++}
++
++/* A clear throw at it from the eyes: the line to a solid part of it
++   meets nothing on the way. */
++static qboolean ETA_MarkerBreakableThrow(void)
++{
++	trace_t tr;
++	vec3_t  eye, at;
++
++	if (!ETA_MarkerBreakableAim(at))
++	{
++		VectorCopy(eta_marker.origin, at);
++	}
++	VectorCopy(cg.predictedPlayerState.origin, eye);
++	eye[2] += cg.predictedPlayerState.viewheight;
++	CG_Trace(&tr, eye, NULL, NULL, at, cg.predictedPlayerState.clientNum, MASK_SHOT);
++	return (qboolean)( tr.fraction >= 0.97f
++	                   || ( tr.entityNum >= 0 && tr.entityNum < ENTITYNUM_WORLD
++	                        && cg_entities[tr.entityNum].currentState.eType == ET_EXPLOSIVE ) );
++}
++
++/* Cover from a blast at danger: the nearest spot, a few metres off, that
++   it cannot see and that is a straight walk from here - behind a wall,
++   as the tester took it, to the right of the radar room's door. */
++static qboolean ETA_CoverFrom(const vec3_t danger, vec3_t out)
++{
++	const float *here = cg.predictedPlayerState.origin;
++	float        best = 0.0f, r;
++	int          k, found = 0;
++
++	for (r = 64.0f; r <= 384.0f; r += 32.0f)
++	{
++		for (k = 0; k < 24; k++)
++		{
++			vec3_t  p, down;
++			trace_t tr;
++			float   yaw = k * 15.0f;
++
++			p[0] = here[0] + r * cos(DEG2RAD(yaw));
++			p[1] = here[1] + r * sin(DEG2RAD(yaw));
++			p[2] = here[2];
++			if (!ETA_CrumbClear(here, p) || CG_AccessibilityTrapUnder(p))
++			{
++				continue;
++			}
++			/* Ground under it, not a drop. */
++			VectorCopy(p, down);
++			down[2] -= 64.0f;
++			CG_Trace(&tr, p, NULL, NULL, down, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			if (tr.fraction >= 1.0f)
++			{
++				continue;
++			}
++			/* Unseen from the blast, the head as well. */
++			if (ETA_CrumbClear(danger, p))
++			{
++				continue;
++			}
++			p[2] += 32.0f;
++			if (ETA_CrumbClear(danger, p))
++			{
++				continue;
++			}
++			p[2] -= 32.0f;
++			if (!found || r < best)
++			{
++				found = 1;
++				best  = r;
++				VectorCopy(p, out);
++			}
++		}
++		if (found)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* A clear shot at the marker on something to break, from the eyes: what
++   is hit first on the line to it is the thing itself. The radar base's
++   radar control is set back in its wall; from beside the recess the
++   test player, told to fire, hit the recess's side. */
++static qboolean ETA_MarkerBreakableInSight(void)
++{
++	trace_t tr;
++	vec3_t  eye;
++
++	VectorCopy(cg.predictedPlayerState.origin, eye);
++	eye[2] += cg.predictedPlayerState.viewheight;
++	CG_Trace(&tr, eye, NULL, NULL, eta_marker.origin, cg.predictedPlayerState.clientNum, MASK_SHOT);
++	return (qboolean)( tr.fraction >= 1.0f
++	                   || ( tr.entityNum >= 0 && tr.entityNum < ENTITYNUM_WORLD
++	                        && cg_entities[tr.entityNum].currentState.eType == ET_EXPLOSIVE ) );
++}
++
+ static qboolean ETA_MarkerStoodOn(void)
+ {
+ 	trace_t tr;
+@@ -2943,6 +3507,8 @@ static void ETA_MarkerProgressFrame(void)
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	float               step;
+ 
++	ETA_CrumbFrame();
++
+ 	if (ps->groundEntityNum == ENTITYNUM_NONE || CG_AccessibilityClimbing())
+ 	{
+ 		VectorCopy(ps->origin, eta_progress.last);
+@@ -3123,13 +3689,32 @@ void CG_AccessibilityMarkerFrame(void)
+ 	   two metres short of it, the objective was not met - the rocket
+ 	   base's "Locate exit" said "Marker reached" again and again, a
+ 	   step from its strip. Reached on it. */
+-	if (arrived && !Q_stricmp(eta_marker.name, "your next objective"))
++	if (( arrived || ETA_MarkerThrowCase() ) && !Q_stricmp(eta_marker.name, "your next objective"))
+ 	{
+ 		vec3_t flat;
+ 
+ 		VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
+ 		flat[2] = 0.0f;
+-		arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
++		/* Something to break is reached beside it: the radar base's radar
++		   control is set in a wall, its middle two metres in, and the
++		   test player stood at it a minute hearing "1 meter". */
++		/* With dynamite, for one whose breaking sets off a trap: reached
++		   outside the trap, as soon as there is a clear throw at it -
++		   from its doorway, as the tester played it, never going in. */
++		vec3_t spot;
++
++		if (ETA_MarkerThrowCase() && ETA_MarkerThrowSpot(spot))
++		{
++			VectorSubtract(spot, cg.predictedPlayerState.origin, flat);
++			flat[2] = 0.0f;
++			arrived = (qboolean)( VectorLength(flat) <= 40.0f && !CG_AccessibilityTrapUnder(cg.predictedPlayerState.origin) );
++		}
++		else
++		{
++			arrived = ETA_MarkerOnBreakable()
++			          ? (qboolean)( VectorLength(flat) <= 96.0f && ETA_MarkerBreakableInSight() )
++			          : (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
++		}
+ 	}
+ 
+ 	/* The back of the truck: at the foot of its ramp, so that straight
+@@ -3227,6 +3812,29 @@ void CG_AccessibilityMarkerFrame(void)
+ 				CG_AccessibilityFacePoint(inside);
+ 			}
+ 		}
++		else if (!Q_stricmp(eta_marker.name, "your next objective") && ETA_MarkerOnBreakable())
++		{
++			eta_breakArrivedAt = cg.time ? cg.time : 1;
++			VectorCopy(cg.predictedPlayerState.origin, eta_breakArrivedFrom);
++			VectorCopy(eta_marker.origin, eta_breakDanger);
++			eta_breakDynamite = CG_AccessibilityTrapUnder(eta_marker.origin) ? CG_AccessibilityDynamiteCount() : -1;
++			{
++				vec3_t aimAt;
++
++				if (!ETA_MarkerBreakableAim(aimAt))
++				{
++					VectorCopy(eta_marker.origin, aimAt);
++				}
++				CG_AccessibilityAimPoint(aimAt);
++			}
++			ETA_Speech_Say(eta_breakDynamite > 0
++			               ? "Marker reached, your next objective: something to break, aimed at it from outside its room, "
++			                 "which its breaking sets on fire: do not go in. If a door is shut in front of you, F opens it. Throw "
++			                 "dynamite at it from here - 6, pressed until it says Dynamite; hold fire for the timer, let go - then "
++			                 "hold W: you are steered to cover"
++			               : "Marker reached, your next objective: something to break, aimed at it. Fire at it; "
++			                 "once it breaks, hold W at once: you are steered back out the way you came");
++		}
+ 		else if (eta_marker.objective)
+ 		{
+ 			ETA_Speech_Say(va("Marker reached, %s", eta_marker.name));
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index abf665a2..2221d124 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8314,6 +8314,98 @@ static void ETA_MarkerSetByO(const vec3_t point, const char *name)
+ 	Q_strncpyz(eta_oName, name, sizeof(eta_oName));
+ }
+ 
++/*
++ * Dynamite first, for a thing to break whose breaking sets off a trap:
++ * the radar base's radar control, its room going up in flames that kill
++ * at once two to eighteen seconds after it breaks, the door behind shut
++ * by then. Shot, it was a race the test player lost every time; the
++ * level means it for dynamite, three sticks of it on the way, and a fuse
++ * gives the time to get out. The tester chose that O leads to it first.
++ */
++static qboolean eta_dynamiteVisited[ETA_MAP_ITEMS];
++
++int CG_AccessibilityDynamiteCount(void)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++
++	return ps->ammo[BG_FindAmmoForWeapon(WP_DYNAMITE)] + ps->ammoclip[BG_FindClipForWeapon(WP_DYNAMITE)];
++}
++
++static qboolean ETA_HasDynamite(void)
++{
++	return (qboolean)( CG_AccessibilityDynamiteCount() > 0 );
++}
++
++/* The breakable the point is on, with a trap its breaking sets off. */
++static qboolean ETA_BreakableWithTrap(const vec3_t place)
++{
++	int m;
++
++	if (!CG_AccessibilityTrapUnder(place))
++	{
++		return qfalse;
++	}
++	for (m = 1; m < MAX_MODELS && m < cgs.numInlineModels; m++)
++	{
++		vec3_t mins, maxs;
++
++		if (!eta_breakModel[m] || !cgs.inlineDrawModel[m])
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[m], mins, maxs);
++		if (place[0] >= mins[0] - 8.0f && place[0] <= maxs[0] + 8.0f && place[1] >= mins[1] - 8.0f
++		    && place[1] <= maxs[1] + 8.0f && place[2] >= mins[2] - 8.0f && place[2] <= maxs[2] + 8.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* Dynamite lying in the level, not yet gone to, nearest. */
++static qboolean ETA_DynamiteToFetch(vec3_t out)
++{
++	const playerState_t *ps = &cg.predictedPlayerState;
++	int                 i, best = -1;
++
++	for (i = 0; i < eta_mapItemCount; i++)
++	{
++		gitem_t *it = &bg_itemlist[eta_mapItems[i].item];
++
++		if (it->giTag != WP_DYNAMITE || ( it->giType != IT_AMMO && it->giType != IT_WEAPON )
++		    || eta_mapItems[i].hidden == 'l' || eta_dynamiteVisited[i])
++		{
++			continue;
++		}
++		if (best < 0 || Distance(ps->origin, eta_mapItems[i].at) < Distance(ps->origin, eta_mapItems[best].at))
++		{
++			best = i;
++		}
++	}
++	if (best < 0)
++	{
++		return qfalse;
++	}
++	VectorCopy(eta_mapItems[best].at, out);
++	return qtrue;
++}
++
++/* Gone to: not led to again, taken or not. */
++static void ETA_DynamiteFrame(void)
++{
++	int i;
++
++	for (i = 0; i < eta_mapItemCount; i++)
++	{
++		if (bg_itemlist[eta_mapItems[i].item].giTag == WP_DYNAMITE
++		    && Distance(cg.predictedPlayerState.origin, eta_mapItems[i].at) < 48.0f)
++		{
++			eta_dynamiteVisited[i] = qtrue;
++		}
++	}
++}
++
+ /*
+  * The level's trail: the player's own script triggers, numbered in the
+  * order the level means them to be walked into - "action11", "action12"
+@@ -8372,6 +8464,7 @@ static void ETA_StepFrame(void)
+ 		char *space;
+ 
+ 		eta_stepStart     = cgs.levelStartTime;
++		memset(eta_dynamiteVisited, 0, sizeof(eta_dynamiteVisited));
+ 		eta_stepPassedMax = -1;
+ 		eta_stepGaveUp    = 0;
+ 		trap_Cvar_VariableStringBuffer("eta_stepsWalked", kept, sizeof(kept));
+@@ -8412,12 +8505,16 @@ static void ETA_StepFrame(void)
+ }
+ 
+ /* The next step of the trail to the objective, where it is: qfalse with
+-   none - the objective not met at a numbered trigger, or nothing left
+-   between. */
+-static qboolean ETA_StepNext(int objective, vec3_t out)
++   none - nothing left between. A level that meets none of its objectives
++   at a numbered trigger, the radar base's, where the radar is blown by
++   shooting its panel and the second objective is a doorway the script
++   watches: the trail goes, from the start, up to the numbered step
++   nearest the objective, and on from there as before. */
++static qboolean ETA_StepNext(int objective, const vec3_t place, vec3_t out)
+ {
+-	int   i, target = -1, floor = eta_stepPassedMax, next = -1;
+-	float best = 0.0f;
++	int      i, target = -1, floor = eta_stepPassedMax, next = -1;
++	float    best = 0.0f;
++	qboolean scripted = qtrue;
+ 
+ 	for (i = 0; i < eta_playerTriggerCount; i++)
+ 	{
+@@ -8429,6 +8526,10 @@ static qboolean ETA_StepNext(int objective, vec3_t out)
+ 		}
+ 		o   = ETA_StepOrder(eta_playerTriggers[i].event);
+ 		met = CG_AccessibilityObjectiveOfEvent(eta_playerTriggers[i].event);
++		if (met > 0)
++		{
++			scripted = qfalse;
++		}
+ 		if (met == objective && ( target < 0 || o < target ))
+ 		{
+ 			target = o;
+@@ -8438,10 +8539,51 @@ static qboolean ETA_StepNext(int objective, vec3_t out)
+ 			floor = o;
+ 		}
+ 	}
+-	if (target < 0 || floor < 0 || eta_stepGaveUp == objective)
++	if (target < 0 && scripted)
++	{
++		/* The step nearest the objective on its own floor - one whose box
++		   reaches the objective's height - and failing that the nearest.
++		   The radar is upstairs; the nearest step to it was on the street
++		   below, and the way up is by the stairs at a later step. */
++		int pass;
++
++		for (pass = 0; pass < 2 && target < 0; pass++)
++		{
++			for (i = 0; i < eta_playerTriggerCount; i++)
++			{
++				vec3_t mins, maxs, mid;
++				float  d;
++
++				if (!ETA_StepUsable(i))
++				{
++					continue;
++				}
++				ETA_StepBox(i, mins, maxs);
++				if (pass == 0 && ( maxs[2] < place[2] - 96.0f || mins[2] > place[2] + 32.0f ))
++				{
++					continue;
++				}
++				VectorAdd(mins, maxs, mid);
++				VectorScale(mid, 0.5f, mid);
++				d = pass == 0 ? sqrtf(( mid[0] - place[0] ) * ( mid[0] - place[0] ) + ( mid[1] - place[1] ) * ( mid[1] - place[1] ))
++				             : Distance(mid, place);
++				if (target < 0 || d < best)
++				{
++					target = ETA_StepOrder(eta_playerTriggers[i].event) + 1;
++					best   = d;
++				}
++			}
++		}
++		best = 0.0f;
++	}
++	else if (floor < 0)
+ 	{
+ 		return qfalse;   /* none before the first objective: the start is led as it was */
+ 	}
++	if (target < 0 || eta_stepGaveUp == objective)
++	{
++		return qfalse;
++	}
+ 	for (i = 0; i < eta_playerTriggerCount; i++)
+ 	{
+ 		vec3_t mins, maxs, mid;
+@@ -8724,8 +8866,25 @@ void CG_AccessibilityWayOut(void)
+ 			const char *words = CG_AccessibilityObjectiveText(objective);
+ 			vec3_t      step;
+ 
++			/* Dynamite first, where breaking the objective sets off a trap. */
++			if (!ETA_HasDynamite() && ETA_BreakableWithTrap(place) && ETA_DynamiteToFetch(step))
++			{
++				VectorSubtract(step, ps->origin, delta);
++				meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++				ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++				ETA_Speech_Say(va("Your next objective%s%s, %d meters. Its breaking sets the room it is in on fire: "
++				                  "dynamite first, and you have none. Dynamite, %d %s, %s%s%s. O again turns you toward it",
++				                  words[0] ? ": " : "", words, (int)(Distance(place, ps->origin) * ETA_QU_TO_METERS + 0.5f),
++				                  meters < 1 ? 1 : meters, meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++				                  height[0] ? ", " : "", height));
++				ETA_MarkerSetByO(step, "the dynamite");
++				CG_AccessibilityMarkerWalkOnto(qtrue);
++				return;
++			}
++
+ 			/* By the level's trail, a step at a time. */
+-			if (ETA_StepNext(objective, step))
++			if (ETA_StepNext(objective, place, step))
+ 			{
+ 				VectorSubtract(step, ps->origin, delta);
+ 				meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+@@ -12515,6 +12674,8 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_SwitchNoticeFrame();
+ 	ETA_LiftsFrame();
+ 	ETA_StepFrame();
++	ETA_DynamiteFrame();
++	CG_AccessibilityBreakFrame();
+ 	ETA_WarriorFrame();
+ 	ETA_SpiritFrame();
+ 	ETA_EnemyLooksFrame();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 81d45898..64d97775 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2317,6 +2317,8 @@ const char *CG_AccessibilityWeaponName( int weapon );
+ int CG_AccessibilityMountedGuns(vec3_t *out, int max);
+ qboolean CG_AccessibilityBoardingInside(const vec3_t point, vec3_t inside);
+ void CG_AccessibilityFacePoint(const vec3_t point);
++void CG_AccessibilityAimPoint(const vec3_t point);
++void CG_AccessibilitySteerBack(void);
+ const char *CG_AccessibilityRideThingName(void);
+ const char *CG_AccessibilityRideAction(void);
+ void CG_AccessibilityRideBoardNow(void);
+@@ -2360,6 +2362,9 @@ char CG_AccessibilityDoorLive( int model );
+ void CG_AccessibilityAreasNoWayForget( void );
+ qboolean CG_AccessibilityObjectiveDone( int n );
+ qboolean CG_AccessibilityStepLedPassed( void );
++const char *CG_AccessibilityObjectiveDoneRun( void );
++void CG_AccessibilityBreakFrame( void );
++int CG_AccessibilityDynamiteCount( void );
+ void CG_AccessibilityStepGiveUp( void );
+ const char *CG_AccessibilityObjectiveText( int n );
+ int CG_AccessibilityFirstObjectiveLeft( void );

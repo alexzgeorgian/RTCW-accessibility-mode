@@ -5169,3 +5169,55 @@ objective, at the door's edge: through it, up to the crawlspace, "The
 way goes through something to break, 2 meters on"; T, "Breakable metal,
 ahead, 2 meters. F turns you to it, to break it"; F and fire; O, "Way
 out, 3 meters", and "Mission complete".
+
+## 0305-radar-base.patch
+
+The radar base, mission 3's third part. Its two objectives are met by the
+script, not at numbered triggers - the radar when its control panel
+breaks, the X-Aircraft entrance at a doorway the script watches - so the
+level's trail never applied, and from the air duct at the start O faced
+a wall for minutes.
+
+- The trail, for a level that meets none of its objectives at a numbered
+  trigger, goes from the start up to the numbered step nearest the
+  objective on its own floor - a step whose box reaches the objective's
+  height - and on from there as before. The radar is upstairs; the stairs
+  up are at the eighth step.
+- Something to break in the way of the guide is said, "In the way, ahead:
+  something to break. Fire at it, and the way goes on through", not gone
+  round: the duct's grate.
+- The way may drop 232 units, not 200, when nothing else gets there: the
+  game hurts a landing past 242. The duct past its grate ends a little
+  over five metres up.
+- An objective that is something to break is reached at its open face,
+  in a straight line to it, not stood on: the radar control is set in a
+  wall, its middle in the wall, and the way ended behind that wall. The
+  player is aimed at a solid part of it, up or down as well - it is a
+  frame of plates with a gap at its middle, and every shot at the middle
+  went through.
+- Dynamite first, where breaking the objective sets off a trap - a
+  trigger_hurt that starts off, round it: the radar room burns two to
+  eighteen seconds after the control breaks, killing at once, the door
+  behind shut by then. With none carried, O leads to the dynamite the
+  level lays out: "Its breaking sets the room it is in on fire: dynamite
+  first, and you have none". With dynamite, the marker is reached at the
+  nearest place outside the trap in a straight line to the control - the
+  room's doorway, where the tester, who played it years ago, threw it:
+  "aimed at it from outside its room ... do not go in ... Throw dynamite
+  at it from here - 6, pressed until it says Dynamite". Thrown, the
+  nearest place the blast cannot see, a few metres off, is chosen, the
+  player turned to it and steered there while W is held: "Dynamite
+  thrown. Take cover now, behind the wall behind right, 2 meters".
+- Broken by gunfire instead, the player is turned back the way they came,
+  by the steps they walked, and steered out while W is held.
+- The marker for the way back is let go of on death.
+
+In game, from the start: through the duct, the grate broken, the drop,
+and the level's steps to the rooftops by the radar building - where
+soldiers left standing by the test player's notarget block the doors.
+From the rooftop: through the doors to the radar control. From the
+doorway: dynamite thrown, cover taken, "Objective done: Locate and
+destroy MVX-mk1 radar array", alive. O then leads to the second
+objective, seven metres below, past the door the soldiers open after the
+radar falls - not tried with soldiers in the test.
+
