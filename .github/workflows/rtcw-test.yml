@@ -11,11 +11,14 @@ name: RTCW test build
 # mode's in-game updater, which asks only for the latest, never offers
 # it. None of RTCW's own files are in it: the player brings their own.
 on:
-  # Branches only: a published build's tag, made in this repository,
-  # would otherwise start a build of its own, and that one another.
+  # main only: each build takes the owner's Actions minutes, the Mac's
+  # most of all, and a backup pushed to another branch was built and
+  # published as a test build of its own (rtcw-test-316). Tags never: a
+  # published build's tag, made in this repository, would otherwise
+  # start a build of its own, and that one another.
   push:
     branches:
-      - '**'
+      - main
     paths:
       - 'integration/iortcw/**'
       - 'release/build-iortcw.sh'
@@ -25,15 +28,6 @@ on:
       - 'release/make-cue-sounds.py'
       - 'release/fetch-nvda-client.sh'
       - 'release/nvda-client.pin'
-      - 'src/accessibility/**'
-      - '.github/workflows/rtcw-test.yml'
-  pull_request:
-    paths:
-      - 'integration/iortcw/**'
-      - 'release/build-iortcw.sh'
-      - 'release/build-iortcw-mac.sh'
-      - 'release/INSTALL-iortcw.md.in'
-      - 'release/rtcw/**'
       - 'src/accessibility/**'
       - '.github/workflows/rtcw-test.yml'
   workflow_dispatch:
