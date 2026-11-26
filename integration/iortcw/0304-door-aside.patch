@@ -1,0 +1,50 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 1eb8c754..3028eebd 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7225,22 +7225,33 @@ static int ETA_DoorToward(float yaw)
+ 	   looked along over it. */
+ 	{
+ 		static const float heights[3] = { -1.0f, 0.0f, -16.0f };   /* eye; the middle; near the feet */
+-		int                h;
+-
+-		VectorSet(dir, cosf(DEG2RAD(yaw)), sinf(DEG2RAD(yaw)), 0.0f);
+-		for (h = 0; h < 3; h++)
+-		{
+-			VectorCopy(ps->origin, eye);
+-			eye[2] += heights[h] < 0.0f && h == 0 ? ps->viewheight : heights[h];
+-			VectorMA(eye, ETA_DOOR_TOWARD, dir, end);
+-			CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_PLAYERSOLID);
+-			if (trace.fraction < 1.0f && trace.entityNum < ENTITYNUM_WORLD
+-			    && cg_entities[trace.entityNum].currentState.eType == ET_MOVER)
++		/* Straight on, then a little to either side: at the rocket base's
++		   exit door, come at by its edge, the way was looked along into
++		   the wall beside it, and the door was never said. */
++		static const float aside[3] = { 0.0f, -25.0f, 25.0f };
++		int                h, a;
++
++		for (a = 0; a < 3; a++)
++		{
++			VectorSet(dir, cosf(DEG2RAD(yaw + aside[a])), sinf(DEG2RAD(yaw + aside[a])), 0.0f);
++			for (h = 0; h < 3; h++)
++			{
++				VectorCopy(ps->origin, eye);
++				eye[2] += heights[h] < 0.0f && h == 0 ? ps->viewheight : heights[h];
++				VectorMA(eye, ETA_DOOR_TOWARD, dir, end);
++				CG_Trace(&trace, eye, NULL, NULL, end, ps->clientNum, MASK_PLAYERSOLID);
++				if (trace.fraction < 1.0f && trace.entityNum < ENTITYNUM_WORLD
++				    && cg_entities[trace.entityNum].currentState.eType == ET_MOVER)
++				{
++					break;
++				}
++			}
++			if (h < 3)
+ 			{
+ 				break;
+ 			}
+ 		}
+-		if (h == 3)
++		if (a == 3)
+ 		{
+ 			return -1;
+ 		}

@@ -5157,3 +5157,15 @@ the ladder, through the moving door into the rocket room, the tunnel,
 the stairs, the front doors' corridor, over the bridge, and the exit
 objective met, in a minute from the front doors. Still open: past the
 objective, the exit door and the vent to the outside.
+
+## 0304-door-aside.patch
+
+Past the rocket base's exit objective, the test player came at the exit
+door by its edge: the way was looked along into the wall beside it,
+"Facing the way" was said again and again, and never "A door: F opens
+it". A door is now looked for straight on and then a little to either
+side, 25 degrees each way. In game, from a save just after the exit
+objective, at the door's edge: through it, up to the crawlspace, "The
+way goes through something to break, 2 meters on"; T, "Breakable metal,
+ahead, 2 meters. F turns you to it, to break it"; F and fire; O, "Way
+out, 3 meters", and "Mission complete".
