@@ -5272,3 +5272,30 @@ lever left for the crank, the crank, the fuel lever, "Objective done:
 Prep Kobra for launch"; the last button, "Objective done: Capture Kobra
 and fly to OSA airbase in Malta"; through the way out, and the ending
 cutscene. The radar base's start led on as before.
+
+## 0307-people-described-as-they-appear.patch
+
+The tester heard new people in the cutscenes described after they had
+spoken - the descriptions wait for a gap in the talking, and a character
+who speaks at once was told of near the end of the scene - and the kinds
+of enemy described only in the level after the cutscene that showed
+them. They asked for both when they first appear.
+
+- A cutscene line starting "@" is someone appearing: said first, at the
+  first gap in the talking, ahead of the other lines waiting, and kept
+  across a change of shot - not said over the dialogue: the tester said
+  the cutscenes leave room between its lines. The people of the
+  cutscenes are marked so: the guards and the doctor in the first
+  dungeon, the officers of the first briefing, Jack coming in, Helga and
+  her people at the church, the officers of the laboratories, the pilot
+  and the guard at the dam, the Elite guard among the stones, the woman
+  in red, the super soldier, the dead warriors and Heinrich.
+- A kind of enemy the cutscene's camera first sees - in sight, ahead,
+  within forty metres - has what it looks like said there, a moment into
+  the shot, after its first line, at a gap in the talking, and is
+  remembered as told, so the level does not tell it again.
+
+In game: the first dungeon's cutscene said "A dungeon, from above", then
+"Soldiers are German army men in field-grey uniforms...", then "Barred
+cells. A guard walks past"; the church's said Helga, the scientist and
+the Elite guard as it opened, then what Elite guards look like.

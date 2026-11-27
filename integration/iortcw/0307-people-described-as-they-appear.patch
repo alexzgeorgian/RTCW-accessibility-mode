@@ -1,0 +1,297 @@
+diff --git a/SP/code/cgame/cg_accessibility.c b/SP/code/cgame/cg_accessibility.c
+index 6e596f87..89fba7d8 100644
+--- a/SP/code/cgame/cg_accessibility.c
++++ b/SP/code/cgame/cg_accessibility.c
+@@ -203,6 +203,7 @@ static struct {
+ 		char text[512];
+ 		int due;                 /* cg.time it may be said from */
+ 		int shot;                /* the shot it belongs to */
++		qboolean person;         /* someone appearing: said first, at the first gap */
+ 	} pending[ETA_PENDING_LINES]; /* descriptions waiting their moment */
+ 	int numPending;
+ 	qboolean announceCutscene;   /* "Cutscene. Escape skips it" still to say */
+@@ -1167,13 +1168,24 @@ void CG_AccessibilityVoice( const char *soundFile ) {
+  */
+ static void CG_AccessibilityDescribe( void ) {
+ 	int i, next = -1;
++	qboolean person = qfalse;
+ 
+ 	for ( i = 0; i < eta.numPending; i++ ) {
+ 		if ( eta.pending[i].due <= cg.time && ( next < 0 || eta.pending[i].due < eta.pending[next].due ) ) {
+ 			next = i;
+ 		}
+ 	}
+-
++	/* Someone appearing is said first, at the first gap in the talking:
++	   the tester heard new people described after other lines, at the
++	   end of the scene, and asked for them when they first appear - not
++	   over the dialogue, the cutscenes leave room between its lines. */
++	for ( i = 0; i < eta.numPending; i++ ) {
++		if ( eta.pending[i].person && eta.pending[i].due <= cg.time
++			 && ( !person || eta.pending[i].due < eta.pending[next].due ) ) {
++			next = i;
++			person = qtrue;
++		}
++	}
+ 	if ( cg.time < eta.voiceUntil + ETA_DESCRIBE_GAP_MS || cg.time < eta.describingUntil ) {
+ 		/* Someone is speaking. A start not yet announced still is, after
+ 		   a moment, so the player knows the keys have stopped. */
+@@ -1229,7 +1241,8 @@ void CG_AccessibilityCamera( const char *name ) {
+ 	   said in this one if it is fresh; one long overdue would describe
+ 	   what is no longer on the screen. */
+ 	for ( i = 0; i < eta.numPending; ) {
+-		if ( cg.time - eta.pending[i].due < 4000 ) {
++		/* Someone appearing is kept: who they are still holds. */
++		if ( cg.time - eta.pending[i].due < 4000 || eta.pending[i].person ) {
+ 			i++;
+ 			continue;
+ 		}
+@@ -1246,7 +1259,10 @@ void CG_AccessibilityCamera( const char *name ) {
+ 			/* A mission's camera used again later is the same place:
+ 			   said the first time. */
+ 			etaCutsceneSaid[i] = qtrue;
+-			Q_strncpyz( eta.pending[eta.numPending].text, etaCutsceneLines[i].text,
++			/* "@" before a line: someone appearing, said first. */
++			eta.pending[eta.numPending].person = (qboolean)( etaCutsceneLines[i].text[0] == '@' );
++			Q_strncpyz( eta.pending[eta.numPending].text,
++						etaCutsceneLines[i].text + ( etaCutsceneLines[i].text[0] == '@' ),
+ 						sizeof( eta.pending[eta.numPending].text ) );
+ 			eta.pending[eta.numPending].due = cg.time + etaCutsceneLines[i].delay;
+ 			eta.pending[eta.numPending].shot = eta.cameraCount;
+@@ -1256,6 +1272,23 @@ void CG_AccessibilityCamera( const char *name ) {
+ 	CG_Printf( "eta: camera %i %s on %s at %i\n", eta.cameraCount, eta.cameraName, eta.map, cg.time );
+ }
+ 
++/*
++ * A kind of enemy seen for the first time in a cutscene: what it looks
++ * like, said at the first gap in the talking - not first in the level
++ * after the cutscene that showed it (cg_accessibility_world.c).
++ */
++void CG_AccessibilityCutscenePerson( const char *text ) {
++	if ( !text || !text[0] || eta.numPending >= ETA_PENDING_LINES ) {
++		return;
++	}
++	Q_strncpyz( eta.pending[eta.numPending].text, text, sizeof( eta.pending[eta.numPending].text ) );
++	/* A moment in, after the shot's own first line. */
++	eta.pending[eta.numPending].due = cg.time + 1000;
++	eta.pending[eta.numPending].shot = eta.cameraCount;
++	eta.pending[eta.numPending].person = qtrue;
++	eta.numPending++;
++}
++
+ /* For writing the descriptions: eta_cameraShots 1 takes a picture of each
+    shot as it starts and every two and a half seconds after. */
+ static void CG_AccessibilityCameraShots( void ) {
+@@ -1502,6 +1535,7 @@ void CG_AccessibilityFrame( void ) {
+ 		}
+ 	}
+ 	if ( eta.camera ) {
++		CG_AccessibilityCutsceneEnemiesFrame();
+ 		CG_AccessibilityDescribe();
+ 		CG_AccessibilityCameraShots();
+ 		return;
+diff --git a/SP/code/cgame/cg_accessibility_cutscenes.h b/SP/code/cgame/cg_accessibility_cutscenes.h
+index 1bea58d9..4cd37236 100644
+--- a/SP/code/cgame/cg_accessibility_cutscenes.h
++++ b/SP/code/cgame/cg_accessibility_cutscenes.h
+@@ -15,6 +15,9 @@
+  * character speaks, so most are short, and a shot whose talking leaves
+  * no gap goes undescribed rather than talked over.
+  */
++/* A line starting "@" is someone appearing: said first, at the first
++   gap in the talking, ahead of other lines - the tester asked for new
++   people described when they first appear, and not over the dialogue. */
+ static const struct {
+ 	const char *map;
+ 	int shot;           /* in a cutscene map: the shot's number */
+@@ -26,12 +29,12 @@ static const struct {
+ 	/* The start of the campaign: the OSA learns its agents are taken. */
+ { "cutscene1", 1, NULL, 0, "Night. A red-brick mansion behind lamplit gates, American and British flags flying" },
+ 	{ "cutscene1", 2, NULL, 0, "A dark office. The Director sits alone at his desk" },
+-	{ "cutscene1", 2, NULL, 9500, "Jack, in a grey suit and glasses, comes in" },
++	{ "cutscene1", 2, NULL, 9500, "@Jack, in a grey suit and glasses, comes in" },
+ 	{ "cutscene1", 6, NULL, 300, "The picture fades to black" },
+ 	{ "cutscene1", 7, NULL, 0, "A briefing room. Jack at a screen" },
+-	{ "cutscene1", 12, NULL, 0, "SS officers" },
+-	{ "cutscene1", 14, NULL, 0, "A woman officer" },
+-	{ "cutscene1", 15, NULL, 4700, "An SS officer" },
++	{ "cutscene1", 12, NULL, 0, "@SS officers" },
++	{ "cutscene1", 14, NULL, 0, "@A woman officer" },
++	{ "cutscene1", 15, NULL, 4700, "@An SS officer" },
+ 	{ "cutscene1", 19, NULL, 5100, "Ruined stone walls" },
+ 	{ "cutscene1", 23, NULL, 0, "Two agents' files on the screen, with photographs and fingerprints" },
+ 	{ "cutscene1", 26, NULL, 5800, "The picture fades to black" },
+@@ -42,7 +45,7 @@ static const struct {
+ 
+ 	/* Between missions 3 and 4: the Director's office. */
+ 	{ "cutscene9", 1, NULL, 0, "The Director's office. He sits alone at his desk" },
+-	{ "cutscene9", 1, NULL, 6500, "Jack comes in and crosses to the Director's desk" },
++	{ "cutscene9", 1, NULL, 6500, "@Jack comes in and crosses to the Director's desk" },
+ 	{ "cutscene9", 16, NULL, 5800, "The office through the curtains again. The picture fades to black" },
+ 
+ 	/* Between missions 4 and 5: the Director's office. */
+@@ -59,21 +62,21 @@ static const struct {
+ 	/* The end of the campaign: the OSA, then the castle. */
+ 	{ "cutscene19", 1, NULL, 0, "Daylight. The red-brick mansion behind its gates, the American and British flags flying" },
+ 	{ "cutscene19", 2, NULL, 0, "The Director's office" },
+-	{ "cutscene19", 2, NULL, 7000, "Jack comes in and crosses to the desk" },
++	{ "cutscene19", 2, NULL, 7000, "@Jack comes in and crosses to the desk" },
+ 	{ "cutscene19", 13, NULL, 0, "A ruined castle courtyard" },
+ 	{ "cutscene19", 13, NULL, 3200, "German soldiers run out of the smoke" },
+ 	{ "cutscene19", 15, NULL, 2400, "Blazkowicz, pistol in hand, walks away. The picture fades to black" },
+ 
+ 	/* Mission 1 opens: the castle's dungeon. */
+ 	{ "escape1", 0, "cs01a_01", 0, "A dungeon, from above" },
+-	{ "escape1", 0, "cs01a_01", 6800, "Barred cells. A guard walks past" },
++	{ "escape1", 0, "cs01a_01", 6800, "@Barred cells. A guard walks past" },
+ 	{ "escape1", 0, "cs01a_01", 12900, "Torches burn by a spiral stair" },
+ 	{ "escape1", 0, "cs01a_02", 600, "Through the bars of a cell: shelves of skulls across the passage" },
+ 	{ "escape1", 0, "cs01a_03", 0, "A torture room: a prisoner on a table" },
+-	{ "escape1", 0, "cs01a_05", 0, "The doctor in a green coat bends over the prisoner. A machine crackles on the wall" },
++	{ "escape1", 0, "cs01a_05", 0, "@The doctor in a green coat bends over the prisoner. A machine crackles on the wall" },
+ 	{ "escape1", 0, "cs01a_08", 3500, "In a stone hall, a skeleton slumps in an iron cage hung from the ceiling" },
+ 	{ "escape1", 0, "cs01a_09", 0, "A misty stone corridor, a Nazi banner at its end" },
+-	{ "escape1", 0, "cs01a_11", 0, "A guard with a pistol opens a cell door" },
++	{ "escape1", 0, "cs01a_11", 0, "@A guard with a pistol opens a cell door" },
+ 	{ "escape1", 0, "cs01a_11d", 0, "The picture goes black" },
+ 
+ 	/* Mission 2 opens: the village in winter. */
+@@ -92,7 +95,7 @@ static const struct {
+ 	/* Who is there said before anyone speaks - Helga, about seven seconds
+ 	   in - not at the end: the tester heard the place, then the talk, and
+ 	   only then who was talking. */
+-	{ "church", 0, "cs04_01", 0, "A tall stone church. Below, by a tomb: Helga von Bulow, a heavy woman in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather: an Elite guard, one of Helga's own guard" },
++	{ "church", 0, "cs04_01", 0, "@A tall stone church. Below, by a tomb: Helga von Bulow, a heavy woman in a white shirt and black tie; an old scientist in glasses; a red-haired woman in black leather: an Elite guard, one of Helga's own guard" },
+ 	{ "church", 0, "cs04_03d", 0, "A dead warrior lies on the tomb. The Elite guard in black leather watches, pistol in hand" },
+ 
+ 	/* Mission 2, the tomb. */
+@@ -101,38 +104,38 @@ static const struct {
+ 
+ 	/* Mission 4 opens: the secret weapons facility. */
+ 	{ "swf", 0, "cs10_01", 0, "A concrete pen, a grey submarine moored" },
+-	{ "swf", 0, "cs10_03d", 0, "A pilot in goggles, and a bald officer with a monocle in a black leather coat" },
++	{ "swf", 0, "cs10_03d", 0, "@A pilot in goggles, and a bald officer with a monocle in a black leather coat" },
+ 
+ 	/* Mission 5, the X-Labs. */
+ 	{ "xlabs", 0, "xlabs01", 0, "A laboratory hall: tiled floors, catwalks above. On the tables, body parts and machines. Technicians in blue coats, and the bald officer in black" },
+-	{ "xlabs", 0, "xlabs04", 0, "Scientists in blue work round dissection tables, an officer in a pale coat among them" },
++	{ "xlabs", 0, "xlabs04", 0, "@Scientists in blue work round dissection tables, an officer in a pale coat among them" },
+ 	{ "xlabs", 0, "xlabs07", 0, "The bald officer, monocle in his eye, raises a finger as he speaks" },
+-	{ "xlabs", 0, "xlabs_10", 0, "A bearded officer in a pale coat and a black cap" },
++	{ "xlabs", 0, "xlabs_10", 0, "@A bearded officer in a pale coat and a black cap" },
+ 	{ "xlabs", 0, "xlabs05", 0, "A technician works a wall of dials while the others bend over the tables" },
+ 	{ "xlabs", 0, "xlabs12", 0, "The bald officer walks away through the laboratory" },
+ 
+ 	/* Mission 6 opens: the dam. */
+ 	{ "dam", 0, "damb25_01", 0, "A bomber" },
+ 	{ "dam", 0, "dam_01", 0, "A great dam at night: a control tower, floodlights, a truck by the road, spillways below" },
+-	{ "dam", 0, "dam_03d", 0, "Through a wire fence, a guard in a helmet faces a man in an olive flying suit beside a truck" },
++	{ "dam", 0, "dam_03d", 0, "@Through a wire fence, a guard in a helmet faces a man in an olive flying suit beside a truck" },
+ 
+ 	/* Mission 6, unhallowed ground. */
+ 	{ "dark", 0, "cs15_01", 0, "Fog at night: tall standing stones and dead twisted trees" },
+-	{ "dark", 0, "cs15_01", 6500, "A blonde woman in black leather walks among the stones: an Elite guard" },
++	{ "dark", 0, "cs15_01", 6500, "@A blonde woman in black leather walks among the stones: an Elite guard" },
+ 	{ "dark", 0, "cs15_01", 11500, "Below, two soldiers by a lamp" },
+ 	{ "dark", 0, "cs15_06", 0, "She walks away into the fog, toward the stones" },
+ 
+ 	/* Mission 7, the end: Heinrich. */
+ 	{ "end", 0, "cs16_01", 0, "Under a full moon, a ring of stone arches and columns on a great stone platform. Fires burn in iron bowls" },
+-	{ "end", 0, "cs16_02", 0, "A pale woman with dark-painted eyes, dressed in black, a red cape behind her, among the stones" },
+-	{ "end", 0, "cs16_06", 0, "A giant armoured super soldier with a double-barrelled gun towers against the moon" },
++	{ "end", 0, "cs16_02", 0, "@A pale woman with dark-painted eyes, dressed in black, a red cape behind her, among the stones" },
++	{ "end", 0, "cs16_06", 0, "@A giant armoured super soldier with a double-barrelled gun towers against the moon" },
+ 	{ "end", 0, "cs16_05", 0, "The armoured giant faces the woman in red across the platform" },
+ 	{ "end", 0, "cs16_15", 0, "Black smoke billows up from the ground, and shapes rise out of it" },
+-	{ "end", 0, "cs16_08", 0, "A dead warrior climbs out of the earth, with a spear and a round shield" },
++	{ "end", 0, "cs16_08", 0, "@A dead warrior climbs out of the earth, with a spear and a round shield" },
+ 	{ "end", 0, "cs16_07", 0, "A rotting warrior, its skin like old leather, turns its head" },
+ 	{ "end", 0, "cs16_09", 0, "Another raises a great axe and a round shield" },
+ 	{ "end", 0, "cs16_11", 0, "The dead warriors stand round the woman in red, among the burning bowls" },
+-	{ "end", 0, "cs16_03", 0, "Heinrich rises in spiked armour" },
++	{ "end", 0, "cs16_03", 0, "@Heinrich rises in spiked armour" },
+ 	{ "end", 0, "cs16_12", 3300, "She collapses on the stones" },
+ 	{ "end", 0, "cs16_13", 2600, "Under the arches, Heinrich and his dead warriors. Black smoke rises round them" },
+ 	{ "end", 0, "cs16_10d", 2500, "Heinrich looks down from beneath the moon" },
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 14c7a9c8..7b1738ce 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -12620,6 +12620,56 @@ static const char *ETA_EnemyLooks(int aiChar)
+ #define ETA_LOOKS_AFTER_MS 2500   /* after the first sight, so the enemy's own line is heard first */
+ #define ETA_LOOKS_METERS   40.0f
+ 
++/*
++ * In a cutscene, a kind of enemy first seen by the camera: what it looks
++ * like, said as it appears. The tester heard the kinds described in the
++ * level after the cutscene that showed them, and asked for them when
++ * they first appear. The same remembered kinds as in play, so a kind
++ * told here is not told again in the level.
++ */
++void CG_AccessibilityCutsceneEnemiesFrame(void)
++{
++	static vmCvar_t met;
++	static qboolean registered;
++	int             n;
++
++	if (!registered)
++	{
++		trap_Cvar_Register(&met, "eta_enemiesMet", "0", CVAR_ARCHIVE);
++		registered = qtrue;
++	}
++	trap_Cvar_Update(&met);
++	if (!eta_enemyCues.integer || !cg.snap || !cg.cameraMode)
++	{
++		return;
++	}
++	for (n = 0; n < cg.snap->numEntities; n++)
++	{
++		const entityState_t *es   = &cg.snap->entities[n];
++		const centity_t     *cent = &cg_entities[es->number];
++		vec3_t              mid, to;
++		float               far;
++
++		if (es->eType != ET_PLAYER || !es->aiChar || es->aiChar >= 31 || ( es->eFlags & EF_DEAD )
++		    || !ETA_EnemyLooks(es->aiChar) || ( met.integer & ( 1 << es->aiChar ) ))
++		{
++			continue;
++		}
++		VectorCopy(cent->lerpOrigin, mid);
++		mid[2] += 24.0f;
++		VectorSubtract(mid, cg.refdef.vieworg, to);
++		far = VectorNormalize(to);
++		if (far * ETA_QU_TO_METERS > ETA_LOOKS_METERS || DotProduct(to, cg.refdef.viewaxis[0]) < 0.6f
++		    || !ETA_ClearLine(cg.refdef.vieworg, mid))
++		{
++			continue;
++		}
++		CG_AccessibilityCutscenePerson(ETA_EnemyLooks(es->aiChar));
++		trap_Cvar_Set("eta_enemiesMet", va("%d", met.integer | ( 1 << es->aiChar )));
++		return;
++	}
++}
++
+ static void ETA_EnemyLooksFrame(void)
+ {
+ 	static vmCvar_t met;
+@@ -12635,6 +12685,7 @@ static void ETA_EnemyLooksFrame(void)
+ 		registered = qtrue;
+ 	}
+ 	trap_Cvar_Update(&met);
++
+ 	if (!eta_enemyCues.integer || !cg.snap || cg.cameraMode || ps->pm_type != PM_NORMAL || ps->stats[STAT_HEALTH] <= 0)
+ 	{
+ 		pendingKind = 0;
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 781a160a..c9a147f7 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2470,6 +2470,8 @@ qboolean CG_AccessibilityLadderOnWay( float reach, etaLadder_t *out );
+ qboolean CG_AccessibilityMarkerLadderFrom( vec3_t from, qboolean *up );
+ void CG_AccessibilityObjectiveSwitchPressed( const vec3_t point );
+ void CG_AccessibilityObjectiveSwitchFrame( void );
++void CG_AccessibilityCutscenePerson( const char *text );
++void CG_AccessibilityCutsceneEnemiesFrame( void );
+ qboolean CG_AccessibilityObjectiveSwitchAt( const vec3_t point );
+ 
+ /* Aiming with a key: at the nearest thing to use, and at an enemy. */
