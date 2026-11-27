@@ -5299,3 +5299,37 @@ In game: the first dungeon's cutscene said "A dungeon, from above", then
 "Soldiers are German army men in field-grey uniforms...", then "Barred
 cells. A guard walks past"; the church's said Helga, the scientist and
 the Elite guard as it opened, then what Elite guards look like.
+
+## 0308-enemies-by-name-and-outfit.patch
+
+The tester asked to hear how the enemies look as a sighted player sees
+them, called by the game's own names. One sentence for a kind could not
+do it: the same kind is dressed differently from level to level - the
+air base's soldiers in dark grey, the forest's in camouflage, the
+village's in white.
+
+- A soldier the game dresses as an officer ("officerss") is called
+  Officer, and one dressed as a mechanic ("mechanic") Mechanic, wherever
+  the guide names it.
+- The air base's black guards are its six that come down by parachute
+  ("trooper1" to "trooper6" in its script; the map has no other): called
+  Paratrooper there - the tester knew them as paratroopers, parasutisti -
+  and first told "Paratroopers are Black guards, SS men, who drop in by
+  parachute. They are in a black uniform crossed with straps, and a red
+  armband".
+- What each outfit looks like is written from the outfits' own textures,
+  by the game's names for the model and the outfit ("infantryss",
+  "assault1"): "Soldiers here wear a smock of green and brown spotted
+  camouflage", "Mechanics here wear brown zip-up overalls with a red
+  armband", "Black guards here are in grey and white winter camouflage".
+  Said the first time each outfit is met in a level, in play or in a
+  cutscene, after the kind's own sentence when the kind is new - which no
+  longer describes the clothes. Officers and mechanics have no kind
+  sentence: their name and outfit say what they are.
+
+In game: the first dungeon's cutscene said "Soldiers are German army
+men ... Soldiers here wear a field-grey tunic with pouches on the belt";
+the air base said "Mechanics here wear black zip-up overalls with a red
+armband", then "... brown zip-up overalls ..." for the next outfit; at the drop,
+"Paratrooper, ahead, 27 meters, 26 meters above you", and what
+paratroopers are.

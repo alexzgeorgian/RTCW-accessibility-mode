@@ -1,0 +1,329 @@
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 7b1738ce..6317f057 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2443,12 +2443,49 @@ static qboolean ETA_SeenAsEnemy(const entityState_t *es)
+ 	return (qboolean)(es->teamNum != cg.snap->ps.teamNum && es->teamNum != ETA_AITEAM_NEUTRAL);
+ }
+ 
++/* The model a character wears, as the game names it ("infantryss",
++   "officerss", "mechanic", "trench"), and its outfit ("assault1"). */
++static const char *ETA_CharacterModel(const entityState_t *es, const char **skin)
++{
++	const clientInfo_t *ci;
++
++	*skin = "";
++	if (es->number < 0 || es->number >= MAX_CLIENTS)
++	{
++		return "";
++	}
++	ci = &cgs.clientinfo[es->number];
++	if (!ci->infoValid)
++	{
++		return "";
++	}
++	*skin = ci->skinName;
++	return ci->modelName;
++}
++
+ /* What a character is, by the kind the game made it. */
+ static const char *ETA_CharacterKind(const entityState_t *es)
+ {
+ 	switch (es->aiChar)
+ 	{
+-	case AICHAR_SOLDIER:       return "Soldier";
++	case AICHAR_SOLDIER:
++	{
++		/* By the game's own names for its soldiers: the tester asked
++		   for enemies called as the game calls them - an officer or a
++		   mechanic is not just "Soldier". */
++		const char *skin;
++		const char *model = ETA_CharacterModel(es, &skin);
++
++		if (!Q_stricmp(model, "officerss"))
++		{
++			return "Officer";
++		}
++		if (!Q_stricmp(model, "mechanic"))
++		{
++			return "Mechanic";
++		}
++		return "Soldier";
++	}
+ 	case AICHAR_AMERICAN:      return "American";
+ 	case AICHAR_ZOMBIE:        return "Zombie";
+ 	case AICHAR_WARZOMBIE:     return "Zombie warrior";
+@@ -2459,7 +2496,16 @@ static const char *ETA_CharacterKind(const entityState_t *es)
+ 	case AICHAR_STIMSOLDIER2:
+ 	case AICHAR_STIMSOLDIER3:  return "Stim soldier";
+ 	case AICHAR_SUPERSOLDIER:  return "Super soldier";
+-	case AICHAR_BLACKGUARD:    return "Black guard";
++	case AICHAR_BLACKGUARD:
++		/* The air base's black guards are its six that come down by
++		   parachute - "trooper1" to "trooper6" in its script, which the
++		   client is not told; the map has no other. The tester knew
++		   them as paratroopers, parasutisti. */
++		if (Q_stristr(cgs.mapname, "/assault.bsp"))
++		{
++			return "Paratrooper";
++		}
++		return "Black guard";
+ 	case AICHAR_PROTOSOLDIER:  return "Proto soldier";
+ 	case AICHAR_FROGMAN:       return "Frogman";
+ 	/* The game's code names the tomb's boss after Helga, who wakes it;
+@@ -12583,13 +12629,14 @@ static const char *ETA_EnemyLooks(int aiChar)
+ {
+ 	switch (aiChar)
+ 	{
++	/* What they wear is said by the outfit, level by level (etaOutfits). */
+ 	case AICHAR_SOLDIER:
+-		return "Soldiers are German army men in field-grey uniforms and steel helmets, with rifles and submachine guns";
++		return "Soldiers are German army men in steel helmets, with rifles and submachine guns";
+ 	case AICHAR_ELITEGUARD:
+-		return "Elite guards are women of the SS Paranormal Division, Helga von Bulow's own guard, in black leather. Quick on "
++		return "Elite guards are women of the SS Paranormal Division, Helga von Bulow's own guard. Quick on "
+ 		       "their feet, often with a silenced Sten";
+ 	case AICHAR_BLACKGUARD:
+-		return "Black guards are SS men in black uniforms, the best of the German soldiers, tougher than the army men";
++		return "Black guards are SS men, the best of the German soldiers, tougher than the army men";
+ 	case AICHAR_VENOM:
+ 		return "Venom soldiers are big men in heavy armour, each carrying a Venom: a gun with spinning barrels that fires very fast";
+ 	case AICHAR_ZOMBIE:
+@@ -12617,6 +12664,144 @@ static const char *ETA_EnemyLooks(int aiChar)
+ 	}
+ }
+ 
++/*
++ * What each outfit looks like, by the game's names for the model and the
++ * outfit, written from the outfits' own pictures: the same kind of enemy
++ * is dressed differently from level to level - the air base's soldiers
++ * in dark grey, the forest's in camouflage, the village's in white - and
++ * one sentence for the kind could not say so. Said the first time each
++ * is met in a level.
++ */
++static const struct
++{
++	const char *model;
++	const char *skins;   /* the outfits that look so, space-separated */
++	const char *looks;
++} etaOutfits[] =
++{
++	{ "infantryss", "default escape1 escape2", "a field-grey tunic with pouches on the belt" },
++	{ "infantryss", "assault1 assault2 base1 swf1", "a dark grey tunic with pouches on the belt" },
++	{ "infantryss", "dark1 dig1 ssvill1", "a black tunic, a red swastika armband and gloves" },
++	{ "infantryss", "factory1 factory2 forest1 forest2 forest3 forest4", "a smock of green and brown spotted camouflage" },
++	{ "infantryss", "norway1 village3 village4", "a white winter smock" },
++	{ "infantryss", "village1 village2", "a dark grey tunic and gloves" },
++	{ "infantryss", "church1 church2 crypt1 crypt2", "a dark grey-green tunic" },
++	{ "infantryss", "rocket1", "a pale khaki coat with an orange armband" },
++	{ "infantryss", "xlab1", "a pale grey coat with a round yellow badge on the arm" },
++	{ "infantryss", "sfm1 sfm2 sfm3 sfm4", "a green-grey tunic, their hands bandaged" },
++	{ "infantryss", "burned", "a charred, burnt uniform" },
++	{ "officerss", "default", "an olive-brown tunic with medals and a red swastika armband" },
++	{ "officerss", "dig1 ssvill1", "a black tunic with a red swastika armband" },
++	{ "officerss", "assault1 escape1 escape2 village1", "a dark grey-green tunic, a brown belt, medals and a red swastika armband" },
++	{ "officerss", "chateau1 chateau2", "a black dress uniform with a silver cord, a white belt and a red armband" },
++	{ "officerss", "forest1", "a brown leather coat" },
++	{ "mechanic", "default dig1 tram1", "black zip-up overalls with a red armband" },
++	{ "mechanic", "assault1 rocket1", "brown zip-up overalls with a red armband" },
++	{ "mechanic", "swf1 train1", "dark blue-grey zip-up overalls with a red armband" },
++	{ "mechanic", "radio1", "olive-green zip-up overalls with a red armband" },
++	{ "trench", "base1 base2 dam1 dam2 dam3 dam4", "a long black trench coat with a red swastika armband" },
++	{ "blackguard", "default chateau1 chateau2", "a black uniform crossed with straps, and a red armband" },
++	{ "blackguard", "train1", "dark camouflage" },
++	{ "blackguard", "snow1", "grey and white winter camouflage" },
++	{ "blackguard", "swf1", "black, with an eagle on the arm" },
++	{ "blackguard", "castle1", "black, stained with blood" },
++	{ "venom", "default", "a heavy olive-green coat and a red armband" },
++	{ "venom", "norway", "heavy grey and white winter gear" },
++	{ "venom", "dig1 factory1", "heavy black gear" },
++	{ "eliteguard", "default church1 church2 dark2", "black leather with a red armband" },
++	{ "eliteguard", "chateau1 dark1", "black leather, open at the neck and the waist" },
++	{ "eliteguard", "castle1 castle2", "black leather, stained with blood" }
++};
++
++static int ETA_Outfit(const entityState_t *es)
++{
++	const char *skin;
++	const char *model = ETA_CharacterModel(es, &skin);
++	int        i;
++
++	for (i = 0; model[0] && i < (int)ARRAY_LEN(etaOutfits); i++)
++	{
++		const char *p = etaOutfits[i].skins;
++		int        len = (int)strlen(skin);
++
++		if (Q_stricmp(model, etaOutfits[i].model))
++		{
++			continue;
++		}
++		while (*p)
++		{
++			const char *end = strchr(p, ' ');
++			int        n    = end ? (int)( end - p ) : (int)strlen(p);
++
++			if (n == len && !Q_stricmpn(p, skin, n))
++			{
++				return i;
++			}
++			p += n;
++			while (*p == ' ')
++			{
++				p++;
++			}
++		}
++	}
++	return -1;
++}
++
++/* The outfits told in this level: the same one is not told again in it. */
++static qboolean etaOutfitTold[ARRAY_LEN(etaOutfits)];
++static char     etaOutfitMap[MAX_QPATH];
++
++static void ETA_OutfitLevel(void)
++{
++	if (Q_stricmp(etaOutfitMap, cgs.mapname))
++	{
++		Q_strncpyz(etaOutfitMap, cgs.mapname, sizeof(etaOutfitMap));
++		memset(etaOutfitTold, 0, sizeof(etaOutfitTold));
++	}
++}
++
++/* An outfit not told yet in this level, of a character in sight: "Soldiers
++   here wear a white winter smock". NULL with none. */
++static const char *ETA_OutfitLine(const entityState_t *es, qboolean mark)
++{
++	int        o = ETA_Outfit(es);
++	const char *kind;
++
++	ETA_OutfitLevel();
++	if (o < 0 || etaOutfitTold[o])
++	{
++		return NULL;
++	}
++	if (mark)
++	{
++		etaOutfitTold[o] = qtrue;
++	}
++	kind = ETA_CharacterKind(es);
++	if (!Q_stricmp(kind, "Paratrooper"))
++	{
++		return va("Paratroopers are Black guards, SS men, who drop in by parachute. They are in %s", etaOutfits[o].looks);
++	}
++	return va("%ss here %s %s", kind, !Q_stricmp(etaOutfits[o].model, "blackguard") || !Q_stricmp(etaOutfits[o].model, "eliteguard")
++	          || !Q_stricmp(etaOutfits[o].model, "venom") ? "are in" : "wear", etaOutfits[o].looks);
++}
++
++/* The kind's own sentence for this character: none for the game's
++   officers and mechanics, whose name and outfit say what they are - the
++   test player met a mechanic first and heard "Soldiers are German army
++   men", then what the mechanics wear. */
++static const char *ETA_KindLooks(const entityState_t *es)
++{
++	if (es->aiChar == AICHAR_SOLDIER && Q_stricmp(ETA_CharacterKind(es), "Soldier"))
++	{
++		return NULL;
++	}
++	if (es->aiChar == AICHAR_BLACKGUARD && !Q_stricmp(ETA_CharacterKind(es), "Paratrooper"))
++	{
++		return NULL;   /* said with their outfit: what they are, and that they drop in */
++	}
++	return ETA_EnemyLooks(es->aiChar);
++}
++
+ #define ETA_LOOKS_AFTER_MS 2500   /* after the first sight, so the enemy's own line is heard first */
+ #define ETA_LOOKS_METERS   40.0f
+ 
+@@ -12651,7 +12836,7 @@ void CG_AccessibilityCutsceneEnemiesFrame(void)
+ 		float               far;
+ 
+ 		if (es->eType != ET_PLAYER || !es->aiChar || es->aiChar >= 31 || ( es->eFlags & EF_DEAD )
+-		    || !ETA_EnemyLooks(es->aiChar) || ( met.integer & ( 1 << es->aiChar ) ))
++		    || ( ( !ETA_KindLooks(es) || ( met.integer & ( 1 << es->aiChar ) ) ) && !ETA_OutfitLine(es, qfalse) ))
+ 		{
+ 			continue;
+ 		}
+@@ -12664,8 +12849,22 @@ void CG_AccessibilityCutsceneEnemiesFrame(void)
+ 		{
+ 			continue;
+ 		}
+-		CG_AccessibilityCutscenePerson(ETA_EnemyLooks(es->aiChar));
+-		trap_Cvar_Set("eta_enemiesMet", va("%d", met.integer | ( 1 << es->aiChar )));
++		{
++			const char *outfit = ETA_OutfitLine(es, qtrue);
++			char        said[512];
++
++			said[0] = '\0';
++			if (ETA_KindLooks(es) && !( met.integer & ( 1 << es->aiChar ) ))
++			{
++				Q_strncpyz(said, ETA_KindLooks(es), sizeof(said));
++				trap_Cvar_Set("eta_enemiesMet", va("%d", met.integer | ( 1 << es->aiChar )));
++			}
++			if (outfit)
++			{
++				Q_strcat(said, sizeof(said), va("%s%s", said[0] ? ". " : "", outfit));
++			}
++			CG_AccessibilityCutscenePerson(said);
++		}
+ 		return;
+ 	}
+ }
+@@ -12674,7 +12873,7 @@ static void ETA_EnemyLooksFrame(void)
+ {
+ 	static vmCvar_t met;
+ 	static qboolean registered;
+-	static int      pendingKind, pendingAt;
++	static int      pendingKind, pendingAt, pendingEntity = -1;
+ 	const playerState_t *ps = &cg.predictedPlayerState;
+ 	vec3_t          eye;
+ 	int             n;
+@@ -12695,13 +12894,24 @@ static void ETA_EnemyLooksFrame(void)
+ 	{
+ 		if (cg.time >= pendingAt)
+ 		{
+-			const char *looks = ETA_EnemyLooks(pendingKind);
++			const char *looks  = pendingEntity >= 0 ? ETA_KindLooks(&cg_entities[pendingEntity].currentState) : ETA_EnemyLooks(pendingKind);
++			const char *outfit = pendingEntity >= 0 ? ETA_OutfitLine(&cg_entities[pendingEntity].currentState, qtrue) : NULL;
++			char        said[512];
+ 
++			said[0] = '\0';
+ 			if (looks && !( met.integer & ( 1 << pendingKind ) ))
+ 			{
+-				ETA_Speech_Say(looks);
++				Q_strncpyz(said, looks, sizeof(said));
+ 				trap_Cvar_Set("eta_enemiesMet", va("%d", met.integer | ( 1 << pendingKind )));
+ 			}
++			if (outfit)
++			{
++				Q_strcat(said, sizeof(said), va("%s%s", said[0] ? ". " : "", outfit));
++			}
++			if (said[0])
++			{
++				ETA_Speech_Say(said);
++			}
+ 			pendingKind = 0;
+ 		}
+ 		return;
+@@ -12716,8 +12926,8 @@ static void ETA_EnemyLooksFrame(void)
+ 		vec3_t              low, high;
+ 
+ 		if (es->eType != ET_PLAYER || !es->aiChar || es->aiChar >= 31 || es->number == ps->clientNum
+-		    || ( es->eFlags & EF_DEAD ) || !ETA_SeenAsEnemy(es) || !ETA_EnemyLooks(es->aiChar)
+-		    || ( met.integer & ( 1 << es->aiChar ) )
++		    || ( es->eFlags & EF_DEAD ) || !ETA_SeenAsEnemy(es)
++		    || ( ( !ETA_KindLooks(es) || ( met.integer & ( 1 << es->aiChar ) ) ) && !ETA_OutfitLine(es, qfalse) )
+ 		    || Distance(cent->lerpOrigin, ps->origin) * ETA_QU_TO_METERS > ETA_LOOKS_METERS)
+ 		{
+ 			continue;
+@@ -12730,8 +12940,9 @@ static void ETA_EnemyLooksFrame(void)
+ 		{
+ 			continue;
+ 		}
+-		pendingKind = es->aiChar;
+-		pendingAt   = cg.time + ETA_LOOKS_AFTER_MS;
++		pendingKind   = es->aiChar;
++		pendingEntity = es->number;
++		pendingAt     = cg.time + ETA_LOOKS_AFTER_MS;
+ 		return;
+ 	}
+ }
