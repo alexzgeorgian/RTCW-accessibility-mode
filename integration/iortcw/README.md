@@ -5221,3 +5221,54 @@ destroy MVX-mk1 radar array", alive. O then leads to the second
 objective, seven metres below, past the door the soldiers open after the
 radar falls - not tried with soldiers in the test.
 
+
+## 0306-air-base.patch
+
+The air base ("assault"). The tester reported O circling them before the
+elite paratroops came, and "Jump up" on a metal platform with nothing to
+jump. Seen in game, and fixed:
+
+- The hangar's metal stairs have open risers: the one line down at a
+  square's middle fell between two treads, so each few steps were a
+  ledge to jump. A small box at five places along the square finds a
+  tread; a gap to leap must be one a player falls through, not a line.
+- From the hangar floor a straight line ran under the stairs' upper
+  flight to their top, floor flat all the way until the end, and the
+  ping held the player against the stairs' side. A line whose floor
+  rises faster than a stair is no longer straight ahead.
+- At the top of the alley ladder the way went on to another ladder
+  further off, and the guide climbed the one just come up back down,
+  again and again: the circling. Only the way's own ladder is climbed.
+- "Prep Kobra for launch" is met at three switches - the lift lever, the
+  fuel lever, the crank that opens the hatch - six script events back,
+  past the depth the script was followed; only the crank was found, and
+  O led back to it after it was turned. Followed further for an
+  objective, all three are its places. A switch pressed there that sets
+  something near moving - a lever swung, the hatch - is done with; one
+  that sets nothing moving (the fuel lever before the lift is up) is
+  left with "Nothing moved yet: another part of this objective comes
+  first ... O leads on, and back here after", until another part is
+  done.
+- A switch is led to on the floor in front of it, in F's reach - the
+  lift lever is set in the top of a console, and the way was looked for
+  up onto it - and reached there: "Marker reached, your next objective:
+  Button, in reach. F uses it", turned to it.
+- The last objective is the button beside the way out; one met at the
+  way out was taken for met by leaving, and O led past it. A switch
+  beside the way out is led to first. The way out, a strip across the
+  doorway to "Kobra", is walked onto, not reached three metres short.
+- The crank turns its own handle, a mover a hand's size, taken for a
+  gate shut across the way: the player was sent back to the crank. A
+  mover under 40 units every way is no gate.
+- Past the second objective the trail led to a step on the catwalks
+  seventeen metres off while the last button was seven, and the test
+  player stood under the catwalks for ten minutes: an objective within
+  sixteen metres and nearer than the trail's next step is gone to
+  straight.
+
+In game, from the first objective, God mode on and fighting as the test
+player does: up the stairs and the ladders, the lift lever, the fuel
+lever left for the crank, the crank, the fuel lever, "Objective done:
+Prep Kobra for launch"; the last button, "Objective done: Capture Kobra
+and fly to OSA airbase in Malta"; through the way out, and the ending
+cutscene. The radar base's start led on as before.

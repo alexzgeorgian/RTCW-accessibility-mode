@@ -1,0 +1,659 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index c69d6ff5..fd7c127c 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -294,6 +294,7 @@ static struct
+ static void ETA_UseRemember(int entityNum, const vec3_t point)
+ {
+ 	CG_AccessibilityThingUsed(entityNum, point);
++	CG_AccessibilityObjectiveSwitchPressed(point);
+ 	eta_use.usedAt     = cg.time;
+ 	eta_use.usedEntity = entityNum;
+ 	VectorCopy(point, eta_use.usedPoint);
+@@ -3913,6 +3914,23 @@ static void ETA_GuideFrame(void)
+ 		qboolean    onWay   = CG_AccessibilityLadderOnWay(80.0f, &ladder);
+ 		qboolean    inReach = (qboolean)( CG_AccessibilityLadderNear(&near) && near.meters <= 2.0f );
+ 
++		/* Only the ladder the way gets on, up or down as it goes: at the
++		   top of the air base's alley ladder the way went on to another
++		   ladder further off, and the guide climbed the one just come up
++		   back down, again and again. */
++		{
++			vec3_t   wayFrom;
++			qboolean wayUp;
++
++			if (inReach && CG_AccessibilityMarkerLadderFrom(wayFrom, &wayUp)
++			    && ( near.goesUp != wayUp
++			         || ( near.point[0] - wayFrom[0] ) * ( near.point[0] - wayFrom[0] )
++			         + ( near.point[1] - wayFrom[1] ) * ( near.point[1] - wayFrom[1] ) > 128.0f * 128.0f ))
++			{
++				inReach = qfalse;
++			}
++		}
++
+ 		if (inReach && ( !onWay || ( near.goesUp == ladder.goesUp && ( near.point[0] - ladder.point[0] ) * ( near.point[0] - ladder.point[0] )
+ 		                           + ( near.point[1] - ladder.point[1] ) * ( near.point[1] - ladder.point[1] ) < 96.0f * 96.0f ) ))
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 7b4b0772..18065596 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -411,19 +411,31 @@ static int ETA_RouteMoveExact(void *context, const float from[3], float to[3])
+ 	   proof. */
+ 	if (ledge && lowLift && to[2] - from[2] > 0.0f && to[2] - from[2] <= 2.0f * 18.0f + 4.0f)
+ 	{
++		/* Metal stairs with open risers in the air base's hangar: a
++		   single line down at the middle fell through the gap between
++		   two treads, and the tester was told to jump up every few
++		   steps of a stair. A little box, and a few places along the
++		   square, find a tread. */
++		static const vec3_t   treadMins = { -4.0f, -4.0f, 0.0f };
++		static const vec3_t   treadMaxs = { 4.0f, 4.0f, 0.0f };
++		static const float    along[5]  = { 0.5f, 0.375f, 0.625f, 0.25f, 0.75f };
+ 		trace_t mid;
+ 		vec3_t  top, bottom;
++		int     a;
+ 
+-		VectorSet(top, ( from[0] + to[0] ) * 0.5f, ( from[1] + to[1] ) * 0.5f, to[2] + 8.0f);
+-		VectorSet(bottom, top[0], top[1], from[2] - 40.0f);
+-		trap_CM_BoxTrace(&mid, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
+-		if (!mid.startsolid && mid.fraction < 1.0f)
++		for (a = 0; a < 5 && ledge; a++)
+ 		{
+-			float midFloor = mid.endpos[2] + 24.0f;
+-
+-			if (midFloor - from[2] <= 18.0f + 1.0f && to[2] - midFloor <= 18.0f + 1.0f)
++			VectorSet(top, from[0] + ( to[0] - from[0] ) * along[a], from[1] + ( to[1] - from[1] ) * along[a], to[2] + 8.0f);
++			VectorSet(bottom, top[0], top[1], from[2] - 40.0f);
++			trap_CM_BoxTrace(&mid, top, bottom, treadMins, treadMaxs, 0, MASK_PLAYERSOLID);
++			if (!mid.startsolid && mid.fraction < 1.0f)
+ 			{
+-				ledge = qfalse;
++				float midFloor = mid.endpos[2] + 24.0f;
++
++				if (midFloor - from[2] <= 18.0f + 1.0f && to[2] - midFloor <= 18.0f + 1.0f)
++				{
++					ledge = qfalse;
++				}
+ 			}
+ 		}
+ 	}
+@@ -1152,6 +1164,12 @@ static float ETA_RouteWalkable(const vec3_t from, const vec3_t to)
+ 
+ 			if (trace.fraction >= 1.0f
+ 			    || trace.endpos[2] < lastFloor - MAX(along - lastAt, 18.0f)
++			    /* Nor rise faster: in the air base's hangar a line from
++			       the floor to the top of a stair ran under its upper
++			       flight, the floor flat all the way until the stair's
++			       top at the end, and the ping held the player against
++			       the stair's side. */
++			    || trace.endpos[2] > lastFloor + MAX(along - lastAt, 18.0f)
+ 			    || (CG_PointContents(trace.endpos, -1) & (CONTENTS_LAVA | CONTENTS_SLIME)))
+ 			{
+ 				return f - reach / (float)(samples + 1);
+@@ -1298,7 +1316,14 @@ static int ETA_RouteLeap(void *context, const float from[3], float to[3])
+ 			VectorSet(top, from[0] + ( to[0] - from[0] ) * f, from[1] + ( to[1] - from[1] ) * f, from[2]);
+ 			VectorCopy(top, bottom);
+ 			bottom[2] = from[2] - 24.0f - 40.0f;
+-			trap_CM_BoxTrace(&trace, top, bottom, NULL, NULL, 0, MASK_PLAYERSOLID);
++			/* A gap the player can fall through: a line fell between
++			   the open treads of a metal stair. */
++			{
++				static const vec3_t gapMins = { -8.0f, -8.0f, 0.0f };
++				static const vec3_t gapMaxs = { 8.0f, 8.0f, 0.0f };
++
++				trap_CM_BoxTrace(&trace, top, bottom, gapMins, gapMaxs, 0, MASK_PLAYERSOLID);
++			}
+ 			if (!trace.startsolid && trace.fraction >= 1.0f)
+ 			{
+ 				gap = qtrue;
+@@ -1437,6 +1462,7 @@ static void ETA_RouteStartAt(const vec3_t origin, float out[3])
+ }
+ 
+ static qboolean ETA_MarkerBreakableFace(float out[3]);
++static qboolean ETA_MarkerSwitchFront(float out[3]);
+ static qboolean ETA_MarkerThrowCase(void);
+ static qboolean ETA_MarkerThrowSpot(vec3_t out);
+ 
+@@ -1462,6 +1488,11 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 	{
+ 		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_ROUTE_CELL, eta_marker.square);
+ 	}
++	else if (( !Q_stricmp(eta_marker.name, "your next objective") || !Q_stricmp(eta_marker.name, "the way out") )
++	         && ETA_MarkerSwitchFront(goal))
++	{
++		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL, ETA_ROUTE_CELL, eta_marker.square);
++	}
+ 	else
+ 	{
+ 		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL,
+@@ -2739,6 +2770,80 @@ static qboolean ETA_MarkerOnBreakable(void)
+ 	return qfalse;
+ }
+ 
++/* Where to stand to press the switch an objective is met at: on the
++   floor in front of it, in reach. The air base's lift lever is set in the
++   top of a console; the way was looked for to the lever itself, up on the
++   console, and led round the room and back. Kept for the marker it was
++   found for. */
++static qboolean ETA_MarkerSwitchFront(float out[3])
++{
++	static vec3_t   cachedFor, cached;
++	static qboolean cachedFound, cachedSet;
++	static const vec3_t mins = { -ETA_ROUTE_BODY_HALF, -ETA_ROUTE_BODY_HALF, -24.0f };
++	static const vec3_t maxs = { ETA_ROUTE_BODY_HALF, ETA_ROUTE_BODY_HALF, 32.0f };
++	static const float  reach[3] = { 40.0f, 56.0f, 72.0f };
++	const float        *me = cg.predictedPlayerState.origin;
++	float               bestFar = 0.0f;
++	int                 r, a;
++
++	if (!CG_AccessibilityObjectiveSwitchAt(eta_marker.origin))
++	{
++		return qfalse;
++	}
++	if (cachedSet && VectorCompare(cachedFor, eta_marker.origin))
++	{
++		if (cachedFound)
++		{
++			VectorCopy(cached, out);
++		}
++		return cachedFound;
++	}
++	cachedSet   = qtrue;
++	cachedFound = qfalse;
++	VectorCopy(eta_marker.origin, cachedFor);
++
++	for (r = 0; r < 3 && !cachedFound; r++)
++	{
++		for (a = 0; a < 8; a++)
++		{
++			float   yaw = (float)a * ( M_PI / 4.0f );
++			vec3_t  top, down, stand, eye;
++			trace_t tr;
++			float   far;
++
++			VectorSet(top, eta_marker.origin[0] + cosf(yaw) * reach[r], eta_marker.origin[1] + sinf(yaw) * reach[r],
++			          eta_marker.origin[2] + 8.0f);
++			VectorCopy(top, down);
++			down[2] = eta_marker.origin[2] - 96.0f;
++			CG_Trace(&tr, top, mins, maxs, down, cg.predictedPlayerState.clientNum, MASK_PLAYERSOLID);
++			if (tr.startsolid || tr.allsolid || tr.fraction >= 1.0f || tr.plane.normal[2] < 0.7f)
++			{
++				continue;
++			}
++			VectorCopy(tr.endpos, stand);
++			VectorCopy(stand, eye);
++			eye[2] += 26.0f;
++			CG_Trace(&tr, eye, NULL, NULL, eta_marker.origin, cg.predictedPlayerState.clientNum, MASK_SOLID);
++			if (tr.fraction < 1.0f && Distance(tr.endpos, eta_marker.origin) > 24.0f)
++			{
++				continue;
++			}
++			far = Distance(stand, me);
++			if (!cachedFound || far < bestFar)
++			{
++				cachedFound = qtrue;
++				bestFar     = far;
++				VectorCopy(stand, cached);
++			}
++		}
++	}
++	if (cachedFound)
++	{
++		VectorCopy(cached, out);
++	}
++	return cachedFound;
++}
++
+ /* Where to stand to break the thing to break the marker is on: in front
+    of its open face. Its middle is in the wall, and the way to it ended
+    behind that wall, within the way's reach of the middle but with no
+@@ -3711,12 +3816,41 @@ void CG_AccessibilityMarkerFrame(void)
+ 		}
+ 		else
+ 		{
++			/* A switch is pressed from in front of it: the air base's lift
++			   lever is set in a console, its middle a step in, and the
++			   test player stood before it hearing "3 meters". */
+ 			arrived = ETA_MarkerOnBreakable()
+ 			          ? (qboolean)( VectorLength(flat) <= 96.0f && ETA_MarkerBreakableInSight() )
++			          : ETA_MarkerSwitchFront(spot)
++			          ? (qboolean)( ( VectorLength(flat) <= 64.0f && fabsf(eta_marker.origin[2] - cg.predictedPlayerState.origin[2]) < 64.0f )
++			                        || ( fabsf(spot[0] - cg.predictedPlayerState.origin[0]) <= 24.0f
++			                             && fabsf(spot[1] - cg.predictedPlayerState.origin[1]) <= 24.0f
++			                             && fabsf(spot[2] - cg.predictedPlayerState.origin[2]) < 48.0f ) )
+ 			          : (qboolean)( VectorLength(flat) <= ETA_MARKER_DOOR_UNITS );
+ 		}
+ 	}
+ 
++	/* The way out met at a switch - the air base's last objective, the
++	   button that opens the way to "Kobra": reached in front of it, in
++	   F's reach. Reached three metres off, the test player heard "Marker
++	   reached, the way out" again and again, and nothing said to press. */
++	if (!Q_stricmp(eta_marker.name, "the way out"))
++	{
++		vec3_t spot;
++
++		if (ETA_MarkerSwitchFront(spot))
++		{
++			vec3_t flat;
++
++			VectorSubtract(eta_marker.origin, cg.predictedPlayerState.origin, flat);
++			flat[2]  = 0.0f;
++			arrived = (qboolean)( ( VectorLength(flat) <= 64.0f && fabsf(eta_marker.origin[2] - cg.predictedPlayerState.origin[2]) < 64.0f )
++			                      || ( fabsf(spot[0] - cg.predictedPlayerState.origin[0]) <= 24.0f
++			                           && fabsf(spot[1] - cg.predictedPlayerState.origin[1]) <= 24.0f
++			                           && fabsf(spot[2] - cg.predictedPlayerState.origin[2]) < 48.0f ) );
++		}
++	}
++
+ 	/* The back of the truck: at the foot of its ramp, so that straight
+ 	   on is up it. */
+ 	if (arrived && !Q_stricmp(eta_marker.name, "the back of the truck"))
+@@ -3837,7 +3971,36 @@ void CG_AccessibilityMarkerFrame(void)
+ 		}
+ 		else if (eta_marker.objective)
+ 		{
+-			ETA_Speech_Say(va("Marker reached, %s", eta_marker.name));
++			/* A switch the objective is met at, or a step of it: said,
++			   and faced, with what F does. At the air base the way led to
++			   the crank that opens the hatch over "Kobra", said "Marker
++			   reached, your next objective", and nothing more. */
++			etaAimTarget_t list[16];
++			int            count = CG_AccessibilityUseTargets(list, 16), k, found = -1;
++
++			for (k = 0; k < count; k++)
++			{
++				if (list[k].ladder || list[k].locked || list[k].stairs || list[k].enemy || list[k].ride
++				    || list[k].meters > 2.5f || Distance(list[k].point, eta_marker.origin) > 128.0f)
++				{
++					continue;
++				}
++				/* The one nearest the marker: by the air base's last
++				   button a door was nearer the player, and was named. */
++				if (found < 0 || Distance(list[k].point, eta_marker.origin) < Distance(list[found].point, eta_marker.origin))
++				{
++					found = k;
++				}
++			}
++			if (found >= 0)
++			{
++				CG_AccessibilityFacePoint(list[found].point);
++				ETA_Speech_Say(va("Marker reached, %s: %s, in reach. F uses it", eta_marker.name, list[found].name));
++			}
++			else
++			{
++				ETA_Speech_Say(va("Marker reached, %s", eta_marker.name));
++			}
+ 		}
+ 		else
+ 		{
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 27665048..c6fe462f 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -33,6 +33,11 @@
+ #define ETA_UNLOCK_LINES   4096   /* the rocket base's two scripts: 1533 */
+ #define ETA_UNLOCK_SPOTS   32
+ #define ETA_UNLOCK_DEPTH   6
++/* An objective's switches a step or two further back: the air base's
++   lift lever and fuel lever are six script events from "Prep Kobra for
++   launch" being met, and only its crank, five back, was found. */
++#define ETA_UNLOCK_DEPTH_OBJECTIVE 8
++#define ETA_UNLOCK_DEPTH_NOW ( eta_unlockObjective ? ETA_UNLOCK_DEPTH_OBJECTIVE : ETA_UNLOCK_DEPTH )
+ 
+ typedef struct
+ {
+@@ -94,6 +99,9 @@ static struct
+ 	vec3_t   at;
+ 	int      objective;   /* from 1 */
+ 	qboolean pickup;      /* met by picking something up there */
++	qboolean used;        /* a switch there pressed, and something moved */
++	int      triedAt;     /* pressed, and nothing moved: another part first */
++	qboolean isSwitch;    /* pressed with F, not walked onto */
+ } eta_objectivePlaces[ETA_OBJECTIVE_PLACES];
+ static int eta_objectivePlaceCount;
+ static int eta_unlockObjective;   /* being followed back, from 1; 0 a door */
+@@ -208,6 +216,9 @@ static void ETA_UnlockObjectiveAt(const vec3_t at)
+ 		VectorCopy(at, eta_objectivePlaces[eta_objectivePlaceCount].at);
+ 		eta_objectivePlaces[eta_objectivePlaceCount].objective = eta_unlockObjective;
+ 		eta_objectivePlaces[eta_objectivePlaceCount].pickup    = qtrue;
++		eta_objectivePlaces[eta_objectivePlaceCount].used      = qfalse;
++		eta_objectivePlaces[eta_objectivePlaceCount].triedAt   = 0;
++		eta_objectivePlaces[eta_objectivePlaceCount].isSwitch  = qfalse;
+ 		eta_objectivePlaceCount++;
+ 	}
+ }
+@@ -417,6 +428,10 @@ static int ETA_UnlockAddSpot(const eta_unlockRecord_t *r, const char *name)
+ 			VectorCopy(at, eta_objectivePlaces[eta_objectivePlaceCount].at);
+ 			eta_objectivePlaces[eta_objectivePlaceCount].objective = eta_unlockObjective;
+ 			eta_objectivePlaces[eta_objectivePlaceCount].pickup    = qfalse;
++			eta_objectivePlaces[eta_objectivePlaceCount].used      = qfalse;
++			eta_objectivePlaces[eta_objectivePlaceCount].triedAt   = 0;
++			eta_objectivePlaces[eta_objectivePlaceCount].isSwitch  = (qboolean)( !Q_stricmp(r->classname, "func_button")
++			                                                                 || !Q_stricmp(r->classname, "func_invisible_user") );
+ 			eta_objectivePlaceCount++;
+ 		}
+ 		return -1;
+@@ -465,7 +480,7 @@ static void ETA_UnlockEvent(const char *owner, const char *event, int depth)
+ {
+ 	int i;
+ 
+-	if (depth > ETA_UNLOCK_DEPTH || !owner[0] || !event[0])
++	if (depth > ETA_UNLOCK_DEPTH_NOW || !owner[0] || !event[0])
+ 	{
+ 		return;
+ 	}
+@@ -512,7 +527,7 @@ static void ETA_UnlockFired(const char *name, int depth)
+ {
+ 	int i;
+ 
+-	if (depth > ETA_UNLOCK_DEPTH || !name[0])
++	if (depth > ETA_UNLOCK_DEPTH_NOW || !name[0])
+ 	{
+ 		return;
+ 	}
+@@ -806,6 +821,20 @@ int CG_AccessibilityGateInWay(const vec3_t from, const vec3_t toward, float with
+ 		{
+ 			continue;
+ 		}
++		/* Only something big enough to stand in a player's way: the air
++		   base's crank turns its own handle, a mover a hand's size,
++		   and that was taken for a gate shut across the way - the test
++		   player was sent back to the crank again and again. */
++		if (cgs.inlineDrawModel[es->modelindex])
++		{
++			vec3_t gmins, gmaxs;
++
++			trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], gmins, gmaxs);
++			if (gmaxs[0] - gmins[0] < 40.0f && gmaxs[1] - gmins[1] < 40.0f && gmaxs[2] - gmins[2] < 40.0f)
++			{
++				continue;
++			}
++		}
+ 		VectorAdd(cg_entities[es->number].lerpOrigin, cgs.inlineModelMidpoints[es->modelindex], mid);
+ 		VectorSubtract(mid, from, to);
+ 		to[2] = 0.0f;
+@@ -844,6 +873,168 @@ static qboolean ETA_ObjectivePlaceShared(int index)
+ 	return qfalse;
+ }
+ 
++/*
++ * An objective met in parts, each a switch: the air base's "Prep Kobra
++ * for launch" wants the lift raised, the fuel run and the hatch over the
++ * plane cranked open, each at its own lever, in that order for the fuel.
++ * O led to the crank, the tester turned it, and O led to it again and
++ * again. A switch pressed there that set something moving - a lever
++ * swung, a hatch opened - is done with; one that set nothing moving wants
++ * another part first, and is left until another part is done.
++ */
++#define ETA_OBJECTIVE_USE_WATCH_MS 4000
++#define ETA_OBJECTIVE_USE_MOVERS   64
++
++static struct
++{
++	int    place;      /* the place pressed at; -1 none */
++	int    at;
++	int    count;
++	int    entity[ETA_OBJECTIVE_USE_MOVERS];
++	vec3_t pos[ETA_OBJECTIVE_USE_MOVERS];
++	vec3_t angles[ETA_OBJECTIVE_USE_MOVERS];
++} eta_objectiveUse = { -1 };
++
++static qboolean ETA_ObjectivePlaceSkipped(int index)
++{
++	int i;
++
++	if (eta_objectivePlaces[index].used)
++	{
++		return qtrue;
++	}
++	if (!eta_objectivePlaces[index].triedAt)
++	{
++		return qfalse;
++	}
++	/* Tried and nothing moved: left while another part of the same
++	   objective is still to do. */
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (i != index && eta_objectivePlaces[i].objective == eta_objectivePlaces[index].objective
++		    && !eta_objectivePlaces[i].used && !eta_objectivePlaces[i].triedAt)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++static qboolean ETA_ObjectiveMoverState(int n, vec3_t pos, vec3_t angles)
++{
++	const centity_t *cent = &cg_entities[n];
++
++	if (!cent->currentValid || cent->currentState.eType != ET_MOVER)
++	{
++		return qfalse;
++	}
++	BG_EvaluateTrajectory(&cent->currentState.pos, cg.time, pos);
++	BG_EvaluateTrajectory(&cent->currentState.apos, cg.time, angles);
++	return qtrue;
++}
++
++/* Whether an objective's place there is a switch, pressed from in reach
++   of it rather than walked onto. */
++qboolean CG_AccessibilityObjectiveSwitchAt(const vec3_t point)
++{
++	int i;
++
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (eta_objectivePlaces[i].isSwitch && Distance(eta_objectivePlaces[i].at, point) < 32.0f)
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/* F pressed on something, where: an objective's switch there is watched. */
++void CG_AccessibilityObjectiveSwitchPressed(const vec3_t point)
++{
++	int i, best = -1;
++
++	for (i = 0; i < eta_objectivePlaceCount; i++)
++	{
++		if (eta_objectivePlaces[i].pickup || eta_objectivePlaces[i].used
++		    || CG_AccessibilityObjectiveDone(eta_objectivePlaces[i].objective)
++		    || Distance(eta_objectivePlaces[i].at, point) > 96.0f)
++		{
++			continue;
++		}
++		if (best < 0 || Distance(eta_objectivePlaces[i].at, point) < Distance(eta_objectivePlaces[best].at, point))
++		{
++			best = i;
++		}
++	}
++	eta_objectiveUse.place = best;
++	eta_objectiveUse.count = 0;
++	if (best < 0 || !cg.snap)
++	{
++		return;
++	}
++	eta_objectiveUse.at = cg.time;
++	for (i = 0; i < cg.snap->numEntities && eta_objectiveUse.count < ETA_OBJECTIVE_USE_MOVERS; i++)
++	{
++		int                  n  = cg.snap->entities[i].number;
++		const entityState_t *es = &cg_entities[n].currentState;
++
++		/* Only what stood still, near: the hatch the crank opens was
++		   still opening when the next lever was pressed. */
++		if (ETA_ObjectiveMoverState(n, eta_objectiveUse.pos[eta_objectiveUse.count], eta_objectiveUse.angles[eta_objectiveUse.count])
++		    && es->pos.trType == TR_STATIONARY && es->apos.trType == TR_STATIONARY
++		    && Distance(eta_objectiveUse.pos[eta_objectiveUse.count], point) < 512.0f)
++		{
++			eta_objectiveUse.entity[eta_objectiveUse.count++] = n;
++		}
++	}
++}
++
++/* Every frame: whether the switch pressed set anything moving. */
++void CG_AccessibilityObjectiveSwitchFrame(void)
++{
++	int i;
++
++	if (eta_objectiveUse.place < 0 || eta_objectiveUse.place >= eta_objectivePlaceCount)
++	{
++		return;
++	}
++	/* Met by that press: nothing more to watch or say. */
++	if (cg.time < eta_objectiveUse.at || CG_AccessibilityObjectiveDone(eta_objectivePlaces[eta_objectiveUse.place].objective))
++	{
++		eta_objectiveUse.place = -1;
++		return;
++	}
++	for (i = 0; i < eta_objectiveUse.count; i++)
++	{
++		vec3_t pos, angles;
++
++		if (ETA_ObjectiveMoverState(eta_objectiveUse.entity[i], pos, angles)
++		    && ( Distance(pos, eta_objectiveUse.pos[i]) > 1.0f
++		         || fabsf(AngleDelta(angles[0], eta_objectiveUse.angles[i][0])) > 2.0f
++		         || fabsf(AngleDelta(angles[1], eta_objectiveUse.angles[i][1])) > 2.0f
++		         || fabsf(AngleDelta(angles[2], eta_objectiveUse.angles[i][2])) > 2.0f ))
++		{
++			int k;
++
++			eta_objectivePlaces[eta_objectiveUse.place].used = qtrue;
++			/* A part done: those tried before it may work now. */
++			for (k = 0; k < eta_objectivePlaceCount; k++)
++			{
++				eta_objectivePlaces[k].triedAt = 0;
++			}
++			eta_objectiveUse.place = -1;
++			return;
++		}
++	}
++	if (cg.time - eta_objectiveUse.at > ETA_OBJECTIVE_USE_WATCH_MS)
++	{
++		eta_objectivePlaces[eta_objectiveUse.place].triedAt = cg.time ? cg.time : 1;
++		eta_objectiveUse.place = -1;
++		ETA_Speech_Say("Nothing moved yet: another part of this objective comes first, or what the last one set going has still to finish. O leads on, and back here after");
++	}
++}
++
+ /* The nearest place that meets an objective not met yet: qfalse with
+    none known. One that meets two at once ends the level, so it is left
+    for last: the forest's truck was nearer than the Snooper rifle, and
+@@ -858,7 +1049,7 @@ qboolean CG_AccessibilityObjectivePlace(const vec3_t from, vec3_t out, int *obje
+ 	{
+ 		qboolean last;
+ 
+-		if (CG_AccessibilityObjectiveDone(eta_objectivePlaces[i].objective))
++		if (CG_AccessibilityObjectiveDone(eta_objectivePlaces[i].objective) || ETA_ObjectivePlaceSkipped(i))
+ 		{
+ 			continue;
+ 		}
+@@ -901,7 +1092,7 @@ qboolean CG_AccessibilityObjectiveInOrder(const vec3_t from, vec3_t out, int *ob
+ 		qboolean last;
+ 		float    far;
+ 
+-		if (o <= 0 || CG_AccessibilityObjectiveDone(o))
++		if (o <= 0 || CG_AccessibilityObjectiveDone(o) || ETA_ObjectivePlaceSkipped(i))
+ 		{
+ 			continue;
+ 		}
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 2221d124..14c7a9c8 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8539,7 +8539,14 @@ static qboolean ETA_StepNext(int objective, const vec3_t place, vec3_t out)
+ 			floor = o;
+ 		}
+ 	}
+-	if (target < 0 && scripted)
++	/* The objective met by the script, not at a numbered trigger: the
++	   trail up to the step nearest it on its own floor. From the level's
++	   start only where no objective is met at one - elsewhere the start
++	   is led as it was - and after that wherever: past the air base's
++	   first objective, the second is its rocket plane's fuelling, levers
++	   on the catwalks above the hangar floor, and O, aiming straight at
++	   them, took the tester round in circles below. */
++	if (target < 0 && ( scripted || floor >= 0 ))
+ 	{
+ 		/* The step nearest the objective on its own floor - one whose box
+ 		   reaches the objective's height - and failing that the nearest.
+@@ -8576,7 +8583,7 @@ static qboolean ETA_StepNext(int objective, const vec3_t place, vec3_t out)
+ 		}
+ 		best = 0.0f;
+ 	}
+-	else if (floor < 0)
++	if (floor < 0 && !scripted)
+ 	{
+ 		return qfalse;   /* none before the first objective: the start is led as it was */
+ 	}
+@@ -8860,8 +8867,13 @@ void CG_AccessibilityWayOut(void)
+ 		qboolean skip = eta_wayOutSkipObjective;
+ 
+ 		eta_wayOutSkipObjective = qfalse;
++		/* One met at the way out is met by leaving - but not a switch
++		   beside it: the air base's last objective is the button that
++		   opens the way to "Kobra", four metres from the way out, and O
++		   led past it to the way out, which said nothing to press. */
+ 		if (!skip && CG_AccessibilityObjectiveInOrder(ps->origin, place, &objective)
+-		    && !( CG_AccessibilityExitPoint(place, exitAt) && Distance(exitAt, place) < 256.0f ))
++		    && !( CG_AccessibilityExitPoint(place, exitAt) && Distance(exitAt, place) < 256.0f
++		          && !CG_AccessibilityObjectiveSwitchAt(place) ))
+ 		{
+ 			const char *words = CG_AccessibilityObjectiveText(objective);
+ 			vec3_t      step;
+@@ -8883,8 +8895,13 @@ void CG_AccessibilityWayOut(void)
+ 				return;
+ 			}
+ 
+-			/* By the level's trail, a step at a time. */
+-			if (ETA_StepNext(objective, place, step))
++			/* By the level's trail, a step at a time - unless the
++			   objective is nearer than the trail's next step: at the
++			   air base the last button was seven metres off, the trail
++			   led to a step seventeen metres away on the catwalks, and
++			   the test player stood stuck under them for ten minutes. */
++			if (ETA_StepNext(objective, place, step)
++			    && ( Distance(place, ps->origin) > 640.0f || Distance(step, ps->origin) <= Distance(place, ps->origin) ))
+ 			{
+ 				VectorSubtract(step, ps->origin, delta);
+ 				meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
+@@ -9019,8 +9036,12 @@ void CG_AccessibilityWayOut(void)
+ 	                  ETA_HudNarrator_FacingName(ETA_HudNarrator_FacingFromYaw(vectoyaw(delta))),
+ 	                  height[0] ? ", " : "", height));
+ 
+-	/* The marker goes on it, and its sound leads the way round the walls. */
++	/* The marker goes on it, and its sound leads the way round the walls.
++	   Reached on it, as walking into it ends the level: the air base's
++	   way out is a strip across the doorway to "Kobra", and "Marker
++	   reached" three metres short of it left the test player there. */
+ 	ETA_MarkerSetByO(best, "the way out");
++	CG_AccessibilityMarkerWalkOnto(qtrue);
+ }
+ 
+ 
+@@ -12675,6 +12696,7 @@ void CG_AccessibilityWorldFrame(qboolean held)
+ 	ETA_LiftsFrame();
+ 	ETA_StepFrame();
+ 	ETA_DynamiteFrame();
++	CG_AccessibilityObjectiveSwitchFrame();
+ 	CG_AccessibilityBreakFrame();
+ 	ETA_WarriorFrame();
+ 	ETA_SpiritFrame();
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 64d97775..781a160a 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2468,6 +2468,9 @@ qboolean CG_AccessibilityLadderNear( etaLadder_t *out );
+ qboolean CG_AccessibilityLadderDownNear( etaLadder_t *out );
+ qboolean CG_AccessibilityLadderOnWay( float reach, etaLadder_t *out );
+ qboolean CG_AccessibilityMarkerLadderFrom( vec3_t from, qboolean *up );
++void CG_AccessibilityObjectiveSwitchPressed( const vec3_t point );
++void CG_AccessibilityObjectiveSwitchFrame( void );
++qboolean CG_AccessibilityObjectiveSwitchAt( const vec3_t point );
+ 
+ /* Aiming with a key: at the nearest thing to use, and at an enemy. */
+ typedef struct {
