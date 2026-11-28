@@ -1,0 +1,116 @@
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 691695c6..ecf613ca 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -938,6 +938,45 @@ static void ETA_RouteLockedDoors(void)
+ 		eta_routeLockedCount++;
+ 	}
+ 
++	/* What the level's script has moved into the way and left there:
++	   Kugelstadt's barbed-wire barricades, pushed aside as the tank
++	   breaks through, lie across the street the way went down to the
++	   gunner, and the tester was led into them. A script_mover's brush,
++	   standing still, from knee to above head height - not a lift's
++	   floor, which is thin, nor a moving thing. By its outline, as the
++	   furniture is. */
++	for (n = 0; cg.snap && n < cg.snap->numEntities && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
++	{
++		const entityState_t *es = &cg.snap->entities[n];
++
++		if (es->eType != ET_MOVER || es->solid != SOLID_BMODEL || es->pos.trType != TR_STATIONARY
++		    || es->apos.trType != TR_STATIONARY || es->modelindex <= 0 || es->modelindex >= cgs.numInlineModels
++		    || !cgs.inlineDrawModel[es->modelindex] || !CG_AccessibilityModelScriptMover(es->modelindex))
++		{
++			continue;
++		}
++		trap_R_ModelBounds(cgs.inlineDrawModel[es->modelindex], mins, maxs);
++		if (maxs[2] - mins[2] < 24.0f || maxs[2] - mins[2] > 128.0f)
++		{
++			continue;
++		}
++		VectorCopy(cg_entities[es->number].lerpOrigin, origin);
++		VectorAdd(origin, mins, mins);
++		VectorAdd(origin, maxs, maxs);
++		if (CG_AccessibilityLiftShaft(mins, maxs))
++		{
++			continue;
++		}
++		eta_routeLocked[eta_routeLockedCount].clip = -1;
++		VectorClear(eta_routeLocked[eta_routeLockedCount].origin);
++		for (k = 0; k < 3; k++)
++		{
++			eta_routeLocked[eta_routeLockedCount].mins[k] = mins[k] - ( k < 2 ? ETA_ROUTE_BODY_HALF + 1.0f : 24.0f );
++			eta_routeLocked[eta_routeLockedCount].maxs[k] = maxs[k] + ( k < 2 ? ETA_ROUTE_BODY_HALF + 1.0f : 24.0f );
++		}
++		eta_routeLockedCount++;
++	}
++
+ 	eta_routeBreakables = 0;
+ 	for (n = 0; !eta_routeOpenBreakables && cg.snap && n < cg.snap->numEntities
+ 	     && eta_routeLockedCount < ETA_ROUTE_LOCKED_MAX; n++)
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index 07767323..a169b2bf 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -48,6 +48,7 @@ typedef struct
+ 	char ainame[32];
+ 	int  lock;          /* a door's "key" -1 */
+ 	int  startOff;      /* an ai_trigger the script must wake first */
++	int  solid;         /* a script_mover the player cannot walk through ("SOLID") */
+ 	int  placed;        /* a thing set down at a point: at is its place */
+ 	vec3_t at;
+ } eta_unlockRecord_t;
+@@ -173,7 +174,7 @@ void CG_AccessibilityUnlockEntity(const char *classname, const char *model, cons
+ {
+ 	eta_unlockRecord_t *r;
+ 
+-	if (( !targetname[0] && !target[0] ) || eta_unlockRecordCount >= ETA_UNLOCK_RECORDS)
++	if (( !targetname[0] && !target[0] && Q_stricmp(classname, "script_mover") ) || eta_unlockRecordCount >= ETA_UNLOCK_RECORDS)
+ 	{
+ 		return;
+ 	}
+@@ -185,6 +186,7 @@ void CG_AccessibilityUnlockEntity(const char *classname, const char *model, cons
+ 	Q_strncpyz(r->ainame, ainame, sizeof(r->ainame));
+ 	r->lock     = lock[0] && atoi(lock) == -1;
+ 	r->startOff = !Q_stricmp(classname, "ai_trigger") && ( atoi(spawnflags) & 1 );
++	r->solid    = !Q_stricmp(classname, "script_mover") && ( atoi(spawnflags) & 2 );
+ 	r->placed   = !r->model && origin[0] && sscanf(origin, "%f %f %f", &r->at[0], &r->at[1], &r->at[2]) == 3;
+ }
+ 
+@@ -1210,6 +1212,24 @@ qboolean CG_AccessibilityObjectiveByCount(int objective)
+ 	return qfalse;
+ }
+ 
++/* Whether a brush model is a solid script_mover's: something the
++   level's script moves - a barricade, a tank - not a door or a lift's
++   own. One without the "SOLID" flag is walked through: Kugelstadt's
++   barbed wire, which the tank crushes, is only a picture. */
++qboolean CG_AccessibilityModelScriptMover(int model)
++{
++	int i;
++
++	for (i = 0; model > 0 && i < eta_unlockRecordCount; i++)
++	{
++		if (eta_unlockRecords[i].model == model)
++		{
++			return (qboolean)eta_unlockRecords[i].solid;
++		}
++	}
++	return qfalse;
++}
++
+ /* Whether the player event that fired at a spot also starts a countdown
+    - the rocket base's launch: "trigger counter2 v2_countdown". */
+ static char eta_senderEvent[48];
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 156a03cc..2b3a95d5 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2342,6 +2342,7 @@ qboolean CG_AccessibilityLiftSenderCountdown(void);
+ int CG_AccessibilityObjectiveOfEvent(const char *event);
+ qboolean CG_AccessibilityObjectiveCounts(int objective, const char *ainame);
+ qboolean CG_AccessibilityObjectiveByCount(int objective);
++qboolean CG_AccessibilityModelScriptMover(int model);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );

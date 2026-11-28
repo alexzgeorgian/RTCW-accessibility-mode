@@ -5428,3 +5428,26 @@ the first objective's, and U at the start said "No enemy in sight.
 Your objective's soldiers still alive: 1. The nearest, Soldier, 40
 meters, ahead left, 6 meters above you, out of sight. Turned toward
 it. O leads there".
+
+## 0312-round-script-movers.patch
+
+The tester, through Kugelstadt's doors with the gunner to hit, was led
+into walls: the way to him went down the street where the barricade's
+blocks stand, which the way-finder, knowing the map's stone and not
+what the script moves, did not see. At the level's start the same
+blindness walked the test player into the tank ("Panzer a") for twenty
+seconds.
+
+- A script_mover the level makes solid (its "SOLID" flag), standing
+  still and between knee and above head height, is gone round as
+  furniture is: by its outline and a body's half width. Not a lift's
+  floor (thin, or in a lift's shaft), nor anything moving.
+- Kugelstadt's barbed wire, a script_mover without the flag, is walked
+  through, as the player can.
+- The level's script_movers are now kept from its entities whether or
+  not anything names them.
+
+Checked: from the doorway, the way to the gunner now goes round the
+barricade block at the corner instead of through it; at the start, O
+led past the tank to the first soldiers in eleven seconds, with no
+"Panzer a" stall.
