@@ -5402,3 +5402,29 @@ none over the movie's own speech:
 
 In game: "cinematic wolfintro.RoQ" said all twenty-nine lines in turn,
 then the main menu.
+
+## 0311-objective-soldiers-said-further.patch
+
+The tester heard nothing of Kugelstadt's Panzerfaust gunner, whom the
+objective "Escort the captured Panzer safely to the SWF complex" needs
+hit before he fires on the tank: he comes in 56 metres up the street,
+and enemies are said from forty. An enemy an objective not met yet
+counts beaten (0309) is now said in sight like any other - "Enemy
+Soldier, ahead, 56 meters" - from a hundred metres. Which one he is
+comes from the game's list of the living, by its nearest entry. The
+narrator (src/accessibility/hud) takes, for each thing, how far it may
+be said from past its kind's furthest band.
+
+And U, with no enemy in sight while such a soldier is alive, no longer
+says only "No enemy in sight" - which the tester heard as the tank's
+crew called out the gunner, round a corner - but "No enemy in sight.
+Your objective's soldiers still alive: 1. The nearest, Soldier, 56
+meters, right, out of sight. Turned toward it. O leads there".
+
+Checked: the narrator, given an enemy 56 metres off, says nothing as
+before, and "Enemy Soldier, ahead, 56 meters" when he is one an
+objective needs; in the game, Kugelstadt's first soldiers were known as
+the first objective's, and U at the start said "No enemy in sight.
+Your objective's soldiers still alive: 1. The nearest, Soldier, 40
+meters, ahead left, 6 meters above you, out of sight. Turned toward
+it. O leads there".

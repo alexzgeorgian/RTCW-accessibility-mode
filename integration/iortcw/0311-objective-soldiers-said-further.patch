@@ -1,0 +1,127 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index 09fe5719..dcc25651 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -1669,7 +1669,42 @@ static qboolean ETA_EnemiesElsewhere(const char *first)
+ 
+ 		if (!CG_AccessibilityBossAlive(boss, &bossChar))
+ 		{
++			vec3_t at, to;
++			int    aichar, objective, alive;
++
+ 			ETA_HudNarrator_HoldPassive(cg.time);
++			/* None in sight, and a soldier an objective needs alive: who
++			   and where, turned toward, and O leads there. At Kugelstadt,
++			   the tank's crew calling out the Panzerfaust gunner, U said
++			   only "No enemy in sight": he stood round a corner. */
++			if (CG_AccessibilityCountedEnemy(at, &aichar, &objective, &alive))
++			{
++				etaAimTarget_t aim;
++				int            meters, below;
++				qboolean       lead = !CG_AccessibilityLeadBusy();
++
++				VectorSubtract(at, cg.predictedPlayerState.origin, to);
++				meters = (int)( VectorLength(to) * ETA_QU_TO_METERS + 0.5f );
++				below  = (int)( -to[2] * ETA_QU_TO_METERS + ( to[2] < 0 ? 0.5f : -0.5f ) );
++				memset(&aim, 0, sizeof(aim));
++				aim.entityNum = -1;
++				VectorCopy(at, aim.point);
++				aim.point[2] += 20.0f;
++				ETA_AimStartSnap(&aim, NULL);
++				if (lead)
++				{
++					CG_AccessibilityChoose(at, "the soldiers to beat");
++				}
++				ETA_Speech_Say(va("No enemy in sight. Your objective's soldiers still alive: %d. The nearest, %s, %d %s, "
++				                  "%s%s, out of sight. Turned toward it%s",
++				                  alive, CG_AccessibilityAiCharName(aichar), meters < 1 ? 1 : meters,
++				                  meters == 1 ? "meter" : "meters",
++				                  ETA_HudNarrator_RelativeDirection(CG_AccessibilityLeftOfView(at)),
++				                  below >= 2 ? va(", %d meters below you", below)
++				                  : below <= -2 ? va(", %d meters above you", -below) : "",
++				                  lead ? ". O leads there" : ""));
++				return qfalse;
++			}
+ 			ETA_Speech_Say("No enemy in sight");
+ 			return qfalse;
+ 		}
+@@ -7545,6 +7580,49 @@ qboolean CG_AccessibilityCountedEnemy(vec3_t at, int *aichar, int *objective, in
+ 	return *aichar != 0;
+ }
+ 
++/*
++ * Whether the enemy at a point is one an objective not met yet counts
++ * beaten: the nearest of the server's living, within a few steps of it,
++ * as the list is a moment behind. So he is said in sight from a hundred
++ * metres, not only within the forty enemies are said from: Kugelstadt's
++ * Panzerfaust gunner comes in 56 metres up the street, and must be hit
++ * before he fires on the tank; the tester never heard of him.
++ */
++qboolean CG_AccessibilityEnemyCountedAt(const vec3_t origin)
++{
++	const char *each = CG_ConfigString(CS_ETA_ENEMIES);
++	float      best  = 160.0f;
++	char       found[32] = "";
++	int        o;
++
++	while (each && *each)
++	{
++		int    c;
++		vec3_t there;
++		char   name[32];
++
++		if (sscanf(each, "%d %f %f %f %31[^;]", &c, &there[0], &there[1], &there[2], name) == 5
++		    && Distance(there, origin) < best)
++		{
++			best = Distance(there, origin);
++			Q_strncpyz(found, name, sizeof(found));
++		}
++		each = strchr(each, ';');
++		if (each)
++		{
++			each++;
++		}
++	}
++	for (o = 1; found[0] && o <= 8 && CG_AccessibilityObjectiveText(o)[0]; o++)
++	{
++		if (!CG_AccessibilityObjectiveDone(o) && CG_AccessibilityObjectiveCounts(o, found))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ static void ETA_FaceTheWayUnreachable(void)
+ {
+ 	vec3_t      origin;
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 060d44fe..7f5631dd 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -2661,6 +2661,13 @@ static int ETA_GatherAwareness(ETA_AwareThing *list, int max, qboolean players,
+ 			if (ETA_SeenAsEnemy(es))
+ 			{
+ 				thing.kind = (es->eFlags & EF_DEAD) ? ETA_AWARE_ENEMY_DOWN : ETA_AWARE_ENEMY;
++				/* One an objective needs beaten: said in sight from a
++				   hundred metres (CG_AccessibilityEnemyCountedAt). */
++				if (thing.kind == ETA_AWARE_ENEMY && meters > ETA_HudNarrator_AwareRange(thing.kind)
++				    && CG_AccessibilityEnemyCountedAt(cent->lerpOrigin))
++				{
++					thing.farMeters = ETA_HudNarrator_AwareRange(thing.kind) * 2.5f;
++				}
+ 
+ 				/* Too far to matter: spare the traces. */
+ 				if (meters > ETA_HudNarrator_AwareRange(thing.kind) * 2.5f)
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index 523707fe..156a03cc 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2232,6 +2232,7 @@ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
+ qboolean CG_AccessibilityCountedEnemy( vec3_t at, int *aichar, int *objective, int *alive );
++qboolean CG_AccessibilityEnemyCountedAt( const vec3_t origin );
+ qboolean CG_AccessibilityLeadBusy( void );
+ qboolean CG_AccessibilityRouteSearching( void );
+ void CG_AccessibilityViewText( char *out, size_t size );

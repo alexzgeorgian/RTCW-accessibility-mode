@@ -1816,6 +1816,14 @@ int ETA_HudNarrator_UpdateAwareness(const ETA_AwareThing *things, int count,
         slot->leftOfView = thing->leftOfView;
         snprintf(slot->name, sizeof(slot->name), "%s", thing->name);
         slot->band = ETA_HudNarrator_AwareBand(&gAwareRules[thing->kind], thing->meters, slot->band);
+        /* Further than the kind is said from, where the integration asks:
+           in the furthest band. Kugelstadt's Panzerfaust gunner, whom
+           an objective needs hit before he fires on the tank, comes in
+           56 metres off, and was never said. */
+        if (slot->band < 0 && thing->farMeters > 0.0f && thing->meters <= thing->farMeters)
+        {
+            slot->band = 0;
+        }
     }
 
     /* What is gone. An enemy that was said is said going; anything else

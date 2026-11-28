@@ -404,6 +404,9 @@ typedef struct
     float         meters;
     float         leftOfView;
     char          name[48];     /* a player's or an item's; may be empty */
+    float         farMeters;    /* said from this far, past its kind's
+                                   furthest band: an enemy an objective
+                                   needs beaten. 0 for its kind's own */
 } ETA_AwareThing;
 
 #define ETA_AWARE_MAX            64
