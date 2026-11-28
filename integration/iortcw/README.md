@@ -5378,3 +5378,27 @@ rest, until "Objective done: Aid Kreisau Circle in safe defection of SWF
 scientist"; then on to the Panzerfaust gunner, "Objective done: Escort
 the captured Panzer safely to the SWF complex", "Objective done: Gain
 access to SWF Complex", and out by the way out: "Mission complete".
+
+## 0310-intro-fight-and-heinrich.patch
+
+The tester found the intro movie's description thin: the hooded man
+walking over the battlefield, the fight, and Heinrich and his sword were
+told only in passing. Written again from the movie's own frames, each
+line when its moment comes and short enough to end before the next, and
+none over the movie's own speech:
+
+- The hooded man among the broken pillars, a flame on top of his staff,
+  then walking away over the rubble and the fallen.
+- The fight: a soldier in a broad helmet swinging a pike at a giant in
+  spiked black armour, the giant cutting the soldiers down, the knights
+  marching up broken steps, one turning with a double-bladed axe, light
+  from the hooded man's staff hurling them back, knights fallen.
+- Heinrich stepping out from behind a fallen pillar - tall, long dark
+  hair, spiked armour - and standing with his sword lowered, its glowing
+  tip on the ground; after he speaks, swinging it at the hooded man, and
+  lightning from the hooded man's hand striking him; the sword, knocked
+  from his hand, lying glowing on the rock.
+- The amulet the hooded man holds at the end, as the ground bursts.
+
+In game: "cinematic wolfintro.RoQ" said all twenty-nine lines in turn,
+then the main menu.
