@@ -1,0 +1,383 @@
+diff --git a/SP/code/cgame/cg_accessibility_keys.c b/SP/code/cgame/cg_accessibility_keys.c
+index fd7c127c..09fe5719 100644
+--- a/SP/code/cgame/cg_accessibility_keys.c
++++ b/SP/code/cgame/cg_accessibility_keys.c
+@@ -7489,6 +7489,62 @@ qboolean CG_AccessibilityBossAlive(vec3_t at, int *aichar)
+ 	return *aichar != 0;
+ }
+ 
++/*
++ * The nearest enemy alive that an objective not met yet counts beaten,
++ * from the server's list of the living, which names each as the script
++ * does: where, what, the objective, and how many it counts are still
++ * alive. Three of Kugelstadt's objectives are soldiers beaten - one
++ * with the flamethrower man among them - and O led past them toward
++ * the tank's next stop, the tester never finding him to fight.
++ */
++qboolean CG_AccessibilityCountedEnemy(vec3_t at, int *aichar, int *objective, int *alive)
++{
++	const char          *list = CG_ConfigString(CS_ETA_ENEMIES);
++	const playerState_t *ps   = &cg.predictedPlayerState;
++	float               best  = 1.0e9f;
++	int                 o;
++
++	*aichar    = 0;
++	*objective = 0;
++	*alive     = 0;
++	/* The first such objective in the notebook's order that has anyone
++	   left alive; the others wait for their soldiers to come in. */
++	for (o = 1; o <= 8 && CG_AccessibilityObjectiveText(o)[0] && !*aichar; o++)
++	{
++		const char *each = list;
++
++		if (CG_AccessibilityObjectiveDone(o) || !CG_AccessibilityObjectiveByCount(o))
++		{
++			continue;
++		}
++		while (each && *each)
++		{
++			int    c;
++			vec3_t there;
++			char   name[32];
++
++			if (sscanf(each, "%d %f %f %f %31[^;]", &c, &there[0], &there[1], &there[2], name) == 5
++			    && CG_AccessibilityObjectiveCounts(o, name))
++			{
++				( *alive )++;
++				if (Distance(there, ps->origin) < best)
++				{
++					best       = Distance(there, ps->origin);
++					*aichar    = c;
++					*objective = o;
++					VectorCopy(there, at);
++				}
++			}
++			each = strchr(each, ';');
++			if (each)
++			{
++				each++;
++			}
++		}
++	}
++	return *aichar != 0;
++}
++
+ static void ETA_FaceTheWayUnreachable(void)
+ {
+ 	vec3_t      origin;
+diff --git a/SP/code/cgame/cg_accessibility_route.c b/SP/code/cgame/cg_accessibility_route.c
+index 18065596..691695c6 100644
+--- a/SP/code/cgame/cg_accessibility_route.c
++++ b/SP/code/cgame/cg_accessibility_route.c
+@@ -209,6 +209,12 @@ typedef struct
+ 
+ static eta_route_t eta_route;
+ 
++/* The marker O puts on the soldiers an objective counts beaten. */
++static qboolean ETA_MarkerIsSoldiers(void)
++{
++	return (qboolean)( eta_marker.active && !Q_stricmp(eta_marker.name, "the soldiers to beat") );
++}
++
+ /**
+  * @brief Whether a whole player fits through the step, the probe aside.
+  *
+@@ -1497,7 +1503,7 @@ static void ETA_RoutePlanWith(qboolean jumps)
+ 	{
+ 		ETA_PathFinder_Begin(start, goal, ETA_ROUTE_CELL,
+ 		                     eta_marker.square ? ETA_MarkerSquareRadius()
+-		                     : eta_marker.walkOnto ? ETA_MARKER_ONTO_UNITS
++		                     : eta_marker.walkOnto || ETA_MarkerIsSoldiers() ? ETA_MARKER_ONTO_UNITS
+ 		                                           : ETA_MARKER_ARRIVE_METERS / ETA_QU_TO_METERS,
+ 		                     eta_marker.square);
+ 	}
+@@ -3737,6 +3743,22 @@ void CG_AccessibilityMarkerFrame(void)
+ 			flat[2] = 0.0f;
+ 			arrived = (qboolean)( VectorLength(flat) <= ETA_MARKER_ONTO_UNITS );
+ 		}
++		/* Soldiers to beat: reached only in sight of where they are.
++		   At Kugelstadt one stood in the next room, three metres off
++		   through the wall; "Marker reached" was said, and O led there
++		   again and again. The way is worked out to their spot itself. */
++		if (arrived && ETA_MarkerIsSoldiers())
++		{
++			trace_t tr;
++			vec3_t  eye, at;
++
++			VectorCopy(cg.predictedPlayerState.origin, eye);
++			eye[2] += cg.predictedPlayerState.viewheight;
++			VectorCopy(eta_marker.origin, at);
++			at[2] += 16.0f;
++			CG_Trace(&tr, eye, NULL, NULL, at, cg.predictedPlayerState.clientNum, CONTENTS_SOLID);
++			arrived = (qboolean)( tr.fraction >= 1.0f );
++		}
+ 		/* A way into an area: reached once in it, or right on the spot
+ 		   just through its doorway. */
+ 		if (eta_marker.intoArea)
+@@ -3978,6 +4000,13 @@ void CG_AccessibilityMarkerFrame(void)
+ 			etaAimTarget_t list[16];
+ 			int            count = CG_AccessibilityUseTargets(list, 16), k, found = -1;
+ 
++			/* Not where soldiers were: at Kugelstadt, on reaching them,
++			   the rifle one had dropped was said as something to use. */
++			if (ETA_MarkerIsSoldiers())
++			{
++				count = 0;
++			}
++
+ 			for (k = 0; k < count; k++)
+ 			{
+ 				if (list[k].ladder || list[k].locked || list[k].stairs || list[k].enemy || list[k].ride
+diff --git a/SP/code/cgame/cg_accessibility_unlock.c b/SP/code/cgame/cg_accessibility_unlock.c
+index c6fe462f..07767323 100644
+--- a/SP/code/cgame/cg_accessibility_unlock.c
++++ b/SP/code/cgame/cg_accessibility_unlock.c
+@@ -1148,6 +1148,68 @@ int CG_AccessibilityObjectiveOfEvent(const char *event)
+ 	return 0;
+ }
+ 
++/*
++ * Whether a script event leads on to the one that meets an objective,
++ * through a few "trigger" lines, and whether a count is waited for on
++ * the way - "accum 0 abort_if_less_than 6": soldiers beaten.
++ */
++static qboolean ETA_EventMeets(const char *owner, const char *event, int objective, int depth, qboolean *counted)
++{
++	int i;
++
++	for (i = 0; i < eta_unlockLineCount; i++)
++	{
++		const eta_unlockLine_t *l = &eta_unlockLines[i];
++
++		if (Q_stricmp(l->owner, owner) || Q_stricmp(l->event, event))
++		{
++			continue;
++		}
++		if (( l->verb == 'o' && atoi(l->what) == objective )
++		    || ( l->verb == 't' && depth < 4 && ETA_EventMeets(l->what, l->whatEvent, objective, depth + 1, counted) ))
++		{
++			if (l->need > 0)
++			{
++				*counted = qtrue;
++			}
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
++/*
++ * Whether a soldier, by the script's name for them, is one an objective
++ * counts beaten: their death goes on to the line that meets it, with a
++ * count waited for on the way. Kugelstadt's first objective is six
++ * soldiers beaten, its third nine, the flamethrower man among them; O
++ * led past them all toward the tank's next stop, and the tester could
++ * not find the flamethrower man to fight.
++ */
++qboolean CG_AccessibilityObjectiveCounts(int objective, const char *ainame)
++{
++	qboolean counted = qfalse;
++
++	return (qboolean)( objective > 0 && ainame && ainame[0] && ETA_EventMeets(ainame, "death", objective, 0, &counted)
++	                   && counted );
++}
++
++/* Whether an objective is met by soldiers beaten, any of them. */
++qboolean CG_AccessibilityObjectiveByCount(int objective)
++{
++	int i;
++
++	for (i = 0; objective > 0 && i < eta_unlockLineCount; i++)
++	{
++		if (eta_unlockLines[i].verb == 't' && !Q_stricmp(eta_unlockLines[i].event, "death")
++		    && CG_AccessibilityObjectiveCounts(objective, eta_unlockLines[i].owner))
++		{
++			return qtrue;
++		}
++	}
++	return qfalse;
++}
++
+ /* Whether the player event that fired at a spot also starts a countdown
+    - the rocket base's launch: "trigger counter2 v2_countdown". */
+ static char eta_senderEvent[48];
+diff --git a/SP/code/cgame/cg_accessibility_world.c b/SP/code/cgame/cg_accessibility_world.c
+index 6317f057..060d44fe 100644
+--- a/SP/code/cgame/cg_accessibility_world.c
++++ b/SP/code/cgame/cg_accessibility_world.c
+@@ -8490,6 +8490,19 @@ static void ETA_StepBox(int i, vec3_t mins, vec3_t maxs)
+ 	trap_R_ModelBounds(cgs.inlineDrawModel[eta_playerTriggers[i].model], mins, maxs);
+ }
+ 
++/* A step the script has not woken yet - "Startoff", alerted later -
++   which walking through does nothing. At Kugelstadt the step that
++   wakes once the second street is cleared lies across the way to it;
++   walked through asleep, it was counted, and O led past the three steps
++   before it, to the far end of the level. */
++static qboolean ETA_StepAsleep(int i)
++{
++	const char *state = CG_ConfigString(CS_ETA_TRIGGERS);
++	int        model  = eta_playerTriggers[i].model;
++
++	return (qboolean)( state[0] == '!' && model > 0 && model < (int)strlen(state) && state[model] == 'o' );
++}
++
+ static qboolean ETA_StepUsable(int i)
+ {
+ 	return (qboolean)( eta_playerTriggers[i].model > 0 && eta_playerTriggers[i].model < MAX_MODELS
+@@ -8529,7 +8542,8 @@ static void ETA_StepFrame(void)
+ 		vec3_t mins, maxs;
+ 		int    order, a;
+ 
+-		if (!ETA_StepUsable(i) || ( order = ETA_StepOrder(eta_playerTriggers[i].event) ) <= eta_stepPassedMax)
++		if (!ETA_StepUsable(i) || ( order = ETA_StepOrder(eta_playerTriggers[i].event) ) <= eta_stepPassedMax
++		    || ETA_StepAsleep(i))
+ 		{
+ 			continue;
+ 		}
+@@ -8647,7 +8661,7 @@ static qboolean ETA_StepNext(int objective, const vec3_t place, vec3_t out)
+ 			continue;
+ 		}
+ 		o = ETA_StepOrder(eta_playerTriggers[i].event);
+-		if (o <= floor || o >= target || ( next >= 0 && o > next ))
++		if (o <= floor || o >= target || ( next >= 0 && o > next ) || ETA_StepAsleep(i))
+ 		{
+ 			continue;
+ 		}
+@@ -8830,6 +8844,53 @@ void CG_AccessibilityWayOut(void)
+ 		}
+ 	}
+ 
++	/* An objective met by soldiers beaten, some of them alive: to
++	   the nearest of them, and again to where they are now. At
++	   Kugelstadt the tank goes on only as its soldiers fall; O led
++	   on toward its next stop, and the tester never found the
++	   flamethrower man to fight. Before the level's way on too: while
++	   none of them is in the level yet, it brings them in. */
++	{
++		int         objective, alive, bossChar;
++		const char *ledTo = NULL;
++		vec3_t      markerAt;
++		qboolean    onOwnWay = ETA_MarkerIsO() && CG_AccessibilityMarkerInfo(markerAt, &ledTo) && ledTo
++		                       && ( !Q_stricmp(ledTo, "the way on") || !Q_stricmp(ledTo, "your next objective") );
++
++		if (( onOwnWay || !CG_AccessibilityLeadBusy() ) && CG_AccessibilityCountedEnemy(point, &bossChar, &objective, &alive))
++		{
++			const char *words = CG_AccessibilityObjectiveText(objective);
++			const char *who   = CG_AccessibilityAiCharName(bossChar);
++			qboolean    again = ETA_MarkerIsO() && CG_AccessibilityMarkerInfo(markerAt, &ledTo) && ledTo
++			                    && !Q_stricmp(ledTo, "the soldiers to beat");
++
++			ETA_MarkerSetByO(point, "the soldiers to beat");
++			if (again)
++			{
++				CG_AccessibilityFaceTheWay();
++				return;
++			}
++			VectorSubtract(point, ps->origin, delta);
++			meters = (int)(VectorLength(delta) * ETA_QU_TO_METERS + 0.5f);
++			ETA_HudNarrator_HeightText(delta[2] * ETA_QU_TO_METERS, height, sizeof(height));
++			ETA_Speech_Say(va("Your next objective%s%s: soldiers to beat, %d still alive. The nearest, %s, %d %s, "
++			                  "%s%s%s. O again leads to where they are, U locks on",
++			                  words[0] ? ": " : "", words, alive, who, meters < 1 ? 1 : meters,
++			                  meters == 1 ? "meter" : "meters",
++			                  ETA_HudNarrator_RelativeDirection(AngleNormalize180(vectoyaw(delta) - ps->viewangles[YAW])),
++			                  height[0] ? ", " : "", height));
++			return;
++		}
++		/* All of them beaten: the marker on the last let go of, for
++		   the way on. Kugelstadt's gunner down, O kept facing where he
++		   fell, 56 metres back. */
++		if (ETA_MarkerIsO() && CG_AccessibilityMarkerInfo(markerAt, &ledTo) && ledTo
++		    && !Q_stricmp(ledTo, "the soldiers to beat"))
++		{
++			CG_AccessibilityMarkerForget();
++		}
++	}
++
+ 	/* Pressed again on the way: turned toward the way, and how far it
+ 	   is - the walking is the player's. Only on O's own way: where T, V
+ 	   or anything else put the marker, O leads on instead. */
+@@ -9633,7 +9694,7 @@ qboolean CG_AccessibilityLeadBusy(void)
+ 	{
+ 		return qfalse;
+ 	}
+-	if (!Q_stricmp(name, "the way out") || !Q_stricmpn(name, "the nearest ", 12))
++	if (!Q_stricmp(name, "the way out") || !Q_stricmpn(name, "the nearest ", 12) || !Q_stricmp(name, "the soldiers to beat"))
+ 	{
+ 		return qfalse;
+ 	}
+@@ -12799,6 +12860,13 @@ static const char *ETA_KindLooks(const entityState_t *es)
+ 	{
+ 		return NULL;   /* said with their outfit: what they are, and that they drop in */
+ 	}
++	/* Kugelstadt's are given flamethrowers by the script: the tester
++	   knew them by that, and heard of a gun with spinning barrels. */
++	if (es->aiChar == AICHAR_VENOM && es->weapon == WP_FLAMETHROWER)
++	{
++		return "Venom soldiers are big men in heavy armour, most with a Venom, a gun with spinning barrels that fires "
++		       "very fast. This one carries a flamethrower";
++	}
+ 	return ETA_EnemyLooks(es->aiChar);
+ }
+ 
+diff --git a/SP/code/cgame/cg_local.h b/SP/code/cgame/cg_local.h
+index c9a147f7..523707fe 100644
+--- a/SP/code/cgame/cg_local.h
++++ b/SP/code/cgame/cg_local.h
+@@ -2231,6 +2231,7 @@ void CG_AccessibilityWaypointPrev( void );
+ void CG_AccessibilityWaypointTop( void );
+ void CG_AccessibilityWaypointList( void );
+ qboolean CG_AccessibilityBossAlive( vec3_t at, int *aichar );
++qboolean CG_AccessibilityCountedEnemy( vec3_t at, int *aichar, int *objective, int *alive );
+ qboolean CG_AccessibilityLeadBusy( void );
+ qboolean CG_AccessibilityRouteSearching( void );
+ void CG_AccessibilityViewText( char *out, size_t size );
+@@ -2338,6 +2339,8 @@ const char *CG_AccessibilityScriptDoorAhead(void);
+ qboolean CG_AccessibilityLiftSenderSpot(const char *liftScript, vec3_t out);
+ qboolean CG_AccessibilityLiftSenderCountdown(void);
+ int CG_AccessibilityObjectiveOfEvent(const char *event);
++qboolean CG_AccessibilityObjectiveCounts(int objective, const char *ainame);
++qboolean CG_AccessibilityObjectiveByCount(int objective);
+ void CG_AccessibilityAreaText( char *out, size_t size );
+ void CG_AccessibilityAreaExits( void );
+ qboolean CG_AccessibilityAreasSomethingNew( void );
+diff --git a/SP/code/game/g_main.c b/SP/code/game/g_main.c
+index a6ff8565..dff87470 100644
+--- a/SP/code/game/g_main.c
++++ b/SP/code/game/g_main.c
+@@ -2521,14 +2521,17 @@ static void G_AccessibilityTriggers( void ) {
+ 
+ 	/*
+ 	 * The enemies alive in the level and in it now - spawned, not yet
+-	 * killed - with what each is and where: "aichar x y z;" each. The
+-	 * tester could not leave the church, its last objective counting
+-	 * twenty Elite guards dead, and did not know four were still alive
+-	 * in rooms they had left behind: the client knows only those in its
+-	 * sight. Not the allies (team 1) nor the neutral (7).
++	 * killed - with what each is, where, and its name in the script:
++	 * "aichar x y z name;" each. The tester could not leave the church,
++	 * its last objective counting twenty Elite guards dead, and did not
++	 * know four were still alive in rooms they had left behind: the
++	 * client knows only those in its sight. The name says which of them
++	 * an objective counts: at Kugelstadt three objectives are soldiers
++	 * beaten, the flamethrower man and the Panzerfaust gunner among them.
++	 * Not the allies (team 1) nor the neutral (7).
+ 	 */
+ 	{
+-		char list[1024], one[48], was[1024];
++		char list[1024], one[80], was[1024];
+ 		int  n = 0;
+ 
+ 		list[0] = '\0';
+@@ -2537,8 +2540,8 @@ static void G_AccessibilityTriggers( void ) {
+ 				 || ent->aiTeam == 1 || ent->aiTeam == 7 ) {
+ 				continue;
+ 			}
+-			Com_sprintf( one, sizeof( one ), "%d %d %d %d;", ent->aiCharacter, (int)ent->r.currentOrigin[0],
+-						 (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2] );
++			Com_sprintf( one, sizeof( one ), "%d %d %d %d %s;", ent->aiCharacter, (int)ent->r.currentOrigin[0],
++						 (int)ent->r.currentOrigin[1], (int)ent->r.currentOrigin[2], ent->aiName ? ent->aiName : "-" );
+ 			if ( strlen( list ) + strlen( one ) >= sizeof( list ) ) {
+ 				break;
+ 			}

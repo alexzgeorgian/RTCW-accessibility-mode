@@ -5333,3 +5333,48 @@ the air base said "Mechanics here wear black zip-up overalls with a red
 armband", then "... brown zip-up overalls ..." for the next outfit; at the drop,
 "Paratrooper, ahead, 27 meters, 26 meters above you", and what
 paratroopers are.
+
+## 0309-soldiers-an-objective-counts.patch
+
+The tester, at Kugelstadt (mission 4, part 1), could not find the
+flamethrower soldier to fight: O led on toward the tank's next stop,
+past the soldiers the level waits for. Three of its four objectives are
+met by soldiers beaten, not at a place - six for "Eliminate panzergrenadier
+team", nine for "Aid Kreisau Circle", the flamethrower man among them, and
+the Panzerfaust gunner for "Escort the captured Panzer" - and the tank
+moves on only as they fall.
+
+- Which soldiers an objective counts is read from the level's scripts:
+  each one whose death goes on, through the script's own triggers, to
+  the line that meets the objective, with a count waited for on the way
+  ("accum 0 abort_if_less_than 6"). Of all the game's levels only
+  Kugelstadt has such objectives.
+- The game's list of the enemies alive now gives each one's name in the
+  script as well, so the guide knows which of them are counted.
+- O, while any counted soldier is alive, says "Your next objective:
+  Eliminate panzergrenadier team: soldiers to beat, 3 still alive. The
+  nearest, Soldier, 21 meters, ahead", and leads to them; O again leads
+  to where they are now. This comes before the level's way on, which
+  still leads while none is in the level yet: walking it brings them in.
+- The marker on them counts as reached only in sight of where they
+  stand: one stood in the next room, three metres off through the wall.
+  The way is worked out to their spot itself, and nothing on the ground
+  there is offered to use. Once the last is beaten, O lets go of the
+  marker on them and leads on.
+- The level's way on no longer counts a step the script has not woken
+  yet. At Kugelstadt the step that wakes once the second street is
+  cleared lies across the way to it; walked through asleep, it was
+  counted, and O skipped the three steps before it and led to the far
+  end of the level.
+- A Venom soldier carrying a flamethrower - Kugelstadt's - is first told
+  as "Venom soldiers are big men in heavy armour, most with a Venom, a
+  gun with spinning barrels that fires very fast. This one carries a
+  flamethrower".
+
+In game: from the start O led to the soldiers of the first street, one
+by one, until "Objective done: Eliminate panzergrenadier team"; in the
+second street to the Venom soldier with the flamethrower among the
+rest, until "Objective done: Aid Kreisau Circle in safe defection of SWF
+scientist"; then on to the Panzerfaust gunner, "Objective done: Escort
+the captured Panzer safely to the SWF complex", "Objective done: Gain
+access to SWF Complex", and out by the way out: "Mission complete".
